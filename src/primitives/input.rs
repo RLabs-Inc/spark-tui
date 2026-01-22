@@ -38,7 +38,7 @@ use crate::engine::{
     get_current_parent_index,
 };
 use crate::engine::arrays::{core, visual, text as text_arrays, interaction};
-use crate::state::{mouse, keyboard, focus};
+use crate::state::{mouse, keyboard, focus, clipboard};
 use crate::types::{ComponentType, BorderStyle};
 use super::types::{InputProps, PropValue, Cleanup};
 
@@ -92,6 +92,73 @@ fn find_word_end(text: &str, pos: usize) -> usize {
     }
 
     i
+}
+
+// =============================================================================
+// Selection Helpers
+// =============================================================================
+
+/// Check if the component has an active selection.
+fn has_selection(index: usize) -> bool {
+    interaction::has_selection(index)
+}
+
+/// Get the selected text from a value string based on selection state.
+/// Returns empty string if no selection.
+fn get_selected_text(index: usize, text: &str) -> String {
+    let start = interaction::get_selection_start(index) as usize;
+    let end = interaction::get_selection_end(index) as usize;
+
+    if start >= end {
+        return String::new();
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+
+    let actual_start = start.min(len);
+    let actual_end = end.min(len);
+
+    if actual_start >= actual_end {
+        return String::new();
+    }
+
+    chars[actual_start..actual_end].iter().collect()
+}
+
+/// Clear the selection (set both start and end to 0).
+fn clear_selection(index: usize) {
+    interaction::clear_selection(index);
+}
+
+/// Delete the selected text from the value string.
+/// Returns the new string and the position where cursor should be placed.
+fn delete_selection(index: usize, text: &str) -> (String, usize) {
+    let start = interaction::get_selection_start(index) as usize;
+    let end = interaction::get_selection_end(index) as usize;
+
+    if start >= end {
+        return (text.to_string(), start);
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+
+    let actual_start = start.min(len);
+    let actual_end = end.min(len);
+
+    let mut new_chars: Vec<char> = Vec::with_capacity(len - (actual_end - actual_start));
+    new_chars.extend(&chars[..actual_start]);
+    new_chars.extend(&chars[actual_end..]);
+
+    (new_chars.into_iter().collect(), actual_start)
+}
+
+/// Get the normalized selection range (min, max).
+fn get_selection_range(index: usize) -> (usize, usize) {
+    let start = interaction::get_selection_start(index) as usize;
+    let end = interaction::get_selection_end(index) as usize;
+    (start.min(end), start.max(end))
 }
 
 // =============================================================================
@@ -418,16 +485,94 @@ pub fn input(props: InputProps) -> Cleanup {
         // Clamp cursor position to value length (handles external value changes)
         let pos = cursor_pos_for_key.get().min(char_count as u16) as usize;
 
-        // Handle Ctrl+key combinations first
-        if event.modifiers.ctrl {
+        // Helper: Update selection during Shift+navigation
+        let update_selection = |new_pos: usize| {
+            if has_selection(index) {
+                // Extend/shrink existing selection
+                let _sel_start = interaction::get_selection_start(index) as usize;
+                let sel_end = interaction::get_selection_end(index) as usize;
+
+                // The anchor is the end that's NOT at cursor position
+                // Move the end that was at cursor position
+                if pos == sel_end {
+                    // Cursor was at end, move end
+                    interaction::set_selection_end(index, new_pos as u16);
+                } else {
+                    // Cursor was at start, move start
+                    interaction::set_selection_start(index, new_pos as u16);
+                }
+            } else {
+                // Start new selection from current position to new position
+                if new_pos < pos {
+                    interaction::set_selection(index, new_pos as u16, pos as u16);
+                } else {
+                    interaction::set_selection(index, pos as u16, new_pos as u16);
+                }
+            }
+        };
+
+        // Handle Shift+Ctrl combinations (word selection)
+        if event.modifiers.shift && event.modifiers.ctrl {
             match event.key.as_str() {
-                // Word navigation
                 "ArrowLeft" => {
+                    let new_pos = find_word_start(&val, pos);
+                    update_selection(new_pos);
+                    cursor_pos_for_key.set(new_pos as u16);
+                    true
+                }
+                "ArrowRight" => {
+                    let new_pos = find_word_end(&val, pos);
+                    update_selection(new_pos);
+                    cursor_pos_for_key.set(new_pos as u16);
+                    true
+                }
+                _ => false
+            }
+        }
+        // Handle Shift combinations (character selection)
+        else if event.modifiers.shift && !event.modifiers.ctrl {
+            match event.key.as_str() {
+                "ArrowLeft" => {
+                    if pos > 0 {
+                        let new_pos = pos - 1;
+                        update_selection(new_pos);
+                        cursor_pos_for_key.set(new_pos as u16);
+                    }
+                    true
+                }
+                "ArrowRight" => {
+                    if pos < char_count {
+                        let new_pos = pos + 1;
+                        update_selection(new_pos);
+                        cursor_pos_for_key.set(new_pos as u16);
+                    }
+                    true
+                }
+                "Home" => {
+                    update_selection(0);
+                    cursor_pos_for_key.set(0);
+                    true
+                }
+                "End" => {
+                    update_selection(char_count);
+                    cursor_pos_for_key.set(char_count as u16);
+                    true
+                }
+                _ => false
+            }
+        }
+        // Handle Ctrl+key combinations (no shift)
+        else if event.modifiers.ctrl {
+            match event.key.as_str() {
+                // Word navigation (clears selection)
+                "ArrowLeft" => {
+                    clear_selection(index);
                     let new_pos = find_word_start(&val, pos);
                     cursor_pos_for_key.set(new_pos as u16);
                     true
                 }
                 "ArrowRight" => {
+                    clear_selection(index);
                     let new_pos = find_word_end(&val, pos);
                     cursor_pos_for_key.set(new_pos as u16);
                     true
@@ -435,10 +580,18 @@ pub fn input(props: InputProps) -> Cleanup {
 
                 // Word deletion
                 "Backspace" => {
-                    if pos > 0 {
+                    // If there's a selection, delete that first
+                    if has_selection(index) {
+                        let (new_val, new_pos) = delete_selection(index, &val);
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set(new_pos as u16);
+                        clear_selection(index);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    } else if pos > 0 {
                         let word_start = find_word_start(&val, pos);
                         let mut chars: Vec<char> = val.chars().collect();
-                        // Remove characters from word_start to pos
                         chars.drain(word_start..pos);
                         let new_val: String = chars.into_iter().collect();
                         value_for_key.set(new_val.clone());
@@ -450,14 +603,21 @@ pub fn input(props: InputProps) -> Cleanup {
                     true
                 }
                 "Delete" => {
-                    if pos < char_count {
+                    // If there's a selection, delete that first
+                    if has_selection(index) {
+                        let (new_val, new_pos) = delete_selection(index, &val);
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set(new_pos as u16);
+                        clear_selection(index);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    } else if pos < char_count {
                         let word_end = find_word_end(&val, pos);
                         let mut chars: Vec<char> = val.chars().collect();
-                        // Remove characters from pos to word_end
                         chars.drain(pos..word_end);
                         let new_val: String = chars.into_iter().collect();
                         value_for_key.set(new_val.clone());
-                        // Cursor stays at pos
                         if let Some(ref cb) = on_change {
                             cb(&new_val);
                         }
@@ -467,40 +627,127 @@ pub fn input(props: InputProps) -> Cleanup {
 
                 // Select all
                 "a" | "A" => {
-                    // Set selection to entire text
                     interaction::set_selection(index, 0, char_count as u16);
+                    cursor_pos_for_key.set(char_count as u16);
+                    true
+                }
+
+                // Clipboard: Copy
+                "c" | "C" => {
+                    if has_selection(index) {
+                        let selected = get_selected_text(index, &val);
+                        clipboard::copy(&selected);
+                    }
+                    true
+                }
+
+                // Clipboard: Cut
+                "x" | "X" => {
+                    if has_selection(index) {
+                        let selected = get_selected_text(index, &val);
+                        clipboard::copy(&selected);
+                        let (new_val, new_pos) = delete_selection(index, &val);
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set(new_pos as u16);
+                        clear_selection(index);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    }
+                    true
+                }
+
+                // Clipboard: Paste
+                "v" | "V" => {
+                    if let Some(pasted) = clipboard::paste() {
+                        // If there's a selection, replace it
+                        let (base_val, insert_pos) = if has_selection(index) {
+                            let result = delete_selection(index, &val);
+                            clear_selection(index);
+                            result
+                        } else {
+                            (val.clone(), pos)
+                        };
+
+                        // Check max length
+                        let pasted_chars: Vec<char> = pasted.chars().collect();
+                        let base_chars: Vec<char> = base_val.chars().collect();
+                        let mut pasted_len = pasted_chars.len();
+
+                        if max_length > 0 {
+                            let available = max_length.saturating_sub(base_chars.len());
+                            pasted_len = pasted_len.min(available);
+                        }
+
+                        if pasted_len > 0 {
+                            let mut new_chars: Vec<char> = Vec::with_capacity(base_chars.len() + pasted_len);
+                            new_chars.extend(&base_chars[..insert_pos.min(base_chars.len())]);
+                            new_chars.extend(&pasted_chars[..pasted_len]);
+                            if insert_pos < base_chars.len() {
+                                new_chars.extend(&base_chars[insert_pos..]);
+                            }
+                            let new_val: String = new_chars.into_iter().collect();
+                            value_for_key.set(new_val.clone());
+                            cursor_pos_for_key.set((insert_pos + pasted_len) as u16);
+                            if let Some(ref cb) = on_change {
+                                cb(&new_val);
+                            }
+                        }
+                    }
                     true
                 }
 
                 _ => false
             }
-        } else {
+        }
+        // Regular keys (no Ctrl, no Shift or Shift on non-navigation)
+        else {
             match event.key.as_str() {
-                // Navigation
+                // Navigation (clears selection)
                 "ArrowLeft" => {
-                    if pos > 0 {
+                    if has_selection(index) {
+                        // Move to start of selection
+                        let (sel_min, _) = get_selection_range(index);
+                        cursor_pos_for_key.set(sel_min as u16);
+                        clear_selection(index);
+                    } else if pos > 0 {
                         cursor_pos_for_key.set((pos - 1) as u16);
                     }
                     true
                 }
                 "ArrowRight" => {
-                    if pos < char_count {
+                    if has_selection(index) {
+                        // Move to end of selection
+                        let (_, sel_max) = get_selection_range(index);
+                        cursor_pos_for_key.set(sel_max as u16);
+                        clear_selection(index);
+                    } else if pos < char_count {
                         cursor_pos_for_key.set((pos + 1) as u16);
                     }
                     true
                 }
                 "Home" => {
+                    clear_selection(index);
                     cursor_pos_for_key.set(0);
                     true
                 }
                 "End" => {
+                    clear_selection(index);
                     cursor_pos_for_key.set(char_count as u16);
                     true
                 }
 
                 // Deletion
                 "Backspace" => {
-                    if pos > 0 {
+                    if has_selection(index) {
+                        let (new_val, new_pos) = delete_selection(index, &val);
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set(new_pos as u16);
+                        clear_selection(index);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    } else if pos > 0 {
                         let mut chars: Vec<char> = val.chars().collect();
                         chars.remove(pos - 1);
                         let new_val: String = chars.into_iter().collect();
@@ -513,7 +760,15 @@ pub fn input(props: InputProps) -> Cleanup {
                     true
                 }
                 "Delete" => {
-                    if pos < char_count {
+                    if has_selection(index) {
+                        let (new_val, new_pos) = delete_selection(index, &val);
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set(new_pos as u16);
+                        clear_selection(index);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    } else if pos < char_count {
                         let mut chars: Vec<char> = val.chars().collect();
                         chars.remove(pos);
                         let new_val: String = chars.into_iter().collect();
@@ -535,6 +790,7 @@ pub fn input(props: InputProps) -> Cleanup {
 
                 // Cancel
                 "Escape" => {
+                    clear_selection(index);
                     if let Some(ref cb) = on_cancel {
                         cb();
                     }
@@ -548,17 +804,28 @@ pub fn input(props: InputProps) -> Cleanup {
                         && !event.modifiers.alt
                         && !event.modifiers.meta
                     {
+                        // If there's a selection, replace it
+                        let (base_val, insert_pos) = if has_selection(index) {
+                            let result = delete_selection(index, &val);
+                            clear_selection(index);
+                            result
+                        } else {
+                            (val.clone(), pos)
+                        };
+
+                        let base_char_count = base_val.chars().count();
+
                         // Check max length
-                        if max_length > 0 && char_count >= max_length {
+                        if max_length > 0 && base_char_count >= max_length {
                             return true;
                         }
 
                         let ch = key.chars().next().unwrap();
-                        let mut chars: Vec<char> = val.chars().collect();
-                        chars.insert(pos, ch);
+                        let mut chars: Vec<char> = base_val.chars().collect();
+                        chars.insert(insert_pos.min(chars.len()), ch);
                         let new_val: String = chars.into_iter().collect();
                         value_for_key.set(new_val.clone());
-                        cursor_pos_for_key.set((pos + 1) as u16);
+                        cursor_pos_for_key.set((insert_pos + 1) as u16);
                         if let Some(ref cb) = on_change {
                             cb(&new_val);
                         }
