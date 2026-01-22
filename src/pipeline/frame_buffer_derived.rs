@@ -11,7 +11,7 @@ use crate::engine::arrays::{core, visual, text, interaction};
 use crate::engine::{get_allocated_indices, get_flex_node};
 use crate::layout::ComputedLayout;
 use crate::renderer::FrameBuffer;
-use crate::types::{Attr, BorderStyle, ClipRect, ComponentType, Rgba, TextAlign, TextWrap};
+use crate::types::{Attr, BorderStyle, ClipRect, ComponentType, Overflow, Rgba, TextAlign, TextWrap};
 use super::inheritance::{get_inherited_fg, get_inherited_bg, get_effective_opacity, apply_opacity};
 use super::terminal::{terminal_width_signal, terminal_height_signal, render_mode_signal, RenderMode};
 
@@ -283,6 +283,13 @@ fn render_component(
 
     // Render children - pass this component's absolute position
     render_children(buffer, index, layout, child_map, hit_regions, &content_clip, parent_scroll_y, parent_scroll_x, abs_x, abs_y);
+
+    // Render scrollbar (on right edge of content area, overlays content)
+    // Place scrollbar at the right edge of the box, inside borders
+    let scrollbar_x = x.saturating_add(w).saturating_sub(1).saturating_sub(border_r);
+    let scrollbar_y = y.saturating_add(border_t);
+    let scrollbar_h = h.saturating_sub(border_t).saturating_sub(border_b);
+    render_scrollbar(buffer, layout, index, scrollbar_x, scrollbar_y, scrollbar_h, &effective_clip);
 }
 
 /// Render children of a component.
@@ -355,6 +362,137 @@ fn render_borders(
 
     // Use the simple draw_border API with single style/color
     buffer.draw_border(x, y, w, h, style, color, None, Some(clip));
+}
+
+// =============================================================================
+// Scrollbar Rendering
+// =============================================================================
+
+/// Scrollbar character constants.
+const SCROLLBAR_TRACK: char = '░';
+const SCROLLBAR_THUMB: char = '█';
+const SCROLL_INDICATOR: char = '▐';
+
+/// Render scrollbar for a scrollable component.
+///
+/// For overflow:scroll - renders full scrollbar (track + thumb).
+/// For overflow:auto - renders minimal scroll indicator.
+fn render_scrollbar(
+    buffer: &mut FrameBuffer,
+    layout: &ComputedLayout,
+    index: usize,
+    x: u16,
+    y: u16,
+    h: u16,
+    clip: &ClipRect,
+) {
+    // Check if scrollable
+    let is_scrollable = layout.scrollable.get(index).copied().unwrap_or(0) == 1;
+    if !is_scrollable {
+        return;
+    }
+
+    // Get overflow mode from FlexNode
+    let overflow_value = if let Some(node) = get_flex_node(index) {
+        node.overflow.get()
+    } else {
+        0
+    };
+    let overflow = Overflow::from(overflow_value);
+
+    // Get scroll metrics
+    let scroll_y = interaction::get_scroll_offset_y(index);
+    let max_scroll_y = layout.max_scroll_y.get(index).copied().unwrap_or(0);
+
+    // Don't render if no scrollable content
+    if max_scroll_y == 0 {
+        return;
+    }
+
+    // Get colors (use border color or dim fg)
+    let fg = get_inherited_fg(index);
+    let scrollbar_color = fg.dim(0.5);
+
+    match overflow {
+        Overflow::Scroll => {
+            // Full scrollbar with track and thumb
+            render_full_scrollbar(buffer, x, y, h, scroll_y, max_scroll_y, scrollbar_color, clip);
+        }
+        Overflow::Auto => {
+            // Minimal scroll indicator
+            render_scroll_indicator(buffer, x, y, h, scroll_y, max_scroll_y, scrollbar_color, clip);
+        }
+        _ => {}
+    }
+}
+
+/// Render full scrollbar with track and thumb for overflow:scroll.
+fn render_full_scrollbar(
+    buffer: &mut FrameBuffer,
+    x: u16,
+    y: u16,
+    height: u16,
+    scroll_y: u16,
+    max_scroll_y: u16,
+    color: Rgba,
+    clip: &ClipRect,
+) {
+    if height == 0 {
+        return;
+    }
+
+    // Calculate thumb size and position
+    let total_content = max_scroll_y + height;
+    let thumb_height = ((height as f32 / total_content as f32) * height as f32).max(1.0) as u16;
+    let thumb_pos = if max_scroll_y > 0 {
+        ((scroll_y as f32 / max_scroll_y as f32) * (height - thumb_height) as f32) as u16
+    } else {
+        0
+    };
+
+    // Render track
+    for row in 0..height {
+        let draw_y = y + row;
+        if clip.contains(x, draw_y) {
+            buffer.draw_char(x, draw_y, SCROLLBAR_TRACK, color.dim(0.3), None, Attr::NONE, Some(clip));
+        }
+    }
+
+    // Render thumb
+    for row in thumb_pos..(thumb_pos + thumb_height).min(height) {
+        let draw_y = y + row;
+        if clip.contains(x, draw_y) {
+            buffer.draw_char(x, draw_y, SCROLLBAR_THUMB, color, None, Attr::NONE, Some(clip));
+        }
+    }
+}
+
+/// Render minimal scroll indicator for overflow:auto.
+fn render_scroll_indicator(
+    buffer: &mut FrameBuffer,
+    x: u16,
+    y: u16,
+    height: u16,
+    scroll_y: u16,
+    max_scroll_y: u16,
+    color: Rgba,
+    clip: &ClipRect,
+) {
+    if height == 0 || max_scroll_y == 0 {
+        return;
+    }
+
+    // Calculate indicator position
+    let indicator_pos = if max_scroll_y > 0 {
+        ((scroll_y as f32 / max_scroll_y as f32) * (height - 1) as f32) as u16
+    } else {
+        0
+    };
+
+    let draw_y = y + indicator_pos;
+    if clip.contains(x, draw_y) {
+        buffer.draw_char(x, draw_y, SCROLL_INDICATOR, color, None, Attr::NONE, Some(clip));
+    }
 }
 
 /// Render text content.
