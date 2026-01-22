@@ -27,7 +27,10 @@ use spark_signals::Reactive;
 use crate::types::Rgba;
 
 pub mod presets;
+pub mod reactive;
+
 pub use presets::*;
+pub use reactive::*;
 
 // =============================================================================
 // ThemeColor - A color that can be ANSI, RGB, or string
