@@ -9,7 +9,7 @@
 //! - **Scroll** - Scrollable containers, scroll chaining (future)
 //! - **Cursor** - Drawn cursor for inputs, blink animation (future)
 
-mod focus;
+pub mod focus;
 pub mod input;
 pub mod keyboard;
 pub mod mouse;
