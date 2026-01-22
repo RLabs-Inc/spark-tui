@@ -275,6 +275,14 @@ pub fn hit_test(x: u16, y: u16) -> Option<usize> {
     HIT_GRID.with(|g| g.borrow().get(x, y))
 }
 
+/// Get the component at coordinates (alias for hit_test).
+///
+/// This is the primary API for looking up which component is at a given
+/// screen position.
+pub fn get_component_at(x: u16, y: u16) -> Option<usize> {
+    hit_test(x, y)
+}
+
 /// Get the global hit grid dimensions.
 pub fn hit_grid_size() -> (u16, u16) {
     HIT_GRID.with(|g| {
@@ -577,7 +585,7 @@ fn dispatch_scroll(event: &MouseEvent) -> bool {
     }
 
     // Global handlers
-    REGISTRY.with(|reg| {
+    let global_consumed = REGISTRY.with(|reg| {
         let reg = reg.borrow();
         for (_, handler) in &reg.global_scroll_handlers {
             if handler(event) {
@@ -585,7 +593,22 @@ fn dispatch_scroll(event: &MouseEvent) -> bool {
             }
         }
         false
-    })
+    });
+    if global_consumed {
+        return true;
+    }
+
+    // Default scroll behavior: use scroll module's handle_wheel_scroll
+    // This handles the component under cursor, with fallback to focused scrollable,
+    // and parent chaining at boundaries
+    if let Some(scroll_info) = &event.scroll {
+        use super::scroll;
+        return scroll::with_current_layout(|layout| {
+            scroll::handle_wheel_scroll(layout, event.x, event.y, scroll_info.direction)
+        }).unwrap_or(false);
+    }
+
+    false
 }
 
 fn dispatch_down(event: &MouseEvent) -> bool {
