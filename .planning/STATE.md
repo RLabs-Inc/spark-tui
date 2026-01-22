@@ -111,12 +111,14 @@ Status: COMPLETE (4/4 plans complete)
 - 5 new tests for stick_to_bottom
 - All 357 tests pass
 
-### 2026-01-22 — Plan 04-03 Execution (by another agent)
-- find_scrollable_ancestor for hierarchy traversal
-- scroll_focused_into_view for focus visibility
-- Mouse wheel scroll with hit testing and chaining
-- 11 new tests
-- All 352 tests pass
+### 2026-01-22 — Plan 04-03 Execution
+- Wired mouse wheel scroll into dispatch_scroll as default behavior
+- Added find_scrollable_ancestor to walk parent chain
+- Added scroll_focused_into_view high-level helper
+- Focus changes now trigger scrollIntoView automatically
+- Added get_component_at alias for hit_test
+- 13 new tests for mouse scroll and scrollIntoView
+- All 370 tests pass
 
 ### 2026-01-22 — Plan 04-02 Execution
 - Added layout accessor pattern: set_current_layout, with_current_layout, clear_current_layout
@@ -287,7 +289,7 @@ None currently.
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
-- Phase 4 complete! 357 tests total.
+- Phase 4 complete! 370 tests total.
 
 ---
 
