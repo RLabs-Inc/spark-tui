@@ -11,83 +11,10 @@ use std::sync::Arc;
 use spark_signals::effect;
 
 use crate::renderer::{DiffRenderer, InlineRenderer, AppendRenderer};
+use crate::state::mouse;
 use super::layout_derived::create_layout_derived;
 use super::frame_buffer_derived::create_frame_buffer_derived;
 use super::terminal::{RenderMode, render_mode, detect_terminal_size};
-
-// =============================================================================
-// HitGrid - Mouse interaction detection
-// =============================================================================
-
-/// A grid for O(1) mouse hit detection.
-///
-/// Each cell contains the component index that occupies that position,
-/// or usize::MAX if empty.
-pub struct HitGrid {
-    width: u16,
-    height: u16,
-    cells: Vec<usize>,
-}
-
-impl HitGrid {
-    /// Create a new hit grid.
-    pub fn new(width: u16, height: u16) -> Self {
-        let size = width as usize * height as usize;
-        Self {
-            width,
-            height,
-            cells: vec![usize::MAX; size],
-        }
-    }
-
-    /// Resize the grid, clearing all contents.
-    pub fn resize(&mut self, width: u16, height: u16) {
-        self.width = width;
-        self.height = height;
-        let size = width as usize * height as usize;
-        self.cells.resize(size, usize::MAX);
-        self.clear();
-    }
-
-    /// Clear all cells.
-    pub fn clear(&mut self) {
-        self.cells.fill(usize::MAX);
-    }
-
-    /// Fill a rectangle with a component index.
-    pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, index: usize) {
-        for dy in 0..height {
-            let cy = y + dy;
-            if cy >= self.height {
-                break;
-            }
-            for dx in 0..width {
-                let cx = x + dx;
-                if cx >= self.width {
-                    break;
-                }
-                let idx = cy as usize * self.width as usize + cx as usize;
-                if idx < self.cells.len() {
-                    self.cells[idx] = index;
-                }
-            }
-        }
-    }
-
-    /// Get the component index at a position.
-    pub fn get(&self, x: u16, y: u16) -> Option<usize> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-        let idx = y as usize * self.width as usize + x as usize;
-        let value = self.cells.get(idx).copied().unwrap_or(usize::MAX);
-        if value == usize::MAX {
-            None
-        } else {
-            Some(value)
-        }
-    }
-}
 
 // =============================================================================
 // Mount Handle
@@ -149,14 +76,17 @@ pub fn mount() -> io::Result<MountHandle> {
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
 
-    // Create hit grid
-    let mut hit_grid = {
+    // Initialize the global hit grid with terminal size
+    {
         let (tw, th) = {
             let result = fb_derived.get();
             result.terminal_size
         };
-        HitGrid::new(tw, th)
-    };
+        mouse::resize_hit_grid(tw, th);
+    }
+
+    // Track current hit grid size for resize detection
+    let mut last_hit_grid_size: (u16, u16) = mouse::hit_grid_size();
 
     // Create the ONE render effect
     // Each branch needs to be boxed because effect() returns different impl FnOnce() types
@@ -173,17 +103,18 @@ pub fn mount() -> io::Result<MountHandle> {
                 // Read from derived (creates dependency)
                 let result = fb_derived.get();
 
-                // Resize hit grid if needed
+                // Resize/clear hit grid if needed
                 let (tw, th) = result.terminal_size;
-                if hit_grid.width != tw || hit_grid.height != th {
-                    hit_grid.resize(tw, th);
+                if last_hit_grid_size != (tw, th) {
+                    mouse::resize_hit_grid(tw, th);
+                    last_hit_grid_size = (tw, th);
                 } else {
-                    hit_grid.clear();
+                    mouse::clear_hit_grid();
                 }
 
                 // Apply hit regions (side effect!)
                 for region in &result.hit_regions {
-                    hit_grid.fill_rect(
+                    mouse::fill_hit_rect(
                         region.x,
                         region.y,
                         region.width,
@@ -207,16 +138,17 @@ pub fn mount() -> io::Result<MountHandle> {
 
                 let result = fb_derived.get();
 
-                // Update hit grid
+                // Resize/clear hit grid
                 let (tw, th) = result.terminal_size;
-                if hit_grid.width != tw || hit_grid.height != th {
-                    hit_grid.resize(tw, th);
+                if last_hit_grid_size != (tw, th) {
+                    mouse::resize_hit_grid(tw, th);
+                    last_hit_grid_size = (tw, th);
                 } else {
-                    hit_grid.clear();
+                    mouse::clear_hit_grid();
                 }
 
                 for region in &result.hit_regions {
-                    hit_grid.fill_rect(
+                    mouse::fill_hit_rect(
                         region.x,
                         region.y,
                         region.width,
@@ -239,16 +171,17 @@ pub fn mount() -> io::Result<MountHandle> {
 
                 let result = fb_derived.get();
 
-                // Update hit grid
+                // Resize/clear hit grid
                 let (tw, th) = result.terminal_size;
-                if hit_grid.width != tw || hit_grid.height != th {
-                    hit_grid.resize(tw, th);
+                if last_hit_grid_size != (tw, th) {
+                    mouse::resize_hit_grid(tw, th);
+                    last_hit_grid_size = (tw, th);
                 } else {
-                    hit_grid.clear();
+                    mouse::clear_hit_grid();
                 }
 
                 for region in &result.hit_regions {
-                    hit_grid.fill_rect(
+                    mouse::fill_hit_rect(
                         region.x,
                         region.y,
                         region.width,
@@ -280,7 +213,7 @@ pub fn unmount(handle: MountHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::state::mouse::HitGrid;
 
     #[test]
     fn test_hit_grid() {
