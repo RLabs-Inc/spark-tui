@@ -27,12 +27,16 @@ use spark_signals::Reactive;
 use crate::types::Rgba;
 
 pub mod accessor;
+pub mod modifiers;
 pub mod presets;
 pub mod reactive;
+pub mod variant;
 
-pub use accessor::{t, reset_accessor, ThemeAccessor};
+pub use accessor::{t, reset_accessor, ThemeAccessor, ModifiableColor};
+pub use modifiers::*;
 pub use presets::*;
 pub use reactive::*;
+pub use variant::{Variant, VariantStyle, get_variant_style, variant_style};
 
 // =============================================================================
 // ThemeColor - A color that can be ANSI, RGB, or string
