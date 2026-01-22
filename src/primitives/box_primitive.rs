@@ -33,11 +33,14 @@
 //! width.set(Dimension::Cells(80));
 //! ```
 
+use std::rc::Rc;
+
 use crate::engine::{
     allocate_index, release_index, create_flex_node,
     get_current_parent_index, push_parent_context, pop_parent_context,
 };
 use crate::engine::arrays::{core, visual, interaction};
+use crate::state::{mouse, keyboard};
 use crate::types::{ComponentType, BorderStyle};
 use super::types::{BoxProps, PropValue, Cleanup};
 
@@ -354,15 +357,79 @@ pub fn box_primitive(props: BoxProps) -> Cleanup {
         }
     }
 
-    // 8. RENDER CHILDREN
+    // 8. REGISTER MOUSE HANDLERS
+
+    let has_mouse_handlers = props.on_click.is_some()
+        || props.on_mouse_down.is_some()
+        || props.on_mouse_up.is_some()
+        || props.on_mouse_enter.is_some()
+        || props.on_mouse_leave.is_some()
+        || props.on_scroll.is_some();
+
+    let mut mouse_cleanup: Option<Box<dyn FnOnce()>> = None;
+    let mut key_cleanup: Option<Box<dyn FnOnce()>> = None;
+
+    if should_be_focusable || has_mouse_handlers {
+        // Clone Rc callbacks for use in closure (Rc::clone is cheap)
+        let user_on_click = props.on_click.clone();
+
+        // Build click handler that includes click-to-focus
+        let click_handler: Option<Rc<dyn Fn(&mouse::MouseEvent)>> = if should_be_focusable {
+            Some(Rc::new(move |event: &mouse::MouseEvent| {
+                crate::state::focus::focus(index);
+                if let Some(ref handler) = user_on_click {
+                    handler(event);
+                }
+            }))
+        } else {
+            props.on_click.clone()
+        };
+
+        let handlers = mouse::MouseHandlers {
+            on_mouse_down: props.on_mouse_down.clone(),
+            on_mouse_up: props.on_mouse_up.clone(),
+            on_click: click_handler,
+            on_mouse_enter: props.on_mouse_enter.clone(),
+            on_mouse_leave: props.on_mouse_leave.clone(),
+            on_scroll: props.on_scroll.clone(),
+        };
+
+        let cleanup_fn = mouse::on_component(index, handlers);
+        mouse_cleanup = Some(Box::new(cleanup_fn));
+    }
+
+    // 9. REGISTER KEYBOARD HANDLER (if focusable and has on_key)
+
+    if should_be_focusable {
+        if let Some(on_key) = props.on_key.clone() {
+            let cleanup_fn = keyboard::on_focused(index, move |event| {
+                on_key(event)
+            });
+            key_cleanup = Some(Box::new(cleanup_fn));
+        }
+    }
+
+    // 10. RENDER CHILDREN
     if let Some(children) = props.children {
         push_parent_context(index);
         children();
         pop_parent_context();
     }
 
-    // 9. RETURN CLEANUP
+    // 11. RETURN CLEANUP
     Box::new(move || {
+        // Clean up mouse handlers
+        if let Some(cleanup) = mouse_cleanup {
+            cleanup();
+        }
+        // Clean up keyboard handlers
+        if let Some(cleanup) = key_cleanup {
+            cleanup();
+        }
+        // Clean up component state in mouse/keyboard modules
+        mouse::cleanup_index(index);
+        keyboard::cleanup_index(index);
+        // Release index
         release_index(index);
     })
 }
