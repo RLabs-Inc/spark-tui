@@ -329,8 +329,48 @@ pub fn handle_wheel_scroll(
 }
 
 // =============================================================================
+// FIND SCROLLABLE ANCESTOR
+// =============================================================================
+
+/// Find the nearest scrollable ancestor of a component.
+/// Returns the scrollable index, or None if no scrollable ancestor.
+pub fn find_scrollable_ancestor(layout: &ComputedLayout, index: usize) -> Option<usize> {
+    let mut current = core::get_parent_index(index);
+    while let Some(parent_idx) = current {
+        if is_scrollable(layout, parent_idx) {
+            return Some(parent_idx);
+        }
+        current = core::get_parent_index(parent_idx);
+    }
+    None
+}
+
+// =============================================================================
 // SCROLL INTO VIEW
 // =============================================================================
+
+/// High-level scroll into view for a focused component.
+/// Finds the scrollable ancestor and computes positions automatically.
+///
+/// Call this when focus changes to ensure the newly focused element is visible.
+pub fn scroll_focused_into_view(layout: &ComputedLayout, focused_index: usize) {
+    // Find scrollable ancestor
+    let scrollable = match find_scrollable_ancestor(layout, focused_index) {
+        Some(idx) => idx,
+        None => return, // No scrollable ancestor
+    };
+
+    // Get positions from layout
+    let child_y = layout.y.get(focused_index).copied().unwrap_or(0);
+    let child_height = layout.height.get(focused_index).copied().unwrap_or(0);
+    let scrollable_y = layout.y.get(scrollable).copied().unwrap_or(0);
+    let viewport_height = layout.height.get(scrollable).copied().unwrap_or(0);
+
+    // Compute child position relative to scrollable
+    let relative_y = child_y.saturating_sub(scrollable_y);
+
+    scroll_into_view(layout, scrollable, relative_y, child_height, viewport_height);
+}
 
 /// Scroll to make a child visible within a scrollable parent.
 /// This is called when focus changes to ensure focused element is visible.

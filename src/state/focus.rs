@@ -146,6 +146,11 @@ fn set_focus_with_callbacks(new_index: i32) {
                 }
             }
         });
+
+        // Scroll focused element into view (if within a scrollable container)
+        super::scroll::with_current_layout(|layout| {
+            super::scroll::scroll_focused_into_view(layout, new_index as usize);
+        });
     }
 }
 
