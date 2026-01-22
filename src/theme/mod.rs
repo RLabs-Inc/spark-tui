@@ -26,9 +26,11 @@
 use spark_signals::Reactive;
 use crate::types::Rgba;
 
+pub mod accessor;
 pub mod presets;
 pub mod reactive;
 
+pub use accessor::{t, reset_accessor, ThemeAccessor};
 pub use presets::*;
 pub use reactive::*;
 

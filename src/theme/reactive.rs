@@ -22,7 +22,7 @@ pub fn active_theme() -> Theme {
 
 /// Get the reactive theme for creating deriveds.
 /// Returns a clone of ReactiveTheme (Signal clones are cheap).
-pub fn reactive_theme() -> ReactiveTheme {
+pub fn get_reactive_theme() -> ReactiveTheme {
     ACTIVE_THEME.with(|t| t.borrow().clone())
 }
 
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn test_reactive_theme_signals_independent() {
         reset_theme_state();
-        let rt = reactive_theme();
+        let rt = get_reactive_theme();
 
         // Track how many times primary effect runs
         let primary_count = Rc::new(Cell::new(0));
