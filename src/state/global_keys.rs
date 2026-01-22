@@ -4,6 +4,9 @@
 //! - Ctrl+C: Graceful shutdown
 //! - Tab: Focus next component
 //! - Shift+Tab: Focus previous component
+//! - Arrow keys: Scroll focused scrollable (when applicable)
+//! - PageUp/PageDown: Page scroll
+//! - Ctrl+Home/End: Scroll to top/bottom
 //!
 //! These handlers are registered on mount and cleaned up on unmount.
 //!
@@ -26,6 +29,8 @@ use std::sync::Arc;
 
 use super::keyboard;
 use super::focus;
+use super::scroll;
+use super::mouse::ScrollDirection;
 
 // =============================================================================
 // GLOBAL KEYS HANDLE
@@ -36,6 +41,7 @@ pub struct GlobalKeysHandle {
     ctrl_c_cleanup: Option<Box<dyn FnOnce()>>,
     tab_cleanup: Option<Box<dyn FnOnce()>>,
     shift_tab_cleanup: Option<Box<dyn FnOnce()>>,
+    scroll_cleanup: Option<Box<dyn FnOnce()>>,
 }
 
 impl GlobalKeysHandle {
@@ -48,6 +54,9 @@ impl GlobalKeysHandle {
             cleanup();
         }
         if let Some(cleanup) = self.shift_tab_cleanup.take() {
+            cleanup();
+        }
+        if let Some(cleanup) = self.scroll_cleanup.take() {
             cleanup();
         }
     }
@@ -102,10 +111,80 @@ pub fn setup_global_keys(running: Arc<AtomicBool>) -> GlobalKeysHandle {
         }
     });
 
+    // Scroll keys - Arrow keys, PageUp/Down, Ctrl+Home/End
+    // These only activate when focused component is scrollable
+    // Note: Arrow keys should NOT conflict with input navigation (input handlers
+    // are registered per-component and have priority)
+    let scroll_cleanup = keyboard::on(move |event| {
+        // Arrow keys for scrolling (without modifiers, or with just shift)
+        // Plain arrow keys scroll focused scrollable
+        // Note: Ctrl+Arrow is used for word navigation in inputs
+        if !event.modifiers.ctrl && !event.modifiers.alt {
+            match event.key.as_str() {
+                "ArrowUp" if !event.modifiers.shift => {
+                    return scroll::with_current_layout(|layout| {
+                        scroll::handle_arrow_scroll(layout, ScrollDirection::Up)
+                    }).unwrap_or(false);
+                }
+                "ArrowDown" if !event.modifiers.shift => {
+                    return scroll::with_current_layout(|layout| {
+                        scroll::handle_arrow_scroll(layout, ScrollDirection::Down)
+                    }).unwrap_or(false);
+                }
+                "ArrowLeft" if !event.modifiers.shift => {
+                    return scroll::with_current_layout(|layout| {
+                        scroll::handle_arrow_scroll(layout, ScrollDirection::Left)
+                    }).unwrap_or(false);
+                }
+                "ArrowRight" if !event.modifiers.shift => {
+                    return scroll::with_current_layout(|layout| {
+                        scroll::handle_arrow_scroll(layout, ScrollDirection::Right)
+                    }).unwrap_or(false);
+                }
+                _ => {}
+            }
+        }
+
+        // PageUp/PageDown (no modifiers needed)
+        match event.key.as_str() {
+            "PageUp" => {
+                return scroll::with_current_layout(|layout| {
+                    scroll::handle_page_scroll(layout, ScrollDirection::Up)
+                }).unwrap_or(false);
+            }
+            "PageDown" => {
+                return scroll::with_current_layout(|layout| {
+                    scroll::handle_page_scroll(layout, ScrollDirection::Down)
+                }).unwrap_or(false);
+            }
+            _ => {}
+        }
+
+        // Ctrl+Home/End for scroll to boundaries
+        if event.modifiers.ctrl {
+            match event.key.as_str() {
+                "Home" => {
+                    return scroll::with_current_layout(|layout| {
+                        scroll::handle_home_end(layout, true)
+                    }).unwrap_or(false);
+                }
+                "End" => {
+                    return scroll::with_current_layout(|layout| {
+                        scroll::handle_home_end(layout, false)
+                    }).unwrap_or(false);
+                }
+                _ => {}
+            }
+        }
+
+        false
+    });
+
     GlobalKeysHandle {
         ctrl_c_cleanup: Some(Box::new(ctrl_c_cleanup)),
         tab_cleanup: Some(Box::new(tab_cleanup)),
         shift_tab_cleanup: Some(Box::new(shift_tab_cleanup)),
+        scroll_cleanup: Some(Box::new(scroll_cleanup)),
     }
 }
 

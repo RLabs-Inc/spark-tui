@@ -30,10 +30,41 @@
 //! scroll::handle_home_end(&layout, true); // to_top
 //! ```
 
+use std::cell::RefCell;
+
 use crate::engine::arrays::{core, interaction};
 use crate::layout::ComputedLayout;
 use crate::state::focus;
 use crate::state::mouse::ScrollDirection;
+
+// =============================================================================
+// CURRENT LAYOUT ACCESSOR
+// =============================================================================
+
+thread_local! {
+    /// Current computed layout for scroll handlers.
+    /// Updated by the render pipeline after each layout computation.
+    static CURRENT_LAYOUT: RefCell<Option<ComputedLayout>> = RefCell::new(None);
+}
+
+/// Set the current layout (called by pipeline before input processing).
+pub fn set_current_layout(layout: ComputedLayout) {
+    CURRENT_LAYOUT.with(|l| *l.borrow_mut() = Some(layout));
+}
+
+/// Get current layout reference for handlers.
+/// Returns None if no layout has been set.
+pub fn with_current_layout<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&ComputedLayout) -> R,
+{
+    CURRENT_LAYOUT.with(|l| l.borrow().as_ref().map(f))
+}
+
+/// Clear the current layout (for cleanup/testing).
+pub fn clear_current_layout() {
+    CURRENT_LAYOUT.with(|l| *l.borrow_mut() = None);
+}
 
 // =============================================================================
 // SCROLL CONSTANTS
