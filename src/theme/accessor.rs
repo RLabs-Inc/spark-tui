@@ -327,6 +327,132 @@ impl ThemeAccessor {
     pub fn border_focus_signal(&self) -> Signal<ThemeColor> {
         self.border_focus_sig.clone()
     }
+
+    // =========================================================================
+    // Contrast methods
+    // =========================================================================
+
+    /// Get a color that contrasts well against the given background.
+    ///
+    /// Uses the theme's text color as the base and adjusts for WCAG AA contrast (4.5:1).
+    ///
+    /// # Example
+    /// ```ignore
+    /// use spark_tui::theme::t;
+    ///
+    /// let bg = t().surface();
+    /// let fg = t().contrast(bg); // Good contrast against surface
+    /// ```
+    #[inline]
+    pub fn contrast(&self, bg: Rgba) -> Rgba {
+        let fg = self.text();
+        super::modifiers::contrast(fg, bg, 4.5)
+    }
+
+    /// Get a specific color adjusted for contrast against background.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use spark_tui::theme::t;
+    /// use spark_tui::Rgba;
+    ///
+    /// let bg = Rgba::rgb(30, 30, 30);
+    /// let fg = t().contrast_with(t().primary(), bg);
+    /// ```
+    #[inline]
+    pub fn contrast_with(&self, fg: Rgba, bg: Rgba) -> Rgba {
+        super::modifiers::contrast(fg, bg, 4.5)
+    }
+}
+
+// =============================================================================
+// ModifiableColor - Chainable color wrapper
+// =============================================================================
+
+/// Color wrapper that enables chaining modifiers.
+///
+/// Provides a fluent API for color manipulation.
+///
+/// # Example
+/// ```rust
+/// use spark_tui::types::Rgba;
+/// use spark_tui::theme::ModifiableColor;
+///
+/// let result = ModifiableColor::from(Rgba::rgb(100, 50, 50))
+///     .lighten(0.1)
+///     .alpha(0.8)
+///     .get();
+///
+/// // result is a lighter, semi-transparent version
+/// ```
+pub struct ModifiableColor(pub Rgba);
+
+impl ModifiableColor {
+    /// Lighten the color by adjusting OKLCH lightness.
+    #[inline]
+    pub fn lighten(self, amount: f32) -> Self {
+        Self(super::modifiers::lighten(self.0, amount))
+    }
+
+    /// Darken the color by adjusting OKLCH lightness.
+    #[inline]
+    pub fn darken(self, amount: f32) -> Self {
+        Self(super::modifiers::darken(self.0, amount))
+    }
+
+    /// Set alpha value (0.0-1.0 as fraction, >1.0 as absolute 0-255).
+    #[inline]
+    pub fn alpha(self, value: f32) -> Self {
+        Self(super::modifiers::alpha(self.0, value))
+    }
+
+    /// Multiply alpha by a factor (0.0-1.0).
+    #[inline]
+    pub fn fade(self, factor: f32) -> Self {
+        Self(super::modifiers::fade(self.0, factor))
+    }
+
+    /// Increase saturation (chroma).
+    #[inline]
+    pub fn saturate(self, amount: f32) -> Self {
+        Self(super::modifiers::saturate(self.0, amount))
+    }
+
+    /// Decrease saturation (chroma).
+    #[inline]
+    pub fn desaturate(self, amount: f32) -> Self {
+        Self(super::modifiers::desaturate(self.0, amount))
+    }
+
+    /// Adjust for minimum contrast against background.
+    #[inline]
+    pub fn contrast(self, bg: Rgba) -> Self {
+        Self(super::modifiers::contrast(self.0, bg, 4.5))
+    }
+
+    /// Mix with another color.
+    #[inline]
+    pub fn mix(self, other: Rgba, weight: f32) -> Self {
+        Self(super::modifiers::mix(self.0, other, weight))
+    }
+
+    /// Get the final Rgba value.
+    #[inline]
+    pub fn get(self) -> Rgba {
+        self.0
+    }
+}
+
+impl From<Rgba> for ModifiableColor {
+    fn from(color: Rgba) -> Self {
+        Self(color)
+    }
+}
+
+impl From<ModifiableColor> for Rgba {
+    fn from(color: ModifiableColor) -> Self {
+        color.0
+    }
 }
 
 impl Default for ThemeAccessor {
@@ -477,5 +603,114 @@ mod tests {
         // Both are valid colors (either ANSI or terminal default)
         assert!(bg.is_ansi() || bg.is_terminal_default());
         assert!(bg_muted.is_ansi() || bg_muted.is_terminal_default());
+    }
+
+    #[test]
+    fn test_t_accessor_contrast() {
+        reset_theme_state();
+        reset_accessor();
+        set_theme("dracula");
+
+        let accessor = t();
+        let bg = Rgba::rgb(20, 20, 20); // Very dark
+        let fg = accessor.contrast(bg);
+
+        let ratio = Rgba::contrast_ratio(fg, bg);
+        assert!(ratio >= 4.5, "Contrast ratio {} should be >= 4.5", ratio);
+        reset_theme_state();
+    }
+
+    #[test]
+    fn test_t_accessor_contrast_with() {
+        reset_theme_state();
+        reset_accessor();
+        set_theme("dracula");
+
+        let accessor = t();
+        let bg = Rgba::rgb(200, 200, 200); // Light bg
+        let primary = accessor.primary();
+        let fg = accessor.contrast_with(primary, bg);
+
+        let ratio = Rgba::contrast_ratio(fg, bg);
+        assert!(ratio >= 4.5, "Contrast ratio {} should be >= 4.5", ratio);
+        reset_theme_state();
+    }
+
+    #[test]
+    fn test_modifiable_color_lighten() {
+        let result = ModifiableColor::from(Rgba::rgb(100, 100, 100))
+            .lighten(0.2)
+            .get();
+
+        // Should be lighter
+        let avg_before = (100 + 100 + 100) / 3;
+        let avg_after = (result.r as i32 + result.g as i32 + result.b as i32) / 3;
+        assert!(avg_after > avg_before, "Lightened avg {} should be > original {}", avg_after, avg_before);
+    }
+
+    #[test]
+    fn test_modifiable_color_darken() {
+        let result = ModifiableColor::from(Rgba::rgb(150, 150, 150))
+            .darken(0.2)
+            .get();
+
+        // Should be darker
+        let avg_before = (150 + 150 + 150) / 3;
+        let avg_after = (result.r as i32 + result.g as i32 + result.b as i32) / 3;
+        assert!(avg_after < avg_before, "Darkened avg {} should be < original {}", avg_after, avg_before);
+    }
+
+    #[test]
+    fn test_modifiable_color_alpha() {
+        let result = ModifiableColor::from(Rgba::RED)
+            .alpha(0.5)
+            .get();
+
+        assert_eq!(result.a, 127);
+        assert_eq!(result.r, 255);
+    }
+
+    #[test]
+    fn test_modifiable_color_chaining() {
+        let result = ModifiableColor::from(Rgba::rgb(100, 50, 50))
+            .lighten(0.1)
+            .alpha(0.8)
+            .get();
+
+        // Should be lighter and semi-transparent
+        assert!(result.r > 100, "r {} should be > 100", result.r);
+        assert!(result.a < 255, "a {} should be < 255", result.a);
+    }
+
+    #[test]
+    fn test_modifiable_color_into_rgba() {
+        let color: Rgba = ModifiableColor::from(Rgba::RED)
+            .alpha(0.5)
+            .into();
+
+        assert_eq!(color.a, 127);
+    }
+
+    #[test]
+    fn test_modifiable_color_contrast() {
+        let bg = Rgba::rgb(30, 30, 30);
+        let result = ModifiableColor::from(Rgba::rgb(60, 60, 60))
+            .contrast(bg)
+            .get();
+
+        let ratio = Rgba::contrast_ratio(result, bg);
+        assert!(ratio >= 4.5, "Contrast ratio {} should be >= 4.5", ratio);
+    }
+
+    #[test]
+    fn test_modifiable_color_mix() {
+        let result = ModifiableColor::from(Rgba::BLACK)
+            .mix(Rgba::WHITE, 0.5)
+            .get();
+
+        // Should be gray
+        assert!((result.r - 127).abs() <= 1, "r {} should be ~127", result.r);
+        assert!((result.g - 127).abs() <= 1, "g {} should be ~127", result.g);
+        assert!((result.b - 127).abs() <= 1, "b {} should be ~127", result.b);
     }
 }
