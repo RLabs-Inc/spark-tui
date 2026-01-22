@@ -204,11 +204,13 @@ mod tests {
     use crate::state::keyboard::{KeyboardEvent, Modifiers, reset_keyboard_state};
     use crate::engine::reset_registry;
     use crate::state::focus::reset_focus_state;
+    use crate::primitives::{box_primitive, BoxProps};
 
     fn setup() {
         reset_registry();
         reset_focus_state();
         reset_keyboard_state();
+        scroll::clear_current_layout();
     }
 
     #[test]
@@ -268,8 +270,6 @@ mod tests {
         setup();
 
         // Create focusable components
-        use crate::primitives::{box_primitive, BoxProps};
-
         let _c1 = box_primitive(BoxProps {
             focusable: Some(true),
             tab_index: Some(1),
@@ -303,8 +303,6 @@ mod tests {
         setup();
 
         // Create focusable components
-        use crate::primitives::{box_primitive, BoxProps};
-
         let _c1 = box_primitive(BoxProps {
             focusable: Some(true),
             tab_index: Some(1),
@@ -331,5 +329,226 @@ mod tests {
         assert_eq!(focus::get_focused_index(), 0);
 
         handle.cleanup();
+    }
+
+    // =========================================================================
+    // SCROLL KEY TESTS (04-02)
+    // =========================================================================
+
+    use crate::engine::arrays::interaction;
+    use crate::layout::ComputedLayout;
+
+    fn create_test_layout(scrollable_indices: &[(usize, u16, u16)]) -> ComputedLayout {
+        let max_idx = scrollable_indices
+            .iter()
+            .map(|(i, _, _)| *i)
+            .max()
+            .unwrap_or(0);
+        let size = max_idx + 1;
+
+        let mut layout = ComputedLayout {
+            x: vec![0; size],
+            y: vec![0; size],
+            width: vec![80; size],
+            height: vec![24; size],
+            scrollable: vec![0; size],
+            max_scroll_x: vec![0; size],
+            max_scroll_y: vec![0; size],
+            content_width: 80,
+            content_height: 24,
+        };
+
+        for &(idx, max_x, max_y) in scrollable_indices {
+            layout.scrollable[idx] = 1;
+            layout.max_scroll_x[idx] = max_x;
+            layout.max_scroll_y[idx] = max_y;
+        }
+
+        layout
+    }
+
+    #[test]
+    fn test_arrow_down_scrolls_focused_scrollable() {
+        setup();
+        interaction::reset();
+
+        // Create focusable component
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+
+        // Focus it
+        focus::focus(0);
+
+        // Set up layout where component 0 is scrollable
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        scroll::set_current_layout(layout);
+
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = setup_global_keys(running);
+
+        // Dispatch ArrowDown
+        let event = KeyboardEvent::new("ArrowDown");
+        keyboard::dispatch(event);
+
+        // Should have scrolled
+        assert_eq!(interaction::get_scroll_offset_y(0), scroll::LINE_SCROLL);
+
+        handle.cleanup();
+        scroll::clear_current_layout();
+    }
+
+    #[test]
+    fn test_page_down_scrolls_by_viewport() {
+        setup();
+        interaction::reset();
+
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+        focus::focus(0);
+
+        // Layout with height=10, max_scroll=100
+        let mut layout = create_test_layout(&[(0, 10, 100)]);
+        layout.height[0] = 10;
+        scroll::set_current_layout(layout);
+
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = setup_global_keys(running);
+
+        // Dispatch PageDown
+        let event = KeyboardEvent::new("PageDown");
+        keyboard::dispatch(event);
+
+        // Should scroll by viewport * 0.9 = 9
+        assert_eq!(interaction::get_scroll_offset_y(0), 9);
+
+        handle.cleanup();
+        scroll::clear_current_layout();
+    }
+
+    #[test]
+    fn test_ctrl_end_scrolls_to_bottom() {
+        setup();
+        interaction::reset();
+
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+        focus::focus(0);
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        scroll::set_current_layout(layout);
+
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = setup_global_keys(running);
+
+        // Dispatch Ctrl+End
+        let event = KeyboardEvent::with_modifiers("End", Modifiers::ctrl());
+        keyboard::dispatch(event);
+
+        // Should be at bottom
+        assert_eq!(interaction::get_scroll_offset_y(0), 50);
+
+        handle.cleanup();
+        scroll::clear_current_layout();
+    }
+
+    #[test]
+    fn test_ctrl_home_scrolls_to_top() {
+        setup();
+        interaction::reset();
+
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+        focus::focus(0);
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        scroll::set_current_layout(layout);
+
+        // Start in middle
+        interaction::set_scroll_offset(0, 0, 25);
+
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = setup_global_keys(running);
+
+        // Dispatch Ctrl+Home
+        let event = KeyboardEvent::with_modifiers("Home", Modifiers::ctrl());
+        keyboard::dispatch(event);
+
+        // Should be at top
+        assert_eq!(interaction::get_scroll_offset_y(0), 0);
+
+        handle.cleanup();
+        scroll::clear_current_layout();
+    }
+
+    #[test]
+    fn test_arrow_keys_dont_scroll_without_layout() {
+        setup();
+        interaction::reset();
+
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+        focus::focus(0);
+
+        // No layout set
+        scroll::clear_current_layout();
+
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = setup_global_keys(running);
+
+        // Dispatch ArrowDown
+        let event = KeyboardEvent::new("ArrowDown");
+        keyboard::dispatch(event);
+
+        // Should not have scrolled (no layout)
+        assert_eq!(interaction::get_scroll_offset_y(0), 0);
+
+        handle.cleanup();
+    }
+
+    #[test]
+    fn test_scroll_only_affects_focused_scrollable() {
+        setup();
+        interaction::reset();
+
+        // Create two components
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+        let _c2 = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+
+        // Focus component 0
+        focus::focus(0);
+
+        // Layout where ONLY component 1 is scrollable (0 is not)
+        let layout = create_test_layout(&[(1, 10, 50)]);
+        scroll::set_current_layout(layout);
+
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = setup_global_keys(running);
+
+        // Dispatch ArrowDown
+        let event = KeyboardEvent::new("ArrowDown");
+        keyboard::dispatch(event);
+
+        // Component 0 is not scrollable, so nothing should scroll
+        assert_eq!(interaction::get_scroll_offset_y(0), 0);
+        assert_eq!(interaction::get_scroll_offset_y(1), 0);
+
+        handle.cleanup();
+        scroll::clear_current_layout();
     }
 }
