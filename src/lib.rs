@@ -34,6 +34,7 @@ pub mod pipeline;
 pub mod primitives;
 pub mod renderer;
 pub mod state;
+pub mod theme;
 pub mod types;
 
 // Re-export commonly used items
@@ -77,4 +78,10 @@ pub use state::{
     dispatch as dispatch_keyboard, dispatch_focused,
     on as on_keyboard, on_key, on_keys, on_focused,
     last_event, last_key, cleanup_index, reset_keyboard_state,
+};
+
+pub use theme::{
+    Theme, ThemeColor, get_preset, preset_names,
+    terminal, dracula, nord, monokai, solarized, catppuccin, gruvbox,
+    tokyo_night, one_dark, rose_pine, kanagawa, everforest, night_owl,
 };
