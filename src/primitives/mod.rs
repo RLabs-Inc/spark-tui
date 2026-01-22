@@ -32,7 +32,9 @@
 mod types;
 mod box_primitive;
 mod text;
+mod input;
 
 pub use types::*;
 pub use box_primitive::box_primitive;
 pub use text::text;
+pub use input::input;
