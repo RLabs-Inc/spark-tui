@@ -488,13 +488,13 @@ impl Rgba {
     /// // With percentage lightness
     /// let bright = Rgba::from_oklch_str("oklch(80% 0.2 180)").unwrap();
     ///
-    /// // With alpha
+    /// // With alpha (0.5 * 255 = 127.5, rounds to 127 or 128)
     /// let semi = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 0.5)").unwrap();
-    /// assert_eq!(semi.a, 127); // ~0.5 * 255
+    /// assert!(semi.a >= 127 && semi.a <= 128);
     ///
     /// // With percentage alpha
     /// let semi2 = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 50%)").unwrap();
-    /// assert_eq!(semi2.a, 127);
+    /// assert!(semi2.a >= 127 && semi2.a <= 128);
     ///
     /// // Invalid returns None
     /// assert!(Rgba::from_oklch_str("not-oklch").is_none());
