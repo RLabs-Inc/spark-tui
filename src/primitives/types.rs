@@ -329,6 +329,15 @@ pub struct BoxProps {
     /// Overflow behavior: visible (default), hidden, scroll, auto.
     pub overflow: Option<PropValue<u8>>,
 
+    /// Auto-scroll to bottom when new content is added.
+    ///
+    /// When enabled, if the scroll position is at or near the bottom,
+    /// the component will automatically scroll to show new content
+    /// (e.g., for chat or log views).
+    ///
+    /// User scrolling up disables auto-follow until they scroll back to bottom.
+    pub stick_to_bottom: bool,
+
     // =========================================================================
     // Event Callbacks
     // =========================================================================

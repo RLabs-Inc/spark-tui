@@ -410,6 +410,93 @@ pub fn scroll_into_view(
     }
 }
 
+// =============================================================================
+// STICK TO BOTTOM (AUTO-SCROLL)
+// =============================================================================
+
+/// Check and apply stick-to-bottom behavior for a component.
+///
+/// If stick_to_bottom is enabled and the component was at the bottom
+/// when content grew, automatically scroll to the new bottom.
+///
+/// This should be called after layout computation to detect content growth.
+pub fn handle_stick_to_bottom(layout: &ComputedLayout, index: usize) {
+    // Check if stick_to_bottom is enabled
+    if !interaction::get_stick_to_bottom(index) {
+        return;
+    }
+
+    // Check if scrollable
+    if !is_scrollable(layout, index) {
+        return;
+    }
+
+    let (_, current_y) = get_scroll_offset(index);
+    let (_, max_y) = get_max_scroll(layout, index);
+    let prev_max_y = interaction::get_prev_max_scroll_y(index);
+
+    // Check if content grew (max scroll increased)
+    if max_y > prev_max_y {
+        // Check if we were at/near the bottom before content grew
+        // We consider "at bottom" if within 1 line of the previous max
+        let was_at_bottom = current_y >= prev_max_y.saturating_sub(LINE_SCROLL);
+
+        if was_at_bottom {
+            // Auto-scroll to new bottom
+            scroll_to_bottom(layout, index);
+        }
+    }
+
+    // Update previous max scroll for next comparison
+    interaction::set_prev_max_scroll_y(index, max_y);
+}
+
+/// Update stick_to_bottom state based on user scroll action.
+///
+/// If the user scrolls away from the bottom, we disable auto-follow.
+/// If the user scrolls back to the bottom, we re-enable auto-follow.
+///
+/// This should be called after any user-initiated scroll (arrow keys, mouse wheel, etc.)
+pub fn update_stick_to_bottom_on_scroll(layout: &ComputedLayout, index: usize) {
+    // Check if stick_to_bottom is enabled
+    if !interaction::get_stick_to_bottom(index) {
+        return;
+    }
+
+    // Check if scrollable
+    if !is_scrollable(layout, index) {
+        return;
+    }
+
+    let (_, current_y) = get_scroll_offset(index);
+    let (_, max_y) = get_max_scroll(layout, index);
+
+    // Check if at bottom (within tolerance)
+    let at_bottom = current_y >= max_y.saturating_sub(LINE_SCROLL);
+
+    // If user scrolled away from bottom, we don't need to do anything special
+    // The handle_stick_to_bottom will check if they were at bottom before growing
+    // If they're at bottom now, prev_max_y tracking handles the rest
+
+    // Update prev_max_scroll_y so that if they scroll back to bottom,
+    // content growth will trigger auto-scroll again
+    if at_bottom {
+        interaction::set_prev_max_scroll_y(index, max_y);
+    }
+}
+
+/// Check if a scrollable component is currently at the bottom.
+pub fn is_at_bottom(layout: &ComputedLayout, index: usize) -> bool {
+    if !is_scrollable(layout, index) {
+        return true; // Non-scrollable is always "at bottom"
+    }
+
+    let (_, current_y) = get_scroll_offset(index);
+    let (_, max_y) = get_max_scroll(layout, index);
+
+    current_y >= max_y.saturating_sub(LINE_SCROLL)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -915,5 +1002,124 @@ mod tests {
 
         // Should not change
         assert_eq!(interaction::get_scroll_offset_y(0), 5);
+    }
+
+    // =========================================================================
+    // STICK TO BOTTOM TESTS (04-04)
+    // =========================================================================
+
+    #[test]
+    fn test_stick_to_bottom_auto_scrolls_on_content_growth() {
+        setup();
+
+        // Enable stick_to_bottom
+        interaction::set_stick_to_bottom(0, true);
+
+        // Create layout with max_scroll_y = 50
+        let mut layout = create_test_layout(&[(0, 10, 50)]);
+        layout.height[0] = 20; // Viewport height
+
+        // Start at bottom (scroll_y = max_scroll_y = 50)
+        interaction::set_scroll_offset(0, 0, 50);
+        interaction::set_prev_max_scroll_y(0, 50);
+
+        // Simulate content growth: max_scroll_y increases to 70
+        layout.max_scroll_y[0] = 70;
+
+        // Handle stick_to_bottom
+        handle_stick_to_bottom(&layout, 0);
+
+        // Should auto-scroll to new bottom
+        assert_eq!(interaction::get_scroll_offset_y(0), 70);
+    }
+
+    #[test]
+    fn test_stick_to_bottom_no_scroll_when_user_scrolled_up() {
+        setup();
+
+        // Enable stick_to_bottom
+        interaction::set_stick_to_bottom(0, true);
+
+        // Create layout with max_scroll_y = 50
+        let mut layout = create_test_layout(&[(0, 10, 50)]);
+        layout.height[0] = 20;
+
+        // User has scrolled up to position 20 (not at bottom)
+        interaction::set_scroll_offset(0, 0, 20);
+        interaction::set_prev_max_scroll_y(0, 50);
+
+        // Simulate content growth: max_scroll_y increases to 70
+        layout.max_scroll_y[0] = 70;
+
+        // Handle stick_to_bottom
+        handle_stick_to_bottom(&layout, 0);
+
+        // Should NOT auto-scroll because user was not at bottom
+        assert_eq!(interaction::get_scroll_offset_y(0), 20);
+    }
+
+    #[test]
+    fn test_stick_to_bottom_updates_prev_max() {
+        setup();
+
+        // Enable stick_to_bottom
+        interaction::set_stick_to_bottom(0, true);
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+
+        // Initial state
+        interaction::set_scroll_offset(0, 0, 50);
+        interaction::set_prev_max_scroll_y(0, 0);
+
+        // Handle should update prev_max_scroll_y
+        handle_stick_to_bottom(&layout, 0);
+
+        assert_eq!(interaction::get_prev_max_scroll_y(0), 50);
+    }
+
+    #[test]
+    fn test_is_at_bottom() {
+        setup();
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+
+        // At bottom
+        interaction::set_scroll_offset(0, 0, 50);
+        assert!(is_at_bottom(&layout, 0));
+
+        // Near bottom (within LINE_SCROLL)
+        interaction::set_scroll_offset(0, 0, 49);
+        assert!(is_at_bottom(&layout, 0));
+
+        // Not at bottom
+        interaction::set_scroll_offset(0, 0, 40);
+        assert!(!is_at_bottom(&layout, 0));
+
+        // At top
+        interaction::set_scroll_offset(0, 0, 0);
+        assert!(!is_at_bottom(&layout, 0));
+    }
+
+    #[test]
+    fn test_stick_to_bottom_disabled_does_nothing() {
+        setup();
+
+        // stick_to_bottom is disabled by default
+        assert!(!interaction::get_stick_to_bottom(0));
+
+        let mut layout = create_test_layout(&[(0, 10, 50)]);
+        layout.height[0] = 20;
+
+        interaction::set_scroll_offset(0, 0, 50);
+        interaction::set_prev_max_scroll_y(0, 50);
+
+        // Simulate content growth
+        layout.max_scroll_y[0] = 70;
+
+        // Handle stick_to_bottom
+        handle_stick_to_bottom(&layout, 0);
+
+        // Should NOT auto-scroll because stick_to_bottom is disabled
+        assert_eq!(interaction::get_scroll_offset_y(0), 50);
     }
 }

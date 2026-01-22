@@ -235,6 +235,11 @@ pub fn box_primitive(props: BoxProps) -> Cleanup {
         bind_slot!(flex_node.overflow, overflow);
     }
 
+    // Stick to bottom (auto-scroll on content growth)
+    if props.stick_to_bottom {
+        interaction::set_stick_to_bottom(index, true);
+    }
+
     // Position
     if let Some(position) = props.position {
         bind_slot!(flex_node.position, position);
