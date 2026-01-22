@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 **Phase:** 3 of 6 (Input Component)
-**Plan:** 3 of 3 complete
+**Plan:** 4 of 4 complete
 **Status:** Phase complete
 
-Last activity: 2026-01-22 - Completed 03-03-PLAN.md
+Last activity: 2026-01-22 - Completed 03-04-PLAN.md
 
-Progress: [###########] 92% (11/12 total plans)
+Progress: [############] 100% (12/12 total plans)
 
 ---
 
@@ -25,17 +25,19 @@ Progress: [###########] 92% (11/12 total plans)
 
 **Phase 3: Input Component**
 
-Status: COMPLETE (3/3 plans complete)
+Status: COMPLETE (4/4 plans complete)
 
 ### Requirements Progress
 - [x] R3.1: Input component foundation (03-01)
 - [x] R3.2: Selection support (03-02)
 - [x] R3.3: Clipboard and selection (03-03)
+- [x] R3.4: History and overflow (03-04)
 
 ### Plans
 - [x] 03-01: Input foundation, props, basic rendering
 - [x] 03-02: Word navigation and selection
 - [x] 03-03: Selection and clipboard
+- [x] 03-04: History and overflow
 
 ---
 
@@ -45,7 +47,7 @@ Status: COMPLETE (3/3 plans complete)
 |-------|--------|----------|
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
-| 3. Input Component | Complete | 100% (3/3) |
+| 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Not Started | 0% |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
@@ -81,10 +83,23 @@ Status: COMPLETE (3/3 plans complete)
 | punctuation-word-separator | Punctuation treated as word separator like whitespace | Consistent with most text editors | 2026-01-22 |
 | internal-clipboard-buffer | Clipboard uses internal thread_local buffer | No external dependencies, works in all environments | 2026-01-22 |
 | navigation-clears-selection | Arrow without Shift clears selection and moves to boundary | Matches standard editor behavior | 2026-01-22 |
+| history-position-negative-one | InputHistory uses position=-1 for "not browsing" state | Clear sentinel value, allows >= 0 check for browsing | 2026-01-22 |
+| history-skip-empty-duplicates | History push skips empty entries and consecutive duplicates | Cleaner history, matches shell behavior | 2026-01-22 |
+| scroll-offset-interaction-array | Scroll offset stored in interaction arrays | Renderer can access without prop drilling | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 03-04 Execution
+- Added InputHistory struct with navigation methods to types.rs
+- Added history prop to InputProps
+- Up/Down arrow history navigation in keyboard handler
+- Auto-add to history on Enter (submit)
+- ensure_cursor_visible helper for scroll offset
+- Scroll offset tracking in interaction arrays
+- 13 new tests for history and scroll offset
+- All 319 tests pass
 
 ### 2026-01-22 — Plan 03-03 Execution
 - Created src/state/clipboard.rs with copy/paste/cut functions
@@ -202,8 +217,8 @@ Status: COMPLETE (3/3 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 19:56 UTC
-Stopped at: Completed 03-03-PLAN.md (Phase 3 complete)
+Last session: 2026-01-22 20:03 UTC
+Stopped at: Completed 03-04-PLAN.md (Phase 3 complete)
 Resume file: None - ready for Phase 4
 
 ---
@@ -222,7 +237,7 @@ None currently.
 - TDD approach: write tests first
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
-- Phase 3 complete! 306 tests total.
+- Phase 3 complete! 319 tests total.
 
 ---
 
