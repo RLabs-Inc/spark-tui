@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 **Phase:** 3 of 6 (Input Component)
-**Plan:** 1 of 3 complete
+**Plan:** 2 of 3 complete
 **Status:** In progress
 
-Last activity: 2026-01-22 - Completed 03-01-PLAN.md
+Last activity: 2026-01-22 - Completed 03-02-PLAN.md
 
-Progress: [#########-] 75% (9/12 total plans)
+Progress: [##########] 83% (10/12 total plans)
 
 ---
 
@@ -25,16 +25,16 @@ Progress: [#########-] 75% (9/12 total plans)
 
 **Phase 3: Input Component**
 
-Status: IN PROGRESS (1/3 plans complete)
+Status: IN PROGRESS (2/3 plans complete)
 
 ### Requirements Progress
 - [x] R3.1: Input component foundation (03-01)
-- [ ] R3.2: Selection support (03-02)
+- [x] R3.2: Selection support (03-02)
 - [ ] R3.3: Advanced features (03-03)
 
 ### Plans
 - [x] 03-01: Input foundation, props, basic rendering
-- [ ] 03-02: Selection support
+- [x] 03-02: Word navigation and selection
 - [ ] 03-03: Advanced features
 
 ---
@@ -45,7 +45,7 @@ Status: IN PROGRESS (1/3 plans complete)
 |-------|--------|----------|
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
-| 3. Input Component | In Progress | 33% (1/3) |
+| 3. Input Component | In Progress | 67% (2/3) |
 | 4. Scroll System | Not Started | 0% |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
@@ -77,10 +77,22 @@ Status: IN PROGRESS (1/3 plans complete)
 | input-props-new | InputProps::new(value) instead of Default | Signal<String> has no Default impl | 2026-01-22 |
 | input-always-focusable | Inputs always focusable (no focusable prop) | Matches expected input behavior | 2026-01-22 |
 | display-text-getter | Display text computed via getter for placeholder+masking | Ensures reactive correctness | 2026-01-22 |
+| word-boundary-alphanumeric | Word boundary uses is_alphanumeric() | Simple, handles Unicode, matches common editor behavior | 2026-01-22 |
+| punctuation-word-separator | Punctuation treated as word separator like whitespace | Consistent with most text editors | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 03-02 Execution
+- Added find_word_start/find_word_end helpers to input.rs
+- Enhanced keyboard handler with Ctrl+ combinations
+- Ctrl+Left/Right word navigation
+- Ctrl+Backspace/Delete word deletion
+- Ctrl+A select all (sets selection range)
+- Added selection getters/setters to interaction.rs
+- 10 new tests for word boundary helpers
+- All 285 tests pass
 
 ### 2026-01-22 — Plan 03-01 Execution
 - Added CursorStyle enum (Block, Bar, Underline) to types.rs
@@ -177,9 +189,9 @@ Status: IN PROGRESS (1/3 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 19:45 UTC
-Stopped at: Completed 03-01-PLAN.md
-Resume file: None - continue with 03-02
+Last session: 2026-01-22 19:49 UTC
+Stopped at: Completed 03-02-PLAN.md
+Resume file: None - continue with 03-03
 
 ---
 
@@ -197,7 +209,7 @@ None currently.
 - TDD approach: write tests first
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
-- Phase 3 in progress - 275 tests total.
+- Phase 3 in progress - 285 tests total.
 
 ---
 
