@@ -28,7 +28,7 @@
 
 **Dependencies:** None (builds on existing infrastructure)
 
-**Plans:** 4 plans ✓
+**Plans:** 4 plans
 
 **Status:** COMPLETE (2026-01-22)
 
@@ -47,15 +47,23 @@ Plans:
 **Requirements:** R2.1-R2.5
 
 **Deliverables:**
-- Rgba color type with sentinels
-- Theme struct with signals
-- 3 presets (terminal, dracula, nord)
-- t.* accessor pattern
-- Color inheritance
+- ThemeColor type with color parsing (hex, OKLCH)
+- Theme struct with all semantic colors
+- All 13 TypeScript presets
+- Reactive theme state with signals
+- t.* accessor pattern with deriveds
+- Variant system with contrast calculation
+- Color modifiers (lighten, darken, alpha, etc.)
 
 **Dependencies:** None (can parallel with Phase 1)
 
-**Plans:** 0 plans
+**Plans:** 4 plans
+
+Plans:
+- [ ] 02-01-PLAN.md - Color parsing and theme types (ThemeColor, Theme, 13 presets)
+- [ ] 02-02-PLAN.md - Reactive theme state and t.* accessor
+- [ ] 02-03-PLAN.md - Variant system with contrast calculation
+- [ ] 02-04-PLAN.md - Color modifiers and t.contrast()
 
 ---
 
