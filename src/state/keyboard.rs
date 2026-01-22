@@ -192,8 +192,20 @@ thread_local! {
 // EVENT DISPATCH
 // =============================================================================
 
+/// Update the last event state without dispatching to handlers.
+///
+/// This is used by the central router (global_keys::route_keyboard_event)
+/// to update reactive state before routing through the priority chain.
+pub fn update_last_event(event: KeyboardEvent) {
+    LAST_EVENT.with(|s| s.set(Some(event)));
+}
+
 /// Dispatch a keyboard event to all registered handlers.
 /// Returns true if any handler consumed the event.
+///
+/// **Note:** In the new architecture, this function is primarily used for testing.
+/// Production code should use `global_keys::route_keyboard_event()` which
+/// enforces the correct priority order.
 pub fn dispatch(event: KeyboardEvent) -> bool {
     // Always update reactive state
     LAST_EVENT.with(|s| s.set(Some(event.clone())));
@@ -203,6 +215,14 @@ pub fn dispatch(event: KeyboardEvent) -> bool {
         return false;
     }
 
+    dispatch_to_handlers(&event)
+}
+
+/// Dispatch to key-specific and global handlers only (not focused).
+///
+/// This is used by the central router after focused component handlers
+/// have had their chance. Returns true if any handler consumed the event.
+pub fn dispatch_to_handlers(event: &KeyboardEvent) -> bool {
     REGISTRY.with(|reg| {
         let reg = reg.borrow();
 
@@ -217,7 +237,7 @@ pub fn dispatch(event: KeyboardEvent) -> bool {
 
         // Dispatch to global handlers
         for (_, handler) in &reg.global_handlers {
-            if handler(&event) {
+            if handler(event) {
                 return true;
             }
         }

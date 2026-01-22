@@ -363,6 +363,12 @@ pub struct BoxProps {
     /// Keyboard callback (when focused).
     pub on_key: Option<KeyCallback>,
 
+    /// Focus callback (fires when component gains focus).
+    pub on_focus: Option<FocusCallback>,
+
+    /// Blur callback (fires when component loses focus).
+    pub on_blur: Option<BlurCallback>,
+
     // =========================================================================
     // Children
     // =========================================================================
@@ -502,11 +508,30 @@ pub struct TextProps {
     pub opacity: Option<PropValue<u8>>,
 
     // =========================================================================
+    // Interaction
+    // =========================================================================
+
+    /// Whether the component can receive focus (for selectable/clickable text).
+    pub focusable: Option<bool>,
+
+    /// Tab index for focus navigation.
+    pub tab_index: Option<i32>,
+
+    // =========================================================================
     // Event Callbacks
     // =========================================================================
 
     /// Click callback for clickable text.
     pub on_click: Option<MouseCallback>,
+
+    /// Keyboard callback (when focused).
+    pub on_key: Option<KeyCallback>,
+
+    /// Focus callback (fires when component gains focus).
+    pub on_focus: Option<FocusCallback>,
+
+    /// Blur callback (fires when component loses focus).
+    pub on_blur: Option<BlurCallback>,
 }
 
 impl Default for TextProps {
@@ -536,7 +561,12 @@ impl Default for TextProps {
             fg: None,
             bg: None,
             opacity: None,
+            focusable: None,
+            tab_index: None,
             on_click: None,
+            on_key: None,
+            on_focus: None,
+            on_blur: None,
         }
     }
 }

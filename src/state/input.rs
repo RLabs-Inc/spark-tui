@@ -202,10 +202,18 @@ pub fn read_event() -> std::io::Result<InputEvent> {
 
 /// Route an event to the appropriate handler.
 /// Returns true if any handler consumed the event.
+///
+/// For keyboard events, this uses the central router in `global_keys` which
+/// enforces the correct priority order:
+/// 1. Ctrl+C (hardcoded)
+/// 2. Tab/Shift+Tab (focus navigation)
+/// 3. Focused component handlers (FIRST CHANCE)
+/// 4. User keyboard.on/on_key handlers
+/// 5. Framework defaults like scroll (FALLBACK)
 pub fn route_event(event: InputEvent) -> bool {
     match event {
         InputEvent::Mouse(mouse) => super::mouse::dispatch(mouse),
-        InputEvent::Key(key) => super::keyboard::dispatch(key),
+        InputEvent::Key(key) => super::global_keys::route_key_event(&key),
         InputEvent::Resize(w, h) => {
             // Update terminal size signal
             crate::pipeline::terminal::set_terminal_size(w, h);

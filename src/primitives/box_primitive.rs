@@ -40,7 +40,7 @@ use crate::engine::{
     get_current_parent_index, push_parent_context, pop_parent_context,
 };
 use crate::engine::arrays::{core, visual, interaction};
-use crate::state::{mouse, keyboard};
+use crate::state::{mouse, keyboard, focus::{self, FocusCallbacks}};
 use crate::types::{ComponentType, BorderStyle};
 use super::types::{BoxProps, PropValue, Cleanup};
 
@@ -405,12 +405,24 @@ pub fn box_primitive(props: BoxProps) -> Cleanup {
 
     // 9. REGISTER KEYBOARD HANDLER (if focusable and has on_key)
 
+    let mut focus_cleanup: Option<Box<dyn FnOnce()>> = None;
+
     if should_be_focusable {
         if let Some(on_key) = props.on_key.clone() {
             let cleanup_fn = keyboard::on_focused(index, move |event| {
                 on_key(event)
             });
             key_cleanup = Some(Box::new(cleanup_fn));
+        }
+
+        // 9b. REGISTER FOCUS CALLBACKS (on_focus/on_blur)
+        if props.on_focus.is_some() || props.on_blur.is_some() {
+            let callbacks = FocusCallbacks {
+                on_focus: props.on_focus.clone().map(|f| -> Box<dyn Fn()> { Box::new(move || f()) }),
+                on_blur: props.on_blur.clone().map(|f| -> Box<dyn Fn()> { Box::new(move || f()) }),
+            };
+            let cleanup_fn = focus::register_callbacks(index, callbacks);
+            focus_cleanup = Some(Box::new(cleanup_fn));
         }
     }
 
@@ -429,6 +441,10 @@ pub fn box_primitive(props: BoxProps) -> Cleanup {
         }
         // Clean up keyboard handlers
         if let Some(cleanup) = key_cleanup {
+            cleanup();
+        }
+        // Clean up focus callbacks
+        if let Some(cleanup) = focus_cleanup {
             cleanup();
         }
         // Clean up component state in mouse/keyboard modules
@@ -539,5 +555,55 @@ mod tests {
 
         assert!(interaction::get_focusable(0));
         assert_eq!(interaction::get_tab_index(0), 5);
+    }
+
+    #[test]
+    fn test_box_focus_callbacks() {
+        use crate::state::focus::{self, reset_focus_state};
+        use std::rc::Rc;
+        use std::cell::Cell;
+
+        setup();
+        reset_focus_state();
+
+        let focus_count = Rc::new(Cell::new(0));
+        let blur_count = Rc::new(Cell::new(0));
+
+        let focus_count_clone = focus_count.clone();
+        let blur_count_clone = blur_count.clone();
+
+        // Create two focusable boxes, first one with callbacks
+        let _c1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            tab_index: Some(1),
+            on_focus: Some(Rc::new(move || {
+                focus_count_clone.set(focus_count_clone.get() + 1);
+            })),
+            on_blur: Some(Rc::new(move || {
+                blur_count_clone.set(blur_count_clone.get() + 1);
+            })),
+            ..Default::default()
+        });
+
+        let _c2 = box_primitive(BoxProps {
+            focusable: Some(true),
+            tab_index: Some(2),
+            ..Default::default()
+        });
+
+        // Focus component 0
+        focus::focus(0);
+        assert_eq!(focus_count.get(), 1);
+        assert_eq!(blur_count.get(), 0);
+
+        // Move focus to component 1 (blurs 0)
+        focus::focus(1);
+        assert_eq!(focus_count.get(), 1);
+        assert_eq!(blur_count.get(), 1);
+
+        // Focus back to component 0
+        focus::focus(0);
+        assert_eq!(focus_count.get(), 2);
+        assert_eq!(blur_count.get(), 1);
     }
 }

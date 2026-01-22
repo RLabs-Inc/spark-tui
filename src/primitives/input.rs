@@ -38,7 +38,7 @@ use crate::engine::{
     get_current_parent_index,
 };
 use crate::engine::arrays::{core, visual, text as text_arrays, interaction};
-use crate::state::{mouse, keyboard, focus, clipboard};
+use crate::state::{mouse, keyboard, focus::{self, FocusCallbacks}, clipboard};
 use crate::types::{ComponentType, BorderStyle};
 use super::types::{InputProps, PropValue, Cleanup};
 
@@ -952,6 +952,21 @@ pub fn input(props: InputProps) -> Cleanup {
     });
 
     // ==========================================================================
+    // FOCUS CALLBACKS (on_focus/on_blur)
+    // ==========================================================================
+
+    let mut focus_cleanup: Option<Box<dyn FnOnce()>> = None;
+
+    if props.on_focus.is_some() || props.on_blur.is_some() {
+        let callbacks = FocusCallbacks {
+            on_focus: props.on_focus.clone().map(|f| -> Box<dyn Fn()> { Box::new(move || f()) }),
+            on_blur: props.on_blur.clone().map(|f| -> Box<dyn Fn()> { Box::new(move || f()) }),
+        };
+        let cleanup_fn = focus::register_callbacks(index, callbacks);
+        focus_cleanup = Some(Box::new(cleanup_fn));
+    }
+
+    // ==========================================================================
     // MOUSE HANDLERS - Click to focus
     // ==========================================================================
 
@@ -990,6 +1005,11 @@ pub fn input(props: InputProps) -> Cleanup {
         // Clean up keyboard handlers
         key_cleanup();
         keyboard::cleanup_index(index);
+
+        // Clean up focus callbacks
+        if let Some(cleanup) = focus_cleanup {
+            cleanup();
+        }
 
         // Clean up mouse handlers
         mouse_cleanup();
@@ -1703,5 +1723,53 @@ mod tests {
 
         // History should have 2 entries
         assert_eq!(history.borrow().entries.len(), 2);
+    }
+
+    #[test]
+    fn test_input_focus_callbacks() {
+        use crate::state::focus::reset_focus_state;
+        use std::cell::Cell;
+
+        setup();
+        reset_focus_state();
+
+        let focus_count = Rc::new(Cell::new(0));
+        let blur_count = Rc::new(Cell::new(0));
+
+        let focus_clone = focus_count.clone();
+        let blur_clone = blur_count.clone();
+
+        let value1 = signal(String::new());
+        let value2 = signal(String::new());
+
+        let mut props1 = InputProps::new(value1);
+        props1.tab_index = Some(1);
+        props1.on_focus = Some(Rc::new(move || {
+            focus_clone.set(focus_clone.get() + 1);
+        }));
+        props1.on_blur = Some(Rc::new(move || {
+            blur_clone.set(blur_clone.get() + 1);
+        }));
+
+        let mut props2 = InputProps::new(value2);
+        props2.tab_index = Some(2);
+
+        let _i1 = input(props1);
+        let _i2 = input(props2);
+
+        // Focus input 1
+        focus::focus(0);
+        assert_eq!(focus_count.get(), 1);
+        assert_eq!(blur_count.get(), 0);
+
+        // Focus input 2 (blurs input 1)
+        focus::focus(1);
+        assert_eq!(focus_count.get(), 1);
+        assert_eq!(blur_count.get(), 1);
+
+        // Focus back to input 1
+        focus::focus(0);
+        assert_eq!(focus_count.get(), 2);
+        assert_eq!(blur_count.get(), 1);
     }
 }
