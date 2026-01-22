@@ -83,6 +83,8 @@ pub use state::{
 pub use theme::{
     // Types
     Theme, ThemeColor, ReactiveTheme, ThemeAccessor,
+    // Variants
+    Variant, VariantStyle, get_variant_style, variant_style,
     // Presets
     get_preset, preset_names,
     terminal, dracula, nord, monokai, solarized, catppuccin, gruvbox,
