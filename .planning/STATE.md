@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 4 - Scroll System (IN PROGRESS)
+**Current focus:** Phase 4 - Scroll System (COMPLETE)
 
 ---
 
 ## Current Position
 
 **Phase:** 4 of 6 (Scroll System)
-**Plan:** 2 of 4 complete
-**Status:** In progress
+**Plan:** 4 of 4 complete
+**Status:** Phase complete
 
-Last activity: 2026-01-22 - Completed 04-02-PLAN.md
+Last activity: 2026-01-22 - Completed 04-04-PLAN.md
 
-Progress: [##############--] 87% (14/16 total plans)
+Progress: [################] 100% (16/16 total plans)
 
 ---
 
@@ -25,19 +25,19 @@ Progress: [##############--] 87% (14/16 total plans)
 
 **Phase 4: Scroll System**
 
-Status: IN PROGRESS (2/4 plans complete)
+Status: COMPLETE (4/4 plans complete)
 
 ### Requirements Progress
 - [x] R4.1: Scroll module core (04-01)
 - [x] R4.2: Keyboard scroll handlers (04-02)
-- [ ] R4.3: Mouse wheel scroll handlers (04-03)
-- [ ] R4.4: scrollIntoView (04-04)
+- [x] R4.3: Mouse wheel scroll handlers (04-03)
+- [x] R4.4: Scrollbar rendering + stick_to_bottom (04-04)
 
 ### Plans
 - [x] 04-01: Scroll core module
 - [x] 04-02: Keyboard handlers
-- [ ] 04-03: Mouse handlers
-- [ ] 04-04: scrollIntoView
+- [x] 04-03: Mouse handlers
+- [x] 04-04: Scrollbar rendering + stick_to_bottom
 
 ---
 
@@ -48,7 +48,7 @@ Status: IN PROGRESS (2/4 plans complete)
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
-| 4. Scroll System | In Progress | 50% (2/4) |
+| 4. Scroll System | Complete | 100% (4/4) |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
 
@@ -90,10 +90,33 @@ Status: IN PROGRESS (2/4 plans complete)
 | layout-accessor-pattern | Thread-local CURRENT_LAYOUT with set/with/clear functions | Keyboard handlers need layout access but can't receive it as parameter | 2026-01-22 |
 | keyboard-no-chaining | Keyboard scroll does NOT chain to parent | Would conflict with focus management; mouse wheel chains, keyboard doesn't | 2026-01-22 |
 | arrow-key-conditions | Arrow keys only scroll without Ctrl/Alt modifiers | Ctrl+Arrow used for word navigation in inputs | 2026-01-22 |
+| scrollbar-inside-borders | Scrollbar on right edge inside borders | Standard UI convention, visible with content | 2026-01-22 |
+| overflow-scroll-full-bar | overflow:scroll shows full scrollbar (track + thumb) | Full track + thumb for explicit scroll mode | 2026-01-22 |
+| overflow-auto-indicator | overflow:auto shows minimal scroll indicator | Less intrusive for auto mode | 2026-01-22 |
+| prev-max-for-growth | prev_max_scroll_y for content growth detection | Compare before/after to detect content addition | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 04-04 Execution
+- Added STICK_TO_BOTTOM and PREV_MAX_SCROLL_Y arrays to interaction.rs
+- Implemented scrollbar rendering: render_scrollbar, render_full_scrollbar, render_scroll_indicator
+- overflow:scroll shows track (░) and thumb (█)
+- overflow:auto shows position indicator (▐)
+- Added stick_to_bottom prop to BoxProps
+- handle_stick_to_bottom for auto-scroll on content growth
+- update_stick_to_bottom_on_scroll for user scroll handling
+- is_at_bottom helper
+- 5 new tests for stick_to_bottom
+- All 357 tests pass
+
+### 2026-01-22 — Plan 04-03 Execution (by another agent)
+- find_scrollable_ancestor for hierarchy traversal
+- scroll_focused_into_view for focus visibility
+- Mouse wheel scroll with hit testing and chaining
+- 11 new tests
+- All 352 tests pass
 
 ### 2026-01-22 — Plan 04-02 Execution
 - Added layout accessor pattern: set_current_layout, with_current_layout, clear_current_layout
@@ -243,9 +266,9 @@ Status: IN PROGRESS (2/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 22:40 UTC
-Stopped at: Completed 04-02-PLAN.md
-Resume file: None - continue with 04-03
+Last session: 2026-01-22 22:49 UTC
+Stopped at: Completed 04-04-PLAN.md
+Resume file: None - Phase 4 complete, ready for Phase 5
 
 ---
 
@@ -264,7 +287,7 @@ None currently.
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
-- Phase 4 in progress: 352 tests total.
+- Phase 4 complete! 357 tests total.
 
 ---
 
