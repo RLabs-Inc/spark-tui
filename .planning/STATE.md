@@ -5,42 +5,42 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 1 - Mouse System + Event Wiring (COMPLETE)
+**Current focus:** Phase 2 - Theme System (IN PROGRESS)
 
 ---
 
 ## Current Position
 
-**Phase:** 1 of 6 (Mouse System + Event Wiring) - COMPLETE
-**Plan:** 4 of 4 complete
-**Status:** Phase complete, ready for Phase 2
+**Phase:** 2 of 6 (Theme System)
+**Plan:** 1 of 4 complete
+**Status:** In progress
 
-Last activity: 2026-01-22 - Completed 01-04-PLAN.md
+Last activity: 2026-01-22 - Completed 02-01-PLAN.md
 
-Progress: [##########] 100% (Phase 1)
+Progress: [####------] 42% (5/12 total plans)
 
 ---
 
 ## Current Phase
 
-**Phase 1: Mouse System + Event Wiring**
+**Phase 2: Theme System**
 
-Status: COMPLETE (4/4 plans complete)
+Status: IN PROGRESS (1/4 plans complete)
 
 ### Requirements Progress
-- [x] R1.1: HitGrid for O(1) coordinate lookup (01-01)
-- [x] R1.2: Mouse event dispatch (01-01)
-- [x] R1.3: Hover tracking (enter/leave) (01-01)
-- [x] R1.4: Click detection (01-01)
-- [x] R1.5: Event conversion and polling (01-02)
-- [x] R1.6: Event callback wiring (01-03)
-- [x] R1.7: Event loop integration (01-04)
+- [x] R2.1: ThemeColor type (02-01)
+- [x] R2.2: Theme struct with 20 semantic colors (02-01)
+- [x] R2.3: 13 preset themes (02-01)
+- [ ] R2.4: Reactive theme state
+- [ ] R2.5: Color resolution
+- [ ] R2.6: t.* accessor deriveds
+- [ ] R2.7: Variant system
 
 ### Plans
-- [x] 01-01: Mouse types, HitGrid, handlers, dispatch
-- [x] 01-02: Input module with event conversion and polling
-- [x] 01-03: Event callback wiring
-- [x] 01-04: Event loop integration and global keys
+- [x] 02-01: Theme types, ThemeColor, Theme struct, 13 presets
+- [ ] 02-02: Reactive theme state
+- [ ] 02-03: Color resolution and t.* accessors
+- [ ] 02-04: Variant system
 
 ---
 
@@ -49,7 +49,7 @@ Status: COMPLETE (4/4 plans complete)
 | Phase | Status | Progress |
 |-------|--------|----------|
 | 1. Mouse + Events | Complete | 100% (4/4) |
-| 2. Theme System | Not Started | 0% |
+| 2. Theme System | In Progress | 25% (1/4) |
 | 3. Input Component | Not Started | 0% |
 | 4. Scroll System | Not Started | 0% |
 | 5. Cursor System | Not Started | 0% |
@@ -70,10 +70,23 @@ Status: COMPLETE (4/4 plans complete)
 | click-to-focus-wrap | Wrap user on_click with focus::focus() for focusable boxes | Automatic focus on click matches expected behavior | 2026-01-22 |
 | global-keys-on | Use keyboard::on() for global handlers to access modifiers | on_key() doesn't expose modifier state needed for Ctrl+C, Shift+Tab | 2026-01-22 |
 | tick-60fps | 16ms poll timeout for ~60fps event loop | Balance responsiveness with CPU usage | 2026-01-22 |
+| theme-color-enum | ThemeColor enum with Default/Ansi/Rgb/Str variants | Matches TypeScript semantics exactly | 2026-01-22 |
+| preset-functions | Functions returning Theme instead of const values | Theme has String fields requiring allocation | 2026-01-22 |
+| case-insensitive-lookup | get_preset() normalizes to lowercase and strips underscores | User-friendly API | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 02-01 Execution
+- Added 24 comprehensive Rgba color parsing tests
+- Created src/theme/mod.rs with ThemeColor enum and Theme struct
+- Created src/theme/presets.rs with all 13 TypeScript presets
+- ThemeColor supports Default, Ansi, Rgb, Str variants
+- Theme has 20 semantic color slots
+- get_preset() with case-insensitive lookup
+- 56 new tests (24 Rgba + 16 ThemeColor + 16 preset)
+- All 224 tests pass (215 unit + 9 doc)
 
 ### 2026-01-22 — Plan 01-04 Execution
 - Created src/state/global_keys.rs with GlobalKeysHandle
@@ -125,9 +138,9 @@ Status: COMPLETE (4/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 13:44 UTC
-Stopped at: Completed Phase 1 (all 4 plans)
-Resume file: None - Phase 1 complete, ready for Phase 2
+Last session: 2026-01-22 16:23 UTC
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None - continue with 02-02-PLAN.md
 
 ---
 
@@ -143,7 +156,7 @@ None currently.
 - Spec files at `crates/tui/docs/specs/` are comprehensive
 - spark-signals (crates/signals/) is complete and production-ready
 - TDD approach: write tests first
-- Phase 1 complete! Mouse system and event wiring fully integrated.
+- Phase 1 complete! Phase 2 in progress.
 
 ---
 
