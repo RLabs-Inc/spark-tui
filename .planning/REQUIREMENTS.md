@@ -82,11 +82,13 @@ Complete port of TypeScript TUI framework to Rust with identical ergonomics and 
 - Inheritance follows component tree (parentIndex)
 - DEFAULT sentinel triggers inheritance lookup
 
+**Status:** COMPLETE (2026-01-22)
+
 **Success Criteria:**
-- [ ] `t.primary` returns reactive Signal<Rgba>
-- [ ] Changing theme updates all components using t.* colors
-- [ ] DEFAULT color inherits from parent
-- [ ] At least 3 presets working (terminal, dracula, nord)
+- [x] `t.primary` returns reactive Signal<Rgba>
+- [x] Changing theme updates all components using t.* colors
+- [x] DEFAULT color inherits from parent
+- [x] At least 3 presets working (terminal, dracula, nord)
 
 ---
 
