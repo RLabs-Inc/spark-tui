@@ -6,6 +6,47 @@
 
 use std::cell::RefCell;
 use super::{ReactiveTheme, Theme, terminal};
+use crate::types::Rgba;
+
+// =============================================================================
+// ResolvedTheme - All colors resolved to Rgba
+// =============================================================================
+
+/// Theme with all colors resolved to Rgba.
+///
+/// This is the resolved form of a Theme where all ThemeColor values
+/// have been converted to concrete Rgba values.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedTheme {
+    // Main palette
+    pub primary: Rgba,
+    pub secondary: Rgba,
+    pub tertiary: Rgba,
+    pub accent: Rgba,
+
+    // Semantic
+    pub success: Rgba,
+    pub warning: Rgba,
+    pub error: Rgba,
+    pub info: Rgba,
+
+    // Text
+    pub text: Rgba,
+    pub text_muted: Rgba,
+    pub text_dim: Rgba,
+    pub text_disabled: Rgba,
+    pub text_bright: Rgba,
+
+    // Background
+    pub background: Rgba,
+    pub background_muted: Rgba,
+    pub surface: Rgba,
+    pub overlay: Rgba,
+
+    // Border
+    pub border: Rgba,
+    pub border_focus: Rgba,
+}
 
 thread_local! {
     /// The active theme - each field is a Signal<ThemeColor>.
@@ -70,6 +111,38 @@ fn set_theme_from(theme: Theme) {
 /// Reset theme state to terminal (for testing).
 pub fn reset_theme_state() {
     set_theme_from(terminal());
+}
+
+/// Get the current theme with all colors resolved to Rgba.
+///
+/// This function reads the current reactive theme and resolves all
+/// ThemeColor values to concrete Rgba values. It tracks dependencies
+/// on all color signals when called within a reactive context.
+pub fn resolved_theme() -> ResolvedTheme {
+    ACTIVE_THEME.with(|t| {
+        let rt = t.borrow();
+        ResolvedTheme {
+            primary: rt.primary.get().resolve(),
+            secondary: rt.secondary.get().resolve(),
+            tertiary: rt.tertiary.get().resolve(),
+            accent: rt.accent.get().resolve(),
+            success: rt.success.get().resolve(),
+            warning: rt.warning.get().resolve(),
+            error: rt.error.get().resolve(),
+            info: rt.info.get().resolve(),
+            text: rt.text.get().resolve(),
+            text_muted: rt.text_muted.get().resolve(),
+            text_dim: rt.text_dim.get().resolve(),
+            text_disabled: rt.text_disabled.get().resolve(),
+            text_bright: rt.text_bright.get().resolve(),
+            background: rt.background.get().resolve(),
+            background_muted: rt.background_muted.get().resolve(),
+            surface: rt.surface.get().resolve(),
+            overlay: rt.overlay.get().resolve(),
+            border: rt.border.get().resolve(),
+            border_focus: rt.border_focus.get().resolve(),
+        }
+    })
 }
 
 // =============================================================================
