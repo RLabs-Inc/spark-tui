@@ -1141,4 +1141,284 @@ mod tests {
         assert_eq!(interaction::get_selection_start(0), 3);
         assert_eq!(interaction::get_selection_end(0), 7);
     }
+
+    // =========================================================================
+    // Selection Helper Tests
+    // =========================================================================
+
+    #[test]
+    fn test_has_selection() {
+        setup();
+
+        // No selection
+        assert!(!has_selection(0));
+
+        // With selection
+        interaction::set_selection(0, 2, 5);
+        assert!(has_selection(0));
+
+        // Same start and end = no selection
+        interaction::set_selection(0, 3, 3);
+        assert!(!has_selection(0));
+    }
+
+    #[test]
+    fn test_get_selected_text() {
+        setup();
+
+        let text = "Hello World";
+
+        // No selection
+        interaction::set_selection(0, 0, 0);
+        assert_eq!(get_selected_text(0, text), "");
+
+        // Select "Hello"
+        interaction::set_selection(0, 0, 5);
+        assert_eq!(get_selected_text(0, text), "Hello");
+
+        // Select "World"
+        interaction::set_selection(0, 6, 11);
+        assert_eq!(get_selected_text(0, text), "World");
+
+        // Select middle
+        interaction::set_selection(0, 3, 8);
+        assert_eq!(get_selected_text(0, text), "lo Wo");
+
+        // Selection beyond text length is clamped
+        interaction::set_selection(0, 8, 20);
+        assert_eq!(get_selected_text(0, text), "rld");
+    }
+
+    #[test]
+    fn test_get_selected_text_unicode() {
+        setup();
+
+        let text = "Hello 世界";
+
+        // Select unicode
+        interaction::set_selection(0, 6, 8);
+        assert_eq!(get_selected_text(0, text), "世界");
+
+        // Select mixed
+        interaction::set_selection(0, 4, 7);
+        assert_eq!(get_selected_text(0, text), "o 世");
+    }
+
+    #[test]
+    fn test_delete_selection() {
+        setup();
+
+        let text = "Hello World";
+
+        // No selection - returns original
+        interaction::set_selection(0, 0, 0);
+        let (result, pos) = delete_selection(0, text);
+        assert_eq!(result, "Hello World");
+        assert_eq!(pos, 0);
+
+        // Delete "Hello "
+        interaction::set_selection(0, 0, 6);
+        let (result, pos) = delete_selection(0, text);
+        assert_eq!(result, "World");
+        assert_eq!(pos, 0);
+
+        // Delete "World"
+        interaction::set_selection(0, 6, 11);
+        let (result, pos) = delete_selection(0, text);
+        assert_eq!(result, "Hello ");
+        assert_eq!(pos, 6);
+
+        // Delete middle
+        interaction::set_selection(0, 2, 9);
+        let (result, pos) = delete_selection(0, text);
+        assert_eq!(result, "Held");
+        assert_eq!(pos, 2);
+    }
+
+    #[test]
+    fn test_get_selection_range() {
+        setup();
+
+        // Normal order
+        interaction::set_selection(0, 2, 7);
+        assert_eq!(get_selection_range(0), (2, 7));
+
+        // Same position
+        interaction::set_selection(0, 5, 5);
+        assert_eq!(get_selection_range(0), (5, 5));
+    }
+
+    #[test]
+    fn test_clear_selection() {
+        setup();
+
+        interaction::set_selection(0, 5, 10);
+        assert!(has_selection(0));
+
+        clear_selection(0);
+        assert!(!has_selection(0));
+        assert_eq!(interaction::get_selection_start(0), 0);
+        assert_eq!(interaction::get_selection_end(0), 0);
+    }
+
+    // =========================================================================
+    // Clipboard Integration Tests
+    // =========================================================================
+
+    #[test]
+    fn test_clipboard_copy() {
+        setup();
+        clipboard::clear();
+
+        // Set up selection
+        interaction::set_selection(0, 0, 5);
+        let text = "Hello World";
+
+        // Get selected and copy
+        let selected = get_selected_text(0, text);
+        clipboard::copy(&selected);
+
+        // Verify clipboard
+        assert_eq!(clipboard::paste(), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_clipboard_cut() {
+        setup();
+        clipboard::clear();
+
+        let text = "Hello World";
+
+        // Select "World"
+        interaction::set_selection(0, 6, 11);
+
+        // Cut operation
+        let selected = get_selected_text(0, text);
+        clipboard::copy(&selected);
+        let (new_text, new_pos) = delete_selection(0, text);
+        clear_selection(0);
+
+        // Verify
+        assert_eq!(clipboard::paste(), Some("World".to_string()));
+        assert_eq!(new_text, "Hello ");
+        assert_eq!(new_pos, 6);
+        assert!(!has_selection(0));
+    }
+
+    #[test]
+    fn test_clipboard_paste_no_selection() {
+        setup();
+        clipboard::clear();
+
+        clipboard::copy("inserted");
+
+        let text = "Hello World";
+        let pos = 6; // After "Hello "
+
+        // Simulate paste at position
+        if let Some(pasted) = clipboard::paste() {
+            let chars: Vec<char> = text.chars().collect();
+            let pasted_chars: Vec<char> = pasted.chars().collect();
+            let mut new_chars: Vec<char> = Vec::new();
+            new_chars.extend(&chars[..pos]);
+            new_chars.extend(&pasted_chars);
+            new_chars.extend(&chars[pos..]);
+            let new_text: String = new_chars.into_iter().collect();
+
+            assert_eq!(new_text, "Hello insertedWorld");
+        }
+    }
+
+    #[test]
+    fn test_clipboard_paste_replaces_selection() {
+        setup();
+        clipboard::clear();
+
+        clipboard::copy("REPLACED");
+
+        let text = "Hello World";
+
+        // Select "World"
+        interaction::set_selection(0, 6, 11);
+
+        // Delete selection first
+        let (base_text, insert_pos) = delete_selection(0, text);
+        clear_selection(0);
+
+        // Then paste
+        if let Some(pasted) = clipboard::paste() {
+            let chars: Vec<char> = base_text.chars().collect();
+            let pasted_chars: Vec<char> = pasted.chars().collect();
+            let mut new_chars: Vec<char> = Vec::new();
+            new_chars.extend(&chars[..insert_pos]);
+            new_chars.extend(&pasted_chars);
+            let new_text: String = new_chars.into_iter().collect();
+
+            assert_eq!(new_text, "Hello REPLACED");
+        }
+    }
+
+    #[test]
+    fn test_typing_replaces_selection() {
+        setup();
+
+        let text = "Hello World";
+
+        // Select "World"
+        interaction::set_selection(0, 6, 11);
+
+        // Type a character - should replace selection
+        let (base_text, insert_pos) = delete_selection(0, text);
+        clear_selection(0);
+
+        let ch = 'X';
+        let mut chars: Vec<char> = base_text.chars().collect();
+        chars.insert(insert_pos, ch);
+        let new_text: String = chars.into_iter().collect();
+
+        assert_eq!(new_text, "Hello X");
+        assert!(!has_selection(0));
+    }
+
+    #[test]
+    fn test_selection_with_unicode() {
+        setup();
+
+        let text = "Hello 世界 Test";
+
+        // Select "世界"
+        interaction::set_selection(0, 6, 8);
+
+        let selected = get_selected_text(0, text);
+        assert_eq!(selected, "世界");
+
+        // Delete selection
+        let (new_text, pos) = delete_selection(0, text);
+        assert_eq!(new_text, "Hello  Test");
+        assert_eq!(pos, 6);
+    }
+
+    #[test]
+    fn test_empty_selection_operations() {
+        setup();
+        clipboard::clear();
+
+        let text = "Hello";
+
+        // No selection
+        interaction::set_selection(0, 0, 0);
+
+        // get_selected_text returns empty
+        assert_eq!(get_selected_text(0, text), "");
+
+        // delete_selection returns original
+        let (result, pos) = delete_selection(0, text);
+        assert_eq!(result, "Hello");
+        assert_eq!(pos, 0);
+
+        // Copy empty does nothing
+        let selected = get_selected_text(0, text);
+        clipboard::copy(&selected);
+        assert!(!clipboard::has_content());
+    }
 }
