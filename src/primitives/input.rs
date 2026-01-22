@@ -162,6 +162,47 @@ fn get_selection_range(index: usize) -> (usize, usize) {
 }
 
 // =============================================================================
+// Scroll Offset Helpers
+// =============================================================================
+
+/// Adjust scroll offset to keep cursor visible within the visible width.
+///
+/// This ensures the cursor is always on-screen when text overflows.
+/// The visible_width is typically the input's content width.
+///
+/// # Arguments
+/// * `cursor_pos` - Current cursor position in characters
+/// * `_text_len` - Total text length (unused but kept for future use)
+/// * `scroll_offset` - Current horizontal scroll offset
+/// * `visible_width` - Width of visible area in characters (0 = use default 40)
+///
+/// # Returns
+/// New scroll offset that keeps cursor visible
+pub fn ensure_cursor_visible(
+    cursor_pos: usize,
+    _text_len: usize,
+    scroll_offset: u16,
+    visible_width: u16,
+) -> u16 {
+    // Default visible width if not provided (will be refined when integrated with layout)
+    let visible_width = if visible_width == 0 { 40 } else { visible_width };
+
+    let cursor_in_view_start = scroll_offset as usize;
+    let cursor_in_view_end = cursor_in_view_start + visible_width as usize;
+
+    if cursor_pos < cursor_in_view_start {
+        // Cursor is before visible area - scroll left
+        cursor_pos as u16
+    } else if cursor_pos >= cursor_in_view_end {
+        // Cursor is after visible area - scroll right
+        (cursor_pos.saturating_sub(visible_width as usize) + 1) as u16
+    } else {
+        // Cursor is visible - no change
+        scroll_offset
+    }
+}
+
+// =============================================================================
 // Helper: Bind PropValue to Slot
 // =============================================================================
 
@@ -213,6 +254,10 @@ pub fn input(props: InputProps) -> Cleanup {
 
     // Cursor position within the text - local signal synced to slot array
     let cursor_pos = signal(0u16);
+
+    // Scroll offset for text that extends beyond visible width
+    // Stored in interaction arrays for renderer to use
+    let scroll_offset = signal(0u16);
 
     // Value signal (cloned for various closures)
     let value = props.value.clone();
@@ -280,6 +325,10 @@ pub fn input(props: InputProps) -> Cleanup {
 
     // Cursor visible when focused (placeholder for focus integration)
     interaction::set_cursor_visible(index, true);
+
+    // Initialize scroll offset in interaction arrays
+    // This will be used by the renderer to show overflow indicators
+    interaction::set_scroll_offset(index, 0, 0);
 
     // ==========================================================================
     // FLEXNODE BINDINGS - Layout properties
@@ -473,6 +522,7 @@ pub fn input(props: InputProps) -> Cleanup {
     // ==========================================================================
 
     let cursor_pos_for_key = cursor_pos.clone();
+    let scroll_offset_for_key = scroll_offset.clone();
     let value_for_key = value.clone();
     let max_length = props.max_length.unwrap_or(0);
     let on_change = props.on_change.clone();
@@ -485,6 +535,7 @@ pub fn input(props: InputProps) -> Cleanup {
         let char_count = val.chars().count();
         // Clamp cursor position to value length (handles external value changes)
         let pos = cursor_pos_for_key.get().min(char_count as u16) as usize;
+        let current_scroll = scroll_offset_for_key.get();
 
         // Helper: Update selection during Shift+navigation
         let update_selection = |new_pos: usize| {
@@ -710,24 +761,42 @@ pub fn input(props: InputProps) -> Cleanup {
             match event.key.as_str() {
                 // Navigation (clears selection)
                 "ArrowLeft" => {
-                    if has_selection(index) {
+                    let new_pos = if has_selection(index) {
                         // Move to start of selection
                         let (sel_min, _) = get_selection_range(index);
-                        cursor_pos_for_key.set(sel_min as u16);
                         clear_selection(index);
+                        sel_min
                     } else if pos > 0 {
-                        cursor_pos_for_key.set((pos - 1) as u16);
+                        pos - 1
+                    } else {
+                        pos
+                    };
+                    cursor_pos_for_key.set(new_pos as u16);
+                    // Update scroll offset to keep cursor visible
+                    let new_scroll = ensure_cursor_visible(new_pos, char_count, current_scroll, 0);
+                    if new_scroll != current_scroll {
+                        scroll_offset_for_key.set(new_scroll);
+                        interaction::set_scroll_offset(index, new_scroll, 0);
                     }
                     true
                 }
                 "ArrowRight" => {
-                    if has_selection(index) {
+                    let new_pos = if has_selection(index) {
                         // Move to end of selection
                         let (_, sel_max) = get_selection_range(index);
-                        cursor_pos_for_key.set(sel_max as u16);
                         clear_selection(index);
+                        sel_max
                     } else if pos < char_count {
-                        cursor_pos_for_key.set((pos + 1) as u16);
+                        pos + 1
+                    } else {
+                        pos
+                    };
+                    cursor_pos_for_key.set(new_pos as u16);
+                    // Update scroll offset to keep cursor visible
+                    let new_scroll = ensure_cursor_visible(new_pos, char_count, current_scroll, 0);
+                    if new_scroll != current_scroll {
+                        scroll_offset_for_key.set(new_scroll);
+                        interaction::set_scroll_offset(index, new_scroll, 0);
                     }
                     true
                 }
@@ -758,11 +827,18 @@ pub fn input(props: InputProps) -> Cleanup {
                 "Home" => {
                     clear_selection(index);
                     cursor_pos_for_key.set(0);
+                    // Reset scroll to start
+                    scroll_offset_for_key.set(0);
+                    interaction::set_scroll_offset(index, 0, 0);
                     true
                 }
                 "End" => {
                     clear_selection(index);
                     cursor_pos_for_key.set(char_count as u16);
+                    // Update scroll offset to show end of text
+                    let new_scroll = ensure_cursor_visible(char_count, char_count, current_scroll, 0);
+                    scroll_offset_for_key.set(new_scroll);
+                    interaction::set_scroll_offset(index, new_scroll, 0);
                     true
                 }
 
