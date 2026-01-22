@@ -80,14 +80,25 @@ Plans:
 - Placeholder support
 - Password mode
 - Cursor position tracking
-- Keyboard navigation
+- Keyboard navigation (basic + word-level with Ctrl)
+- Selection support (Shift+arrows)
+- Clipboard operations (Ctrl+C/V/X)
+- History navigation (Up/Down arrows)
 - onChange/onSubmit/onCancel events
 
 **Dependencies:**
 - Phase 1 (click-to-focus)
 - Phase 5 (cursor rendering) - partial, can start without blink
 
-**Plans:** 0 plans
+**Plans:** 4 plans
+
+**Status:** PLANNED
+
+Plans:
+- [ ] 03-01-PLAN.md - Types and foundation (InputProps, CursorStyle, basic rendering)
+- [ ] 03-02-PLAN.md - Word navigation and Ctrl+A (Ctrl+arrows, Ctrl+Backspace/Delete)
+- [ ] 03-03-PLAN.md - Selection and clipboard (Shift+arrows, Ctrl+C/V/X)
+- [ ] 03-04-PLAN.md - History and overflow (Up/Down arrows, scroll offset)
 
 ---
 
