@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 2 - Theme System (IN PROGRESS)
+**Current focus:** Phase 2 - Theme System (COMPLETE)
 
 ---
 
 ## Current Position
 
 **Phase:** 2 of 6 (Theme System)
-**Plan:** 2 of 4 complete
-**Status:** In progress
+**Plan:** 4 of 4 complete
+**Status:** Phase complete
 
-Last activity: 2026-01-22 - Completed 02-02-PLAN.md
+Last activity: 2026-01-22 - Completed 02-04-PLAN.md
 
-Progress: [#####-----] 50% (6/12 total plans)
+Progress: [########--] 67% (8/12 total plans)
 
 ---
 
@@ -25,22 +25,22 @@ Progress: [#####-----] 50% (6/12 total plans)
 
 **Phase 2: Theme System**
 
-Status: IN PROGRESS (2/4 plans complete)
+Status: COMPLETE (4/4 plans complete)
 
 ### Requirements Progress
 - [x] R2.1: ThemeColor type (02-01)
 - [x] R2.2: Theme struct with 20 semantic colors (02-01)
 - [x] R2.3: 13 preset themes (02-01)
 - [x] R2.4: Reactive theme state (02-02)
-- [ ] R2.5: Color resolution
+- [x] R2.5: Color resolution (02-03, 02-04)
 - [x] R2.6: t.* accessor deriveds (02-02)
-- [ ] R2.7: Variant system
+- [x] R2.7: Variant system (02-03, 02-04)
 
 ### Plans
 - [x] 02-01: Theme types, ThemeColor, Theme struct, 13 presets
 - [x] 02-02: Reactive theme state
-- [ ] 02-03: Color resolution and t.* accessors
-- [ ] 02-04: Variant system
+- [x] 02-03: Variant system with WCAG contrast
+- [x] 02-04: Color modifiers and contrast methods
 
 ---
 
@@ -49,7 +49,7 @@ Status: IN PROGRESS (2/4 plans complete)
 | Phase | Status | Progress |
 |-------|--------|----------|
 | 1. Mouse + Events | Complete | 100% (4/4) |
-| 2. Theme System | In Progress | 50% (2/4) |
+| 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Not Started | 0% |
 | 4. Scroll System | Not Started | 0% |
 | 5. Cursor System | Not Started | 0% |
@@ -77,10 +77,28 @@ Status: IN PROGRESS (2/4 plans complete)
 | get-reactive-theme | Renamed reactive_theme() to get_reactive_theme() | Avoid conflict with derive macro generated function | 2026-01-22 |
 | accessor-stores-signals | ThemeAccessor stores Signal<ThemeColor> not Derived | Simpler with published spark-signals API | 2026-01-22 |
 | two-accessor-methods | .primary() returns Rgba, .primary_signal() returns Signal | Ergonomic access + reactive tracking support | 2026-01-22 |
+| oklch-contrast-direction | Use OKLCH lightness for contrast direction instead of relative luminance | Consistency with OKLCH-based adjustments | 2026-01-22 |
+| contrast-fallback | Try opposite direction if initial fails to achieve contrast | Handles white-on-medium-bg edge cases | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 02-04 Execution
+- Verified modifiers.rs complete (lighten/darken/alpha/mix/contrast)
+- Added contrast() and contrast_with() to ThemeAccessor
+- Created ModifiableColor for chainable color manipulation
+- Added ResolvedTheme and resolved_theme() to reactive.rs
+- Fixed ensure_contrast() to try opposite direction on failure
+- 9 new accessor tests
+- All 268 tests pass
+
+### 2026-01-22 — Plan 02-03 Execution
+- Created src/theme/variant.rs with Variant enum (14 variants)
+- VariantStyle struct with fg/bg/border/border_focus
+- get_variant_style() with automatic WCAG contrast calculation
+- variant_style() reactive derived
+- All tests pass
 
 ### 2026-01-22 — Plan 02-02 Execution
 - Updated Cargo.toml to spark-signals = "0.1.0" from crates.io
@@ -151,9 +169,9 @@ Status: IN PROGRESS (2/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 17:38 UTC
-Stopped at: Completed 02-02-PLAN.md
-Resume file: None - continue with 02-03-PLAN.md
+Last session: 2026-01-22 18:00 UTC
+Stopped at: Completed 02-04-PLAN.md (Phase 2 Complete!)
+Resume file: None - continue with Phase 3
 
 ---
 
@@ -169,7 +187,9 @@ None currently.
 - Spec files at `crates/tui/docs/specs/` are comprehensive
 - spark-signals now from crates.io (0.1.0) instead of path dependency
 - TDD approach: write tests first
-- Phase 1 complete! Phase 2 at 50%.
+- Phase 1 complete!
+- Phase 2 complete! 268 tests total.
+- Ready for Phase 3: Input Component
 
 ---
 
