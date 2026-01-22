@@ -656,16 +656,28 @@ fn dispatch_up(event: &MouseEvent) -> bool {
 
     // Detect click (press and release on same component with same button)
     if pressed_idx == event.component_index && pressed_btn == event.button {
-        // Component click handler (non-consuming, just fires)
+        // Component click handler with bubbling - walk up parent chain until handler found
         if let Some(idx) = event.component_index {
-            REGISTRY.with(|reg| {
-                let reg = reg.borrow();
-                if let Some(handlers) = reg.component_handlers.get(&idx) {
-                    if let Some(ref on_click) = handlers.on_click {
-                        on_click(event);
+            let mut current = Some(idx);
+            while let Some(component_idx) = current {
+                let handler_found = REGISTRY.with(|reg| {
+                    let reg = reg.borrow();
+                    if let Some(handlers) = reg.component_handlers.get(&component_idx) {
+                        if let Some(ref on_click) = handlers.on_click {
+                            on_click(event);
+                            return true;
+                        }
                     }
+                    false
+                });
+
+                if handler_found {
+                    break; // Handler found and fired, stop bubbling
                 }
-            });
+
+                // Bubble up to parent
+                current = crate::engine::arrays::core::get_parent_index(component_idx);
+            }
         }
 
         // Global click handlers (can consume)

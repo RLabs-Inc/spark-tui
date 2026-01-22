@@ -125,6 +125,8 @@ where
                 None,  // No parent clip
                 0,     // No parent scroll Y
                 0,     // No parent scroll X
+                0,     // Parent absolute X
+                0,     // Parent absolute Y
             );
         }
 
@@ -151,15 +153,17 @@ fn render_component(
     parent_clip: Option<&ClipRect>,
     parent_scroll_y: i32,
     parent_scroll_x: i32,
+    parent_abs_x: i32,
+    parent_abs_y: i32,
 ) {
     // Check visibility
     if !core::get_visible(index) {
         return;
     }
 
-    // Get computed position and size
-    let raw_x = layout.x.get(index).copied().unwrap_or(0) as i32;
-    let raw_y = layout.y.get(index).copied().unwrap_or(0) as i32;
+    // Get computed position (relative to parent) and size
+    let rel_x = layout.x.get(index).copied().unwrap_or(0) as i32;
+    let rel_y = layout.y.get(index).copied().unwrap_or(0) as i32;
     let w = layout.width.get(index).copied().unwrap_or(0);
     let h = layout.height.get(index).copied().unwrap_or(0);
 
@@ -167,9 +171,12 @@ fn render_component(
         return;
     }
 
-    // Apply parent scroll offset
-    let x = (raw_x - parent_scroll_x).max(0) as u16;
-    let y = (raw_y - parent_scroll_y).max(0) as u16;
+    // Calculate absolute position: parent absolute + relative + scroll offset
+    let abs_x = parent_abs_x + rel_x - parent_scroll_x;
+    let abs_y = parent_abs_y + rel_y - parent_scroll_y;
+
+    let x = abs_x.max(0) as u16;
+    let y = abs_y.max(0) as u16;
 
     // Create component bounds
     let component_bounds = ClipRect::new(x, y, w, h);
@@ -240,7 +247,7 @@ fn render_component(
 
     if content_w == 0 || content_h == 0 {
         // Still render children even if no content area
-        render_children(buffer, index, layout, child_map, hit_regions, &effective_clip, parent_scroll_y, parent_scroll_x);
+        render_children(buffer, index, layout, child_map, hit_regions, &effective_clip, parent_scroll_y, parent_scroll_x, abs_x, abs_y);
         return;
     }
 
@@ -248,7 +255,7 @@ fn render_component(
     let content_clip = match content_bounds.intersect(&effective_clip) {
         Some(clip) => clip,
         None => {
-            render_children(buffer, index, layout, child_map, hit_regions, &effective_clip, parent_scroll_y, parent_scroll_x);
+            render_children(buffer, index, layout, child_map, hit_regions, &effective_clip, parent_scroll_y, parent_scroll_x, abs_x, abs_y);
             return;
         }
     };
@@ -274,8 +281,8 @@ fn render_component(
         _ => {}
     }
 
-    // Render children
-    render_children(buffer, index, layout, child_map, hit_regions, &content_clip, parent_scroll_y, parent_scroll_x);
+    // Render children - pass this component's absolute position
+    render_children(buffer, index, layout, child_map, hit_regions, &content_clip, parent_scroll_y, parent_scroll_x, abs_x, abs_y);
 }
 
 /// Render children of a component.
@@ -289,6 +296,8 @@ fn render_children(
     clip: &ClipRect,
     parent_scroll_y: i32,
     parent_scroll_x: i32,
+    parent_abs_x: i32,
+    parent_abs_y: i32,
 ) {
     if let Some(children) = child_map.get(&index) {
         let is_scrollable = layout.scrollable.get(index).copied().unwrap_or(0) == 1;
@@ -316,6 +325,8 @@ fn render_children(
                 Some(clip),
                 child_scroll_y,
                 child_scroll_x,
+                parent_abs_x,
+                parent_abs_y,
             );
         }
     }
