@@ -1005,6 +1005,223 @@ mod tests {
     }
 
     // =========================================================================
+    // FIND SCROLLABLE ANCESTOR TESTS (04-03)
+    // =========================================================================
+
+    #[test]
+    fn test_find_scrollable_ancestor_immediate_parent() {
+        setup();
+
+        // Parent (index 0) is scrollable
+        // Child (index 1) is not scrollable
+        let layout = create_test_layout(&[(0, 10, 50)]);
+
+        // Set up parent-child relationship
+        core::set_parent_index(1, Some(0));
+
+        // Find ancestor of child
+        let ancestor = find_scrollable_ancestor(&layout, 1);
+        assert_eq!(ancestor, Some(0));
+    }
+
+    #[test]
+    fn test_find_scrollable_ancestor_grandparent() {
+        setup();
+
+        // Grandparent (index 0) is scrollable
+        // Parent (index 1) is not scrollable
+        // Child (index 2) is not scrollable
+        let layout = create_test_layout(&[(0, 10, 50)]);
+
+        // Set up hierarchy: 2 -> 1 -> 0
+        core::set_parent_index(2, Some(1));
+        core::set_parent_index(1, Some(0));
+
+        // Find ancestor of grandchild
+        let ancestor = find_scrollable_ancestor(&layout, 2);
+        assert_eq!(ancestor, Some(0));
+    }
+
+    #[test]
+    fn test_find_scrollable_ancestor_no_ancestor() {
+        setup();
+
+        // No scrollable components
+        let layout = ComputedLayout::default();
+
+        // Component with no parent
+        let ancestor = find_scrollable_ancestor(&layout, 0);
+        assert_eq!(ancestor, None);
+    }
+
+    #[test]
+    fn test_find_scrollable_ancestor_skips_non_scrollable_parent() {
+        setup();
+
+        // Grandparent (index 0) is scrollable
+        // Parent (index 1) is also scrollable (closer)
+        // Child (index 2) is not scrollable
+        let layout = create_test_layout(&[(0, 10, 50), (1, 5, 25)]);
+
+        // Set up hierarchy
+        core::set_parent_index(2, Some(1));
+        core::set_parent_index(1, Some(0));
+
+        // Should find the closest scrollable parent (1)
+        let ancestor = find_scrollable_ancestor(&layout, 2);
+        assert_eq!(ancestor, Some(1));
+    }
+
+    // =========================================================================
+    // SCROLL FOCUSED INTO VIEW TESTS (04-03)
+    // =========================================================================
+
+    #[test]
+    fn test_scroll_focused_into_view_scrolls_to_show_child() {
+        setup();
+
+        // Scrollable parent (index 0) with viewport at y=0
+        // Child (index 1) at y=50, which is below viewport
+        let mut layout = create_test_layout(&[(0, 0, 100)]);
+        layout.y = vec![0, 50];
+        layout.height = vec![20, 5];
+
+        // Set up parent-child relationship
+        core::set_parent_index(1, Some(0));
+
+        // No scroll yet
+        interaction::set_scroll_offset(0, 0, 0);
+
+        // Call scroll_focused_into_view for child
+        scroll_focused_into_view(&layout, 1);
+
+        // Should have scrolled to show child
+        // child_bottom (55) - viewport_height (20) = 35
+        assert_eq!(interaction::get_scroll_offset_y(0), 35);
+    }
+
+    #[test]
+    fn test_scroll_focused_into_view_no_scrollable_ancestor() {
+        setup();
+
+        // No scrollable components
+        let mut layout = ComputedLayout::default();
+        layout.y = vec![0, 50];
+        layout.height = vec![20, 5];
+
+        // No scroll should happen (no ancestor to scroll)
+        scroll_focused_into_view(&layout, 1);
+
+        // Nothing should crash, nothing should change
+    }
+
+    // =========================================================================
+    // MOUSE WHEEL SCROLL TESTS (04-03)
+    // =========================================================================
+
+    use crate::state::mouse;
+
+    #[test]
+    fn test_handle_wheel_scroll_uses_hovered_component() {
+        setup();
+
+        // Create scrollable component at index 0
+        let layout = create_test_layout(&[(0, 10, 50)]);
+
+        // Set up hit grid: component 0 occupies area
+        mouse::clear_hit_grid();
+        mouse::fill_hit_rect(0, 0, 10, 10, 0);
+
+        // Mouse wheel at (5, 5) should scroll component 0
+        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Down);
+        assert!(scrolled);
+        assert_eq!(interaction::get_scroll_offset_y(0), WHEEL_SCROLL);
+    }
+
+    #[test]
+    fn test_handle_wheel_scroll_falls_back_to_focused() {
+        setup();
+        use crate::primitives::{box_primitive, BoxProps};
+
+        // Create focusable component that is scrollable
+        let _cleanup = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
+        focus::focus(0);
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+
+        // Clear hit grid - no component under cursor
+        mouse::clear_hit_grid();
+
+        // Should fall back to focused scrollable
+        let scrolled = handle_wheel_scroll(&layout, 50, 50, ScrollDirection::Down);
+        assert!(scrolled);
+        assert_eq!(interaction::get_scroll_offset_y(0), WHEEL_SCROLL);
+    }
+
+    #[test]
+    fn test_handle_wheel_scroll_with_chaining() {
+        setup();
+
+        // Parent (index 0) and child (index 1) both scrollable
+        let layout = create_test_layout(&[(0, 10, 50), (1, 5, 10)]);
+
+        // Set up parent-child relationship
+        core::set_parent_index(1, Some(0));
+
+        // Child at boundary (max scroll)
+        interaction::set_scroll_offset(1, 5, 10);
+
+        // Set up hit grid: child at cursor position
+        mouse::clear_hit_grid();
+        mouse::fill_hit_rect(5, 5, 10, 10, 1);
+
+        // Wheel scroll down should chain to parent
+        let scrolled = handle_wheel_scroll(&layout, 7, 7, ScrollDirection::Down);
+        assert!(scrolled);
+        assert_eq!(interaction::get_scroll_offset_y(1), 10); // Child unchanged
+        assert_eq!(interaction::get_scroll_offset_y(0), WHEEL_SCROLL); // Parent scrolled
+    }
+
+    #[test]
+    fn test_handle_wheel_scroll_no_scrollable() {
+        setup();
+
+        // Empty layout - nothing scrollable
+        let layout = ComputedLayout::default();
+
+        // Clear hit grid
+        mouse::clear_hit_grid();
+        reset_focus_state();
+
+        // Should return false
+        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Down);
+        assert!(!scrolled);
+    }
+
+    #[test]
+    fn test_handle_wheel_scroll_horizontal() {
+        setup();
+
+        let layout = create_test_layout(&[(0, 50, 50)]);
+
+        mouse::clear_hit_grid();
+        mouse::fill_hit_rect(0, 0, 10, 10, 0);
+
+        // Scroll right
+        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Right);
+        assert!(scrolled);
+        assert_eq!(interaction::get_scroll_offset_x(0), WHEEL_SCROLL);
+
+        // Scroll left
+        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Left);
+        assert!(scrolled);
+        assert_eq!(interaction::get_scroll_offset_x(0), 0);
+    }
+
+    // =========================================================================
     // STICK TO BOTTOM TESTS (04-04)
     // =========================================================================
 

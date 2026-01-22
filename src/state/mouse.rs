@@ -1141,4 +1141,37 @@ mod tests {
         dispatch(MouseEvent::up(MouseButton::Left, 5, 5));
         assert!(!called.get());
     }
+
+    // -------------------------------------------------------------------------
+    // Get Component At Tests (04-03)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_component_at() {
+        setup();
+
+        // Set up hit grid with component 42 at (5,5) to (14,14)
+        fill_hit_rect(5, 5, 10, 10, 42);
+
+        // Should find component at position
+        assert_eq!(get_component_at(5, 5), Some(42));
+        assert_eq!(get_component_at(10, 10), Some(42));
+        assert_eq!(get_component_at(14, 14), Some(42));
+
+        // Should not find component outside area
+        assert_eq!(get_component_at(4, 5), None);
+        assert_eq!(get_component_at(5, 4), None);
+        assert_eq!(get_component_at(15, 15), None);
+    }
+
+    #[test]
+    fn test_get_component_at_alias_for_hit_test() {
+        setup();
+
+        fill_hit_rect(0, 0, 5, 5, 10);
+
+        // Both functions should return the same result
+        assert_eq!(get_component_at(2, 2), hit_test(2, 2));
+        assert_eq!(get_component_at(10, 10), hit_test(10, 10));
+    }
 }
