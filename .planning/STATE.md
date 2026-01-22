@@ -12,10 +12,10 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 **Phase:** 1 of 6 (Mouse System + Event Wiring) - COMPLETE
-**Plan:** 3 of 3 complete
+**Plan:** 4 of 4 complete
 **Status:** Phase complete, ready for Phase 2
 
-Last activity: 2026-01-22 - Completed 01-03-PLAN.md
+Last activity: 2026-01-22 - Completed 01-04-PLAN.md
 
 Progress: [##########] 100% (Phase 1)
 
@@ -25,7 +25,7 @@ Progress: [##########] 100% (Phase 1)
 
 **Phase 1: Mouse System + Event Wiring**
 
-Status: COMPLETE (3/3 plans complete)
+Status: COMPLETE (4/4 plans complete)
 
 ### Requirements Progress
 - [x] R1.1: HitGrid for O(1) coordinate lookup (01-01)
@@ -34,11 +34,13 @@ Status: COMPLETE (3/3 plans complete)
 - [x] R1.4: Click detection (01-01)
 - [x] R1.5: Event conversion and polling (01-02)
 - [x] R1.6: Event callback wiring (01-03)
+- [x] R1.7: Event loop integration (01-04)
 
 ### Plans
 - [x] 01-01: Mouse types, HitGrid, handlers, dispatch
 - [x] 01-02: Input module with event conversion and polling
 - [x] 01-03: Event callback wiring
+- [x] 01-04: Event loop integration and global keys
 
 ---
 
@@ -46,7 +48,7 @@ Status: COMPLETE (3/3 plans complete)
 
 | Phase | Status | Progress |
 |-------|--------|----------|
-| 1. Mouse + Events | Complete | 100% (3/3) |
+| 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Not Started | 0% |
 | 3. Input Component | Not Started | 0% |
 | 4. Scroll System | Not Started | 0% |
@@ -66,10 +68,20 @@ Status: COMPLETE (3/3 plans complete)
 | meta-key-false | Meta key always false in convert_modifiers | crossterm doesn't expose meta key state | 2026-01-22 |
 | rc-callbacks | Use Rc<dyn Fn> instead of Box<dyn Fn> for MouseHandlers | Allows cloning callbacks into closures (e.g., click-to-focus) | 2026-01-22 |
 | click-to-focus-wrap | Wrap user on_click with focus::focus() for focusable boxes | Automatic focus on click matches expected behavior | 2026-01-22 |
+| global-keys-on | Use keyboard::on() for global handlers to access modifiers | on_key() doesn't expose modifier state needed for Ctrl+C, Shift+Tab | 2026-01-22 |
+| tick-60fps | 16ms poll timeout for ~60fps event loop | Balance responsiveness with CPU usage | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 01-04 Execution
+- Created src/state/global_keys.rs with GlobalKeysHandle
+- setup_global_keys() for Ctrl+C, Tab, Shift+Tab handlers
+- Integrated event loop into mount.rs (tick/run functions)
+- Mouse capture enabled on mount, disabled on unmount
+- 5 new tests for global keys
+- All 159 tests pass
 
 ### 2026-01-22 — Plan 01-03 Execution
 - Updated src/primitives/types.rs with callback type aliases
@@ -113,8 +125,8 @@ Status: COMPLETE (3/3 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 13:38 UTC
-Stopped at: Completed Phase 1 (all 3 plans)
+Last session: 2026-01-22 13:44 UTC
+Stopped at: Completed Phase 1 (all 4 plans)
 Resume file: None - Phase 1 complete, ready for Phase 2
 
 ---
@@ -131,7 +143,7 @@ None currently.
 - Spec files at `crates/tui/docs/specs/` are comprehensive
 - spark-signals (crates/signals/) is complete and production-ready
 - TDD approach: write tests first
-- Phase 1 complete! Mouse system is fully wired up.
+- Phase 1 complete! Mouse system and event wiring fully integrated.
 
 ---
 
