@@ -28,7 +28,13 @@
 
 **Dependencies:** None (builds on existing infrastructure)
 
-**Estimated Complexity:** Medium
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md - Mouse module foundation (types, HitGrid, registry, dispatch)
+- [ ] 01-02-PLAN.md - Input integration (crossterm event conversion)
+- [ ] 01-03-PLAN.md - Component wiring (BoxProps/TextProps callbacks)
+- [ ] 01-04-PLAN.md - Event loop integration (mount, global keys)
 
 ---
 
@@ -47,7 +53,7 @@
 
 **Dependencies:** None (can parallel with Phase 1)
 
-**Estimated Complexity:** Medium
+**Plans:** 0 plans
 
 ---
 
@@ -67,9 +73,9 @@
 
 **Dependencies:**
 - Phase 1 (click-to-focus)
-- Phase 5 (cursor rendering) — partial, can start without blink
+- Phase 5 (cursor rendering) - partial, can start without blink
 
-**Estimated Complexity:** High
+**Plans:** 0 plans
 
 ---
 
@@ -90,7 +96,7 @@
 **Dependencies:**
 - Phase 1 (mouse wheel events)
 
-**Estimated Complexity:** Medium-High
+**Plans:** 0 plans
 
 ---
 
@@ -109,7 +115,7 @@
 **Dependencies:**
 - Phase 3 (Input needs cursor)
 
-**Estimated Complexity:** Low-Medium
+**Plans:** 0 plans
 
 ---
 
@@ -126,7 +132,7 @@
 
 **Dependencies:** None (orthogonal to other phases)
 
-**Estimated Complexity:** Medium
+**Plans:** 0 plans
 
 ---
 
@@ -135,9 +141,9 @@
 **Recommended sequence:**
 
 ```
-Phase 1: Mouse + Events ─────┐
-                             ├──> Phase 3: Input ──> Phase 5: Cursor
-Phase 2: Theme ──────────────┘         │
+Phase 1: Mouse + Events -----+
+                             +---> Phase 3: Input --> Phase 5: Cursor
+Phase 2: Theme --------------+         |
                                        v
                               Phase 4: Scroll
 
