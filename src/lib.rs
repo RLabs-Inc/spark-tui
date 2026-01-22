@@ -81,7 +81,13 @@ pub use state::{
 };
 
 pub use theme::{
-    Theme, ThemeColor, get_preset, preset_names,
+    // Types
+    Theme, ThemeColor, ReactiveTheme, ThemeAccessor,
+    // Presets
+    get_preset, preset_names,
     terminal, dracula, nord, monokai, solarized, catppuccin, gruvbox,
     tokyo_night, one_dark, rose_pine, kanagawa, everforest, night_owl,
+    // Reactive state
+    t, active_theme, get_reactive_theme, set_theme, set_custom_theme,
+    reset_theme_state, reset_accessor,
 };
