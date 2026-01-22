@@ -4,6 +4,7 @@
 //! Props support static values, signals, and getters for reactivity.
 
 use std::rc::Rc;
+use std::cell::RefCell;
 use spark_signals::Signal;
 
 use crate::types::{Rgba, Dimension, Attr, BorderStyle, TextAlign, TextWrap, CursorStyle};
@@ -532,6 +533,148 @@ impl Default for TextProps {
 }
 
 // =============================================================================
+// Input History
+// =============================================================================
+
+/// Input history state for Up/Down arrow navigation.
+///
+/// Provides command-line style history where Up recalls previous entries
+/// and Down moves forward through history.
+///
+/// # Example
+///
+/// ```ignore
+/// use spark_tui::primitives::InputHistory;
+/// use std::rc::Rc;
+/// use std::cell::RefCell;
+///
+/// // Create shared history
+/// let history = Rc::new(RefCell::new(InputHistory::default()));
+///
+/// // Use with input
+/// let props = InputProps {
+///     value: signal("".to_string()),
+///     history: Some(history.clone()),
+///     ..InputProps::new(signal("".to_string()))
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct InputHistory {
+    /// History entries (oldest first).
+    pub entries: Vec<String>,
+    /// Current position in history (-1 = not in history, editing new).
+    pub position: i32,
+    /// Maximum history entries to keep.
+    pub max_entries: usize,
+    /// Value being edited before entering history.
+    pub editing_value: Option<String>,
+}
+
+impl Default for InputHistory {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            position: -1,
+            max_entries: 100,
+            editing_value: None,
+        }
+    }
+}
+
+impl InputHistory {
+    /// Create a new history with the given entries.
+    pub fn new(entries: Vec<String>) -> Self {
+        Self {
+            entries,
+            position: -1,
+            max_entries: 100,
+            editing_value: None,
+        }
+    }
+
+    /// Create a new empty history for auto-tracking.
+    pub fn auto() -> Self {
+        Self::default()
+    }
+
+    /// Add an entry to history.
+    ///
+    /// - Skips duplicates of the most recent entry
+    /// - Skips empty entries
+    /// - Trims to max_entries if needed
+    pub fn push(&mut self, entry: String) {
+        // Don't add duplicates of the most recent entry
+        if self.entries.last().map(|s| s.as_str()) == Some(&entry) {
+            return;
+        }
+        // Don't add empty entries
+        if entry.is_empty() {
+            return;
+        }
+        self.entries.push(entry);
+        // Trim to max size
+        while self.entries.len() > self.max_entries {
+            self.entries.remove(0);
+        }
+        // Reset position
+        self.position = -1;
+        self.editing_value = None;
+    }
+
+    /// Move up in history (older).
+    ///
+    /// Returns the entry to display, or None if at boundary.
+    /// On first call, saves the current editing value.
+    pub fn up(&mut self, current_value: &str) -> Option<&str> {
+        if self.entries.is_empty() {
+            return None;
+        }
+
+        if self.position == -1 {
+            // Save current editing value
+            self.editing_value = Some(current_value.to_string());
+            self.position = self.entries.len() as i32 - 1;
+            Some(&self.entries[self.position as usize])
+        } else if self.position > 0 {
+            self.position -= 1;
+            Some(&self.entries[self.position as usize])
+        } else {
+            None // At oldest entry
+        }
+    }
+
+    /// Move down in history (newer).
+    ///
+    /// Returns the entry to display, or None if not in history.
+    /// When reaching the end, returns the original editing value.
+    pub fn down(&mut self) -> Option<String> {
+        if self.position == -1 {
+            return None; // Not in history
+        }
+
+        if self.position < self.entries.len() as i32 - 1 {
+            self.position += 1;
+            Some(self.entries[self.position as usize].clone())
+        } else {
+            // Return to editing
+            self.position = -1;
+            self.editing_value.take()
+        }
+    }
+
+    /// Reset history position (called when value changes during editing).
+    pub fn reset_position(&mut self) {
+        self.position = -1;
+        self.editing_value = None;
+    }
+
+    /// Check if currently browsing history.
+    pub fn is_browsing(&self) -> bool {
+        self.position >= 0
+    }
+}
+
+// =============================================================================
 // Input Props
 // =============================================================================
 
@@ -637,6 +780,13 @@ pub struct InputProps {
 
     /// Auto-focus on mount.
     pub auto_focus: bool,
+
+    /// Input history for Up/Down arrow navigation.
+    ///
+    /// When provided, Up arrow recalls previous history entries
+    /// and Down arrow moves forward through history.
+    /// Submit (Enter) automatically adds to history.
+    pub history: Option<Rc<RefCell<InputHistory>>>,
 
     // =========================================================================
     // Cursor
@@ -807,6 +957,7 @@ impl InputProps {
             password: false,
             mask_char: None,
             auto_focus: false,
+            history: None,
             cursor: None,
             visible: None,
             width: None,
