@@ -141,6 +141,8 @@ impl DiffRenderer {
 
     /// Enter fullscreen mode (alternate screen buffer).
     pub fn enter_fullscreen(&mut self) -> io::Result<()> {
+        // Enable raw mode FIRST - prevents input echo
+        crossterm::terminal::enable_raw_mode()?;
         ansi::enter_alt_screen(&mut self.output)?;
         ansi::cursor_hide(&mut self.output)?;
         ansi::clear_screen(&mut self.output)?;
@@ -155,6 +157,8 @@ impl DiffRenderer {
         ansi::cursor_show(&mut self.output)?;
         ansi::exit_alt_screen(&mut self.output)?;
         self.output.flush_stdout()?;
+        // Disable raw mode LAST - restore terminal
+        crossterm::terminal::disable_raw_mode()?;
         Ok(())
     }
 

@@ -47,10 +47,12 @@ use super::terminal::{RenderMode, render_mode, detect_terminal_size};
 /// - The render effect stop function
 /// - The running flag (set to false on Ctrl+C or unmount)
 /// - The global keys handle (for cleanup)
+/// - The render mode (for conditional cleanup)
 pub struct MountHandle {
     stop_effect: Option<Box<dyn FnOnce()>>,
     running: Arc<AtomicBool>,
     global_keys: Option<global_keys::GlobalKeysHandle>,
+    mode: RenderMode,
 }
 
 impl MountHandle {
@@ -59,8 +61,9 @@ impl MountHandle {
     /// This will:
     /// 1. Set running to false
     /// 2. Clean up global key handlers
-    /// 3. Disable mouse capture
-    /// 4. Stop the render effect
+    /// 3. Disable mouse capture (fullscreen only)
+    /// 4. Restore terminal state (fullscreen only: raw mode, alternate screen)
+    /// 5. Stop the render effect
     pub fn unmount(mut self) {
         self.running.store(false, Ordering::SeqCst);
 
@@ -69,8 +72,19 @@ impl MountHandle {
             handle.cleanup();
         }
 
-        // Disable mouse capture
-        let _ = input::disable_mouse();
+        // Fullscreen mode needs extra cleanup
+        if self.mode == RenderMode::Fullscreen {
+            // Disable mouse capture
+            let _ = input::disable_mouse();
+
+            // Restore terminal state
+            let _ = crossterm::terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::LeaveAlternateScreen,
+                crossterm::cursor::Show
+            );
+        }
 
         // Stop render effect
         if let Some(stop) = self.stop_effect.take() {
@@ -92,8 +106,19 @@ impl MountHandle {
 
 impl Drop for MountHandle {
     fn drop(&mut self) {
-        // Disable mouse on drop (best effort)
-        let _ = input::disable_mouse();
+        // Fullscreen mode needs extra cleanup
+        if self.mode == RenderMode::Fullscreen {
+            // Disable mouse on drop (best effort)
+            let _ = input::disable_mouse();
+
+            // Restore terminal state (best effort)
+            let _ = crossterm::terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::LeaveAlternateScreen,
+                crossterm::cursor::Show
+            );
+        }
 
         if let Some(stop) = self.stop_effect.take() {
             stop();
@@ -268,8 +293,11 @@ pub fn mount() -> io::Result<MountHandle> {
         }
     };
 
-    // Enable mouse capture
-    input::enable_mouse()?;
+    // Enable mouse capture only for fullscreen mode
+    // Inline/append modes need native terminal scrollback
+    if mode == RenderMode::Fullscreen {
+        input::enable_mouse()?;
+    }
 
     // Set up global key handlers (Ctrl+C, Tab, Shift+Tab)
     let global_keys_handle = global_keys::setup_global_keys(running.clone());
@@ -278,6 +306,7 @@ pub fn mount() -> io::Result<MountHandle> {
         stop_effect: Some(stop),
         running,
         global_keys: Some(global_keys_handle),
+        mode,
     })
 }
 
