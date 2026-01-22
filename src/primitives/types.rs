@@ -475,6 +475,13 @@ pub struct TextProps {
 
     /// Opacity (0-255, 255 = fully opaque).
     pub opacity: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Event Callbacks
+    // =========================================================================
+
+    /// Click callback for clickable text.
+    pub on_click: Option<MouseCallback>,
 }
 
 impl Default for TextProps {
@@ -504,6 +511,7 @@ impl Default for TextProps {
             fg: None,
             bg: None,
             opacity: None,
+            on_click: None,
         }
     }
 }

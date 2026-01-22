@@ -37,6 +37,7 @@ use crate::engine::{
     get_current_parent_index,
 };
 use crate::engine::arrays::{core, visual, text as text_arrays};
+use crate::state::mouse;
 use crate::types::ComponentType;
 use super::types::{TextProps, PropValue, Cleanup};
 
@@ -276,8 +277,31 @@ pub fn text(props: TextProps) -> Cleanup {
         }
     }
 
-    // 9. RETURN CLEANUP
+    // 9. REGISTER MOUSE HANDLER (if on_click provided)
+    let mut mouse_cleanup: Option<Box<dyn FnOnce()>> = None;
+
+    if let Some(on_click) = props.on_click.clone() {
+        let handlers = mouse::MouseHandlers {
+            on_mouse_down: None,
+            on_mouse_up: None,
+            on_click: Some(on_click),
+            on_mouse_enter: None,
+            on_mouse_leave: None,
+            on_scroll: None,
+        };
+        let cleanup_fn = mouse::on_component(index, handlers);
+        mouse_cleanup = Some(Box::new(cleanup_fn));
+    }
+
+    // 10. RETURN CLEANUP
     Box::new(move || {
+        // Clean up mouse handler
+        if let Some(cleanup) = mouse_cleanup {
+            cleanup();
+        }
+        // Clean up component state in mouse module
+        mouse::cleanup_index(index);
+        // Release index
         release_index(index);
     })
 }
