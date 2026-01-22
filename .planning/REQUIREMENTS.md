@@ -38,11 +38,13 @@ Complete port of TypeScript TUI framework to Rust with identical ergonomics and 
 - Connect onKey callbacks to focused component
 - Global key handlers (Ctrl+C at mount level)
 
+**Status:** COMPLETE (2026-01-22)
+
 **Success Criteria:**
-- [ ] Click on Box fires onClick callback
-- [ ] Hover over Box fires onMouseEnter/Leave
-- [ ] Mouse wheel on scrollable Box fires onScroll
-- [ ] Keyboard input reaches focused component's onKey
+- [x] Click on Box fires onClick callback
+- [x] Hover over Box fires onMouseEnter/Leave
+- [x] Mouse wheel on scrollable Box fires onScroll
+- [x] Keyboard input reaches focused component's onKey
 
 ---
 

@@ -28,13 +28,15 @@
 
 **Dependencies:** None (builds on existing infrastructure)
 
-**Plans:** 4 plans
+**Plans:** 4 plans ✓
+
+**Status:** COMPLETE (2026-01-22)
 
 Plans:
-- [ ] 01-01-PLAN.md - Mouse module foundation (types, HitGrid, registry, dispatch)
-- [ ] 01-02-PLAN.md - Input integration (crossterm event conversion)
-- [ ] 01-03-PLAN.md - Component wiring (BoxProps/TextProps callbacks)
-- [ ] 01-04-PLAN.md - Event loop integration (mount, global keys)
+- [x] 01-01-PLAN.md - Mouse module foundation (types, HitGrid, registry, dispatch)
+- [x] 01-02-PLAN.md - Input integration (crossterm event conversion)
+- [x] 01-03-PLAN.md - Component wiring (BoxProps/TextProps callbacks)
+- [x] 01-04-PLAN.md - Event loop integration (mount, global keys)
 
 ---
 
