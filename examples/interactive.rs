@@ -9,14 +9,14 @@
 //!
 //! Run with: cargo run -p spark-tui --example interactive
 
-use std::rc::Rc;
 use spark_signals::signal;
 use spark_tui::{
-    box_primitive, text, BoxProps, TextProps, PropValue,
-    Dimension, BorderStyle, Attr,
-    reset_registry, mount, unmount,
-    theme::{t, set_theme},
+    Attr, BorderStyle, BoxProps, Dimension, PropValue, TextProps, box_primitive, mount,
+    reset_registry, text,
+    theme::{set_theme, t},
+    unmount,
 };
+use std::rc::Rc;
 
 fn main() {
     reset_registry();
@@ -32,8 +32,7 @@ fn main() {
     // Create UI
     let _cleanup = box_primitive(BoxProps {
         id: Some("root".to_string()),
-        width: Some(PropValue::Static(Dimension::Cells(50))),
-        height: Some(PropValue::Static(Dimension::Cells(12))),
+        width: Some(PropValue::Static(Dimension::Percent(100.00))),
         border: Some(PropValue::Static(BorderStyle::Rounded)),
         border_color: Some(PropValue::Getter(Rc::new({
             let theme = theme.clone();
@@ -45,9 +44,9 @@ fn main() {
         }))),
         padding: Some(PropValue::Static(1)),
         gap: Some(PropValue::Static(1)),
+        align_items: Some(PropValue::Static(2)), // center
         children: Some(Box::new(move || {
             // Title
-            let theme = t();
             text(TextProps {
                 content: PropValue::Static("spark-tui Demo".to_string()),
                 attrs: Some(PropValue::Static(Attr::BOLD)),
@@ -59,7 +58,7 @@ fn main() {
             });
 
             // Counter text
-            let theme = t();
+
             text(TextProps {
                 content: PropValue::Getter(Rc::new({
                     let counter = counter_for_text.clone();
@@ -73,46 +72,43 @@ fn main() {
             });
 
             // Clickable box
-            let theme = t();
+
             box_primitive(BoxProps {
                 id: Some("click_box".to_string()),
-                width: Some(PropValue::Static(Dimension::Cells(20))),
-                height: Some(PropValue::Static(Dimension::Cells(3))),
+                width: Some(PropValue::Static(Dimension::Cells(21))),
+                // height: Some(PropValue::Static(Dimension::Cells(5))),
+                align_items: Some(PropValue::Static(2)), // center
                 border: Some(PropValue::Static(BorderStyle::Single)),
                 border_color: Some(PropValue::Getter(Rc::new({
                     let theme = theme.clone();
-                    move || theme.accent()
+                    move || theme.info()
                 }))),
-                justify_content: Some(PropValue::Static(1)), // center
-                align_items: Some(PropValue::Static(2)), // center
-                focusable: Some(true),
                 on_click: Some(Rc::new({
                     let counter = counter_for_click.clone();
                     move |_event| {
                         counter.set(counter.get() + 1);
                     }
                 })),
-                children: Some(Box::new({
-                    let theme = t();
-                    move || {
-                        text(TextProps {
-                            content: PropValue::Static("Click me!".to_string()),
-                            fg: Some(PropValue::Getter(Rc::new({
-                                let theme = theme.clone();
-                                move || theme.accent()
-                            }))),
-                            ..Default::default()
-                        });
-                    }
+
+                children: Some(Box::new(move || {
+                    text(TextProps {
+                        content: PropValue::Static("Click me!".to_string()),
+                        fg: Some(PropValue::Getter(Rc::new({
+                            let theme = t();
+                            let theme = theme.clone();
+                            move || theme.text()
+                        }))),
+                        ..Default::default()
+                    });
                 })),
                 ..Default::default()
             });
 
             // Instructions
-            let theme = t();
             text(TextProps {
                 content: PropValue::Static("Press 'd' for Dracula, 't' for Terminal".to_string()),
                 fg: Some(PropValue::Getter(Rc::new({
+                    let theme = t();
                     let theme = theme.clone();
                     move || theme.text_muted()
                 }))),
@@ -123,6 +119,7 @@ fn main() {
                 content: PropValue::Static("Press Ctrl+C to exit".to_string()),
                 fg: Some(PropValue::Getter(Rc::new({
                     let theme = t();
+                    let theme = theme.clone();
                     move || theme.text_muted()
                 }))),
                 ..Default::default()
