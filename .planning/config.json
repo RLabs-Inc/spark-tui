@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "spark-tui",
+    "type": "brownfield",
+    "initialized": "2026-01-22"
+  },
+  "workflow": {
+    "research_before_planning": true,
+    "verify_after_execution": true,
+    "atomic_commits": true
+  },
+  "model_profile": "quality"
+}

@@ -1,0 +1,17 @@
+[package]
+name = "spark-tui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Reactive Terminal UI Framework for Rust"
+repository = "https://github.com/RLabs-Inc/spark-tui"
+keywords = ["tui", "terminal", "ui", "reactive", "signals"]
+categories = ["command-line-interface", "gui"]
+
+[dependencies]
+spark-signals = { path = "../signals" }
+bitflags = "2.9"
+taffy = "0.7"
+crossterm = "0.28"
+
+[dev-dependencies]

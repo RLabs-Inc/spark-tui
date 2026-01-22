@@ -1,0 +1,459 @@
+//! Primitive types - Props and cleanup.
+//!
+//! These types define the interface for component props.
+//! Props support static values, signals, and getters for reactivity.
+
+use std::rc::Rc;
+use spark_signals::Signal;
+
+use crate::types::{Rgba, Dimension, Attr, BorderStyle, TextAlign, TextWrap};
+
+// =============================================================================
+// Cleanup Function
+// =============================================================================
+
+/// Cleanup function returned by components.
+///
+/// Call this to unmount the component and release resources.
+pub type Cleanup = Box<dyn FnOnce()>;
+
+// =============================================================================
+// Prop Value - Reactive property wrapper
+// =============================================================================
+
+/// A property value that can be static, a signal, or a getter.
+///
+/// This enables reactive props while maintaining type safety.
+/// When binding to FlexNode slots or arrays, the reactive connection is preserved.
+#[derive(Clone)]
+pub enum PropValue<T: Clone + PartialEq + 'static> {
+    /// Static value (not reactive).
+    Static(T),
+    /// Reactive signal (changes propagate automatically).
+    Signal(Signal<T>),
+    /// Getter function (called each time value is needed).
+    Getter(Rc<dyn Fn() -> T>),
+}
+
+impl<T: Clone + PartialEq + 'static> PropValue<T> {
+    /// Get the current value (for immediate reads).
+    pub fn get(&self) -> T {
+        match self {
+            PropValue::Static(v) => v.clone(),
+            PropValue::Signal(s) => s.get(),
+            PropValue::Getter(f) => f(),
+        }
+    }
+}
+
+impl<T: Clone + PartialEq + Default + 'static> Default for PropValue<T> {
+    fn default() -> Self {
+        PropValue::Static(T::default())
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> From<T> for PropValue<T> {
+    fn from(value: T) -> Self {
+        PropValue::Static(value)
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> From<Signal<T>> for PropValue<T> {
+    fn from(signal: Signal<T>) -> Self {
+        PropValue::Signal(signal)
+    }
+}
+
+// Dimension is PartialEq so these work
+impl From<u16> for PropValue<Dimension> {
+    fn from(value: u16) -> Self {
+        PropValue::Static(Dimension::from(value))
+    }
+}
+
+impl From<i32> for PropValue<Dimension> {
+    fn from(value: i32) -> Self {
+        PropValue::Static(Dimension::from(value))
+    }
+}
+
+// =============================================================================
+// Box Props
+// =============================================================================
+
+/// Properties for the Box component.
+///
+/// Box is the fundamental container - it can have children, borders,
+/// backgrounds, and handles events.
+///
+/// # Example
+///
+/// ```ignore
+/// use spark_tui::primitives::{box_primitive, BoxProps};
+/// use spark_signals::signal;
+///
+/// let width_signal = signal(Dimension::Cells(50));
+///
+/// let cleanup = box_primitive(BoxProps {
+///     width: Some(width_signal.into()),
+///     height: Some(10.into()),
+///     border: Some(BorderStyle::Single.into()),
+///     children: Some(Box::new(|| {
+///         // Child components here
+///     })),
+///     ..Default::default()
+/// });
+///
+/// // Later: update width reactively
+/// width_signal.set(Dimension::Cells(80));
+/// ```
+#[derive(Default)]
+pub struct BoxProps {
+    // =========================================================================
+    // Identity
+    // =========================================================================
+
+    /// Optional component ID for lookup.
+    pub id: Option<String>,
+
+    // =========================================================================
+    // Visibility
+    // =========================================================================
+
+    /// Whether the component is visible (default: true).
+    pub visible: Option<PropValue<bool>>,
+
+    // =========================================================================
+    // Layout - Container
+    // =========================================================================
+
+    /// Flex direction: column (default), row, column-reverse, row-reverse.
+    pub flex_direction: Option<PropValue<u8>>,
+
+    /// Flex wrap: nowrap (default), wrap, wrap-reverse.
+    pub flex_wrap: Option<PropValue<u8>>,
+
+    /// Justify content: flex-start (default), center, flex-end, space-between, space-around, space-evenly.
+    pub justify_content: Option<PropValue<u8>>,
+
+    /// Align items: stretch (default), flex-start, center, flex-end, baseline.
+    pub align_items: Option<PropValue<u8>>,
+
+    /// Align content (multi-line): stretch (default), flex-start, center, flex-end, space-between, space-around.
+    pub align_content: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Layout - Item
+    // =========================================================================
+
+    /// Flex grow factor (default: 0).
+    pub grow: Option<PropValue<f32>>,
+
+    /// Flex shrink factor (default: 1).
+    pub shrink: Option<PropValue<f32>>,
+
+    /// Flex basis (default: auto).
+    pub flex_basis: Option<PropValue<Dimension>>,
+
+    /// Align self override (default: auto).
+    pub align_self: Option<PropValue<u8>>,
+
+    /// Order for reordering flex items (default: 0).
+    pub order: Option<PropValue<i32>>,
+
+    // =========================================================================
+    // Dimensions
+    // =========================================================================
+
+    /// Width.
+    pub width: Option<PropValue<Dimension>>,
+
+    /// Height.
+    pub height: Option<PropValue<Dimension>>,
+
+    /// Minimum width.
+    pub min_width: Option<PropValue<Dimension>>,
+
+    /// Maximum width.
+    pub max_width: Option<PropValue<Dimension>>,
+
+    /// Minimum height.
+    pub min_height: Option<PropValue<Dimension>>,
+
+    /// Maximum height.
+    pub max_height: Option<PropValue<Dimension>>,
+
+    // =========================================================================
+    // Spacing
+    // =========================================================================
+
+    /// Margin (all sides).
+    pub margin: Option<PropValue<u16>>,
+
+    /// Margin top.
+    pub margin_top: Option<PropValue<u16>>,
+
+    /// Margin right.
+    pub margin_right: Option<PropValue<u16>>,
+
+    /// Margin bottom.
+    pub margin_bottom: Option<PropValue<u16>>,
+
+    /// Margin left.
+    pub margin_left: Option<PropValue<u16>>,
+
+    /// Padding (all sides).
+    pub padding: Option<PropValue<u16>>,
+
+    /// Padding top.
+    pub padding_top: Option<PropValue<u16>>,
+
+    /// Padding right.
+    pub padding_right: Option<PropValue<u16>>,
+
+    /// Padding bottom.
+    pub padding_bottom: Option<PropValue<u16>>,
+
+    /// Padding left.
+    pub padding_left: Option<PropValue<u16>>,
+
+    /// Gap between children (both row and column).
+    pub gap: Option<PropValue<u16>>,
+
+    /// Row gap (overrides gap for row spacing).
+    pub row_gap: Option<PropValue<u16>>,
+
+    /// Column gap (overrides gap for column spacing).
+    pub column_gap: Option<PropValue<u16>>,
+
+    // =========================================================================
+    // Position
+    // =========================================================================
+
+    /// Position: relative (default) or absolute.
+    pub position: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Border
+    // =========================================================================
+
+    /// Border style (all sides).
+    pub border: Option<PropValue<BorderStyle>>,
+
+    /// Border top style.
+    pub border_top: Option<PropValue<BorderStyle>>,
+
+    /// Border right style.
+    pub border_right: Option<PropValue<BorderStyle>>,
+
+    /// Border bottom style.
+    pub border_bottom: Option<PropValue<BorderStyle>>,
+
+    /// Border left style.
+    pub border_left: Option<PropValue<BorderStyle>>,
+
+    /// Border color.
+    pub border_color: Option<PropValue<Rgba>>,
+
+    // =========================================================================
+    // Visual
+    // =========================================================================
+
+    /// Foreground color (for text content).
+    pub fg: Option<PropValue<Rgba>>,
+
+    /// Background color.
+    pub bg: Option<PropValue<Rgba>>,
+
+    /// Opacity (0-255, 255 = fully opaque).
+    pub opacity: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Interaction
+    // =========================================================================
+
+    /// Whether the component can receive focus.
+    pub focusable: Option<bool>,
+
+    /// Tab index for focus navigation.
+    pub tab_index: Option<i32>,
+
+    /// Z-index for stacking order.
+    pub z_index: Option<PropValue<i32>>,
+
+    // =========================================================================
+    // Overflow
+    // =========================================================================
+
+    /// Overflow behavior: visible (default), hidden, scroll, auto.
+    pub overflow: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Children
+    // =========================================================================
+
+    /// Child render function.
+    pub children: Option<Box<dyn FnOnce()>>,
+}
+
+// =============================================================================
+// Text Props
+// =============================================================================
+
+/// Properties for the Text component.
+///
+/// Text is a pure display component for text content. Cannot have children.
+///
+/// # Example
+///
+/// ```ignore
+/// use spark_tui::primitives::{text, TextProps};
+/// use spark_signals::signal;
+///
+/// let message = signal("Hello!".to_string());
+///
+/// let cleanup = text(TextProps {
+///     content: message.into(),
+///     attrs: Some(Attr::BOLD.into()),
+///     ..Default::default()
+/// });
+///
+/// // Later: update text reactively
+/// message.set("Updated!".to_string());
+/// ```
+pub struct TextProps {
+    // =========================================================================
+    // Identity
+    // =========================================================================
+
+    /// Optional component ID for lookup.
+    pub id: Option<String>,
+
+    // =========================================================================
+    // Content - REQUIRED
+    // =========================================================================
+
+    /// The text content to display.
+    pub content: PropValue<String>,
+
+    // =========================================================================
+    // Visibility
+    // =========================================================================
+
+    /// Whether the component is visible (default: true).
+    pub visible: Option<PropValue<bool>>,
+
+    // =========================================================================
+    // Text Styling
+    // =========================================================================
+
+    /// Text attributes (bold, italic, etc.).
+    pub attrs: Option<PropValue<Attr>>,
+
+    /// Text alignment.
+    pub align: Option<PropValue<TextAlign>>,
+
+    /// Text wrap mode.
+    pub wrap: Option<PropValue<TextWrap>>,
+
+    // =========================================================================
+    // Layout - Item
+    // =========================================================================
+
+    /// Flex grow factor (default: 0).
+    pub grow: Option<PropValue<f32>>,
+
+    /// Flex shrink factor (default: 1).
+    pub shrink: Option<PropValue<f32>>,
+
+    /// Flex basis (default: auto).
+    pub flex_basis: Option<PropValue<Dimension>>,
+
+    /// Align self override (default: auto).
+    pub align_self: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Dimensions
+    // =========================================================================
+
+    /// Width.
+    pub width: Option<PropValue<Dimension>>,
+
+    /// Height.
+    pub height: Option<PropValue<Dimension>>,
+
+    /// Minimum width.
+    pub min_width: Option<PropValue<Dimension>>,
+
+    /// Maximum width.
+    pub max_width: Option<PropValue<Dimension>>,
+
+    /// Minimum height.
+    pub min_height: Option<PropValue<Dimension>>,
+
+    /// Maximum height.
+    pub max_height: Option<PropValue<Dimension>>,
+
+    // =========================================================================
+    // Spacing
+    // =========================================================================
+
+    /// Padding (all sides).
+    pub padding: Option<PropValue<u16>>,
+
+    /// Padding top.
+    pub padding_top: Option<PropValue<u16>>,
+
+    /// Padding right.
+    pub padding_right: Option<PropValue<u16>>,
+
+    /// Padding bottom.
+    pub padding_bottom: Option<PropValue<u16>>,
+
+    /// Padding left.
+    pub padding_left: Option<PropValue<u16>>,
+
+    // =========================================================================
+    // Visual
+    // =========================================================================
+
+    /// Foreground color.
+    pub fg: Option<PropValue<Rgba>>,
+
+    /// Background color.
+    pub bg: Option<PropValue<Rgba>>,
+
+    /// Opacity (0-255, 255 = fully opaque).
+    pub opacity: Option<PropValue<u8>>,
+}
+
+impl Default for TextProps {
+    fn default() -> Self {
+        Self {
+            id: None,
+            content: PropValue::Static(String::new()),
+            visible: None,
+            attrs: None,
+            align: None,
+            wrap: None,
+            grow: None,
+            shrink: None,
+            flex_basis: None,
+            align_self: None,
+            width: None,
+            height: None,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
+            padding: None,
+            padding_top: None,
+            padding_right: None,
+            padding_bottom: None,
+            padding_left: None,
+            fg: None,
+            bg: None,
+            opacity: None,
+        }
+    }
+}
