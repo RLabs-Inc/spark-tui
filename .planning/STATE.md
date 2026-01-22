@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 **Phase:** 4 of 6 (Scroll System)
-**Plan:** 1 of 4 complete
+**Plan:** 2 of 4 complete
 **Status:** In progress
 
-Last activity: 2026-01-22 - Completed 04-01-PLAN.md
+Last activity: 2026-01-22 - Completed 04-02-PLAN.md
 
-Progress: [#############---] 81% (13/16 total plans)
+Progress: [##############--] 87% (14/16 total plans)
 
 ---
 
@@ -25,17 +25,17 @@ Progress: [#############---] 81% (13/16 total plans)
 
 **Phase 4: Scroll System**
 
-Status: IN PROGRESS (1/4 plans complete)
+Status: IN PROGRESS (2/4 plans complete)
 
 ### Requirements Progress
 - [x] R4.1: Scroll module core (04-01)
-- [ ] R4.2: Keyboard scroll handlers (04-02)
+- [x] R4.2: Keyboard scroll handlers (04-02)
 - [ ] R4.3: Mouse wheel scroll handlers (04-03)
 - [ ] R4.4: scrollIntoView (04-04)
 
 ### Plans
 - [x] 04-01: Scroll core module
-- [ ] 04-02: Keyboard handlers
+- [x] 04-02: Keyboard handlers
 - [ ] 04-03: Mouse handlers
 - [ ] 04-04: scrollIntoView
 
@@ -48,7 +48,7 @@ Status: IN PROGRESS (1/4 plans complete)
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
-| 4. Scroll System | In Progress | 25% (1/4) |
+| 4. Scroll System | In Progress | 50% (2/4) |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
 
@@ -87,10 +87,25 @@ Status: IN PROGRESS (1/4 plans complete)
 | history-skip-empty-duplicates | History push skips empty entries and consecutive duplicates | Cleaner history, matches shell behavior | 2026-01-22 |
 | scroll-offset-interaction-array | Scroll offset stored in interaction arrays | Renderer can access without prop drilling | 2026-01-22 |
 | layout-param | Pass &ComputedLayout as parameter to scroll functions | Rust functions can't access global derived like TypeScript | 2026-01-22 |
+| layout-accessor-pattern | Thread-local CURRENT_LAYOUT with set/with/clear functions | Keyboard handlers need layout access but can't receive it as parameter | 2026-01-22 |
+| keyboard-no-chaining | Keyboard scroll does NOT chain to parent | Would conflict with focus management; mouse wheel chains, keyboard doesn't | 2026-01-22 |
+| arrow-key-conditions | Arrow keys only scroll without Ctrl/Alt modifiers | Ctrl+Arrow used for word navigation in inputs | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 04-02 Execution
+- Added layout accessor pattern: set_current_layout, with_current_layout, clear_current_layout
+- Added keyboard scroll handlers: handle_arrow_scroll, handle_page_scroll, handle_home_end
+- Added get_focused_scrollable helper
+- Added handle_wheel_scroll for mouse wheel (with chaining)
+- Added scroll_into_view for focus visibility
+- Extended GlobalKeysHandle with scroll_cleanup
+- Wired keyboard scroll handlers into setup_global_keys()
+- Arrow keys, PageUp/Down, Ctrl+Home/End
+- 20 new tests (14 scroll + 6 global_keys)
+- All 352 tests pass
 
 ### 2026-01-22 — Plan 04-01 Execution
 - Created src/state/scroll.rs (409 lines)
@@ -228,9 +243,9 @@ Status: IN PROGRESS (1/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 22:34 UTC
-Stopped at: Completed 04-01-PLAN.md
-Resume file: None - continue with 04-02
+Last session: 2026-01-22 22:40 UTC
+Stopped at: Completed 04-02-PLAN.md
+Resume file: None - continue with 04-03
 
 ---
 
@@ -249,7 +264,7 @@ None currently.
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
-- Phase 4 in progress: 333 tests total.
+- Phase 4 in progress: 352 tests total.
 
 ---
 
