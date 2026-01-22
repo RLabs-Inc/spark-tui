@@ -1108,6 +1108,16 @@ pub enum TextWrap {
     Truncate = 2,
 }
 
+/// Cursor style for input components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum CursorStyle {
+    #[default]
+    Block = 0,
+    Bar = 1,
+    Underline = 2,
+}
+
 // =============================================================================
 // Render Mode
 // =============================================================================

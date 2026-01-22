@@ -6,7 +6,7 @@
 use std::rc::Rc;
 use spark_signals::Signal;
 
-use crate::types::{Rgba, Dimension, Attr, BorderStyle, TextAlign, TextWrap};
+use crate::types::{Rgba, Dimension, Attr, BorderStyle, TextAlign, TextWrap, CursorStyle};
 use crate::state::mouse::MouseEvent;
 use crate::state::keyboard::KeyboardEvent;
 
@@ -41,6 +41,21 @@ pub type MouseCallbackConsuming = Rc<dyn Fn(&MouseEvent) -> bool>;
 /// Return true to indicate the event was consumed and should not
 /// propagate to other handlers.
 pub type KeyCallback = Rc<dyn Fn(&KeyboardEvent) -> bool>;
+
+/// Input value change callback.
+pub type InputChangeCallback = Rc<dyn Fn(&str)>;
+
+/// Input submit callback (Enter key).
+pub type InputSubmitCallback = Rc<dyn Fn(&str)>;
+
+/// Input cancel callback (Escape key).
+pub type InputCancelCallback = Rc<dyn Fn()>;
+
+/// Focus callback (called when component gains focus).
+pub type FocusCallback = Rc<dyn Fn()>;
+
+/// Blur callback (called when component loses focus).
+pub type BlurCallback = Rc<dyn Fn()>;
 
 // =============================================================================
 // Prop Value - Reactive property wrapper
@@ -512,6 +527,325 @@ impl Default for TextProps {
             bg: None,
             opacity: None,
             on_click: None,
+        }
+    }
+}
+
+// =============================================================================
+// Input Props
+// =============================================================================
+
+/// Cursor blink configuration.
+#[derive(Debug, Clone)]
+pub struct BlinkConfig {
+    /// Enable blink (default: true).
+    pub enabled: bool,
+    /// Blink rate in FPS (default: 2 = 500ms cycle).
+    pub fps: u8,
+    /// Character to show on "off" phase (default: space).
+    pub alt_char: Option<char>,
+}
+
+impl Default for BlinkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            fps: 2,
+            alt_char: None,
+        }
+    }
+}
+
+/// Cursor configuration for Input component.
+#[derive(Clone, Default)]
+pub struct CursorConfig {
+    /// Cursor shape: Block, Bar, or Underline.
+    pub style: Option<CursorStyle>,
+    /// Custom cursor character (overrides style preset).
+    pub char: Option<char>,
+    /// Blink configuration.
+    pub blink: Option<BlinkConfig>,
+    /// Custom cursor foreground color.
+    pub fg: Option<PropValue<Rgba>>,
+    /// Custom cursor background color.
+    pub bg: Option<PropValue<Rgba>>,
+}
+
+/// Properties for the Input component.
+///
+/// Single-line text input with two-way value binding.
+///
+/// # Example
+///
+/// ```ignore
+/// use spark_tui::primitives::{input, InputProps};
+/// use spark_signals::signal;
+///
+/// let name = signal("".to_string());
+/// let name_clone = name.clone();
+///
+/// let cleanup = input(InputProps {
+///     value: name_clone,
+///     placeholder: Some("Enter your name...".to_string()),
+///     on_submit: Some(Rc::new(|val| println!("Submitted: {}", val))),
+///     ..Default::default()
+/// });
+///
+/// // Later: read or update the value
+/// name.set("Alice".to_string());
+/// ```
+pub struct InputProps {
+    // =========================================================================
+    // Identity
+    // =========================================================================
+
+    /// Optional component ID for lookup.
+    pub id: Option<String>,
+
+    // =========================================================================
+    // Value (Required)
+    // =========================================================================
+
+    /// Current value (two-way bound signal).
+    pub value: Signal<String>,
+
+    // =========================================================================
+    // Text Display
+    // =========================================================================
+
+    /// Placeholder text shown when value is empty.
+    pub placeholder: Option<String>,
+
+    /// Placeholder color (default: dimmed fg).
+    pub placeholder_color: Option<PropValue<Rgba>>,
+
+    /// Text attributes (bold, italic, etc.) - for the input value.
+    pub attrs: Option<PropValue<Attr>>,
+
+    // =========================================================================
+    // Input Behavior
+    // =========================================================================
+
+    /// Maximum input length (0 = unlimited).
+    pub max_length: Option<usize>,
+
+    /// Password mode - mask characters with mask_char.
+    pub password: bool,
+
+    /// Password mask character (default: '•').
+    pub mask_char: Option<char>,
+
+    /// Auto-focus on mount.
+    pub auto_focus: bool,
+
+    // =========================================================================
+    // Cursor
+    // =========================================================================
+
+    /// Cursor configuration (style, blink, colors).
+    pub cursor: Option<CursorConfig>,
+
+    // =========================================================================
+    // Visibility
+    // =========================================================================
+
+    /// Whether the component is visible (default: true).
+    pub visible: Option<PropValue<bool>>,
+
+    // =========================================================================
+    // Dimensions
+    // =========================================================================
+
+    /// Width.
+    pub width: Option<PropValue<Dimension>>,
+
+    /// Height.
+    pub height: Option<PropValue<Dimension>>,
+
+    /// Minimum width.
+    pub min_width: Option<PropValue<Dimension>>,
+
+    /// Maximum width.
+    pub max_width: Option<PropValue<Dimension>>,
+
+    /// Minimum height.
+    pub min_height: Option<PropValue<Dimension>>,
+
+    /// Maximum height.
+    pub max_height: Option<PropValue<Dimension>>,
+
+    // =========================================================================
+    // Spacing
+    // =========================================================================
+
+    /// Padding (all sides).
+    pub padding: Option<PropValue<u16>>,
+
+    /// Padding top.
+    pub padding_top: Option<PropValue<u16>>,
+
+    /// Padding right.
+    pub padding_right: Option<PropValue<u16>>,
+
+    /// Padding bottom.
+    pub padding_bottom: Option<PropValue<u16>>,
+
+    /// Padding left.
+    pub padding_left: Option<PropValue<u16>>,
+
+    /// Margin (all sides).
+    pub margin: Option<PropValue<u16>>,
+
+    /// Margin top.
+    pub margin_top: Option<PropValue<u16>>,
+
+    /// Margin right.
+    pub margin_right: Option<PropValue<u16>>,
+
+    /// Margin bottom.
+    pub margin_bottom: Option<PropValue<u16>>,
+
+    /// Margin left.
+    pub margin_left: Option<PropValue<u16>>,
+
+    // =========================================================================
+    // Border
+    // =========================================================================
+
+    /// Border style (all sides).
+    pub border: Option<PropValue<BorderStyle>>,
+
+    /// Border top style.
+    pub border_top: Option<PropValue<BorderStyle>>,
+
+    /// Border right style.
+    pub border_right: Option<PropValue<BorderStyle>>,
+
+    /// Border bottom style.
+    pub border_bottom: Option<PropValue<BorderStyle>>,
+
+    /// Border left style.
+    pub border_left: Option<PropValue<BorderStyle>>,
+
+    /// Border color.
+    pub border_color: Option<PropValue<Rgba>>,
+
+    // =========================================================================
+    // Visual
+    // =========================================================================
+
+    /// Foreground color (for text).
+    pub fg: Option<PropValue<Rgba>>,
+
+    /// Background color.
+    pub bg: Option<PropValue<Rgba>>,
+
+    /// Opacity (0-255, 255 = fully opaque).
+    pub opacity: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Interaction
+    // =========================================================================
+
+    /// Tab index for focus navigation (default: 0).
+    pub tab_index: Option<i32>,
+
+    // =========================================================================
+    // Event Callbacks
+    // =========================================================================
+
+    /// Called when value changes (on every keystroke).
+    pub on_change: Option<InputChangeCallback>,
+
+    /// Called on Enter key.
+    pub on_submit: Option<InputSubmitCallback>,
+
+    /// Called on Escape key.
+    pub on_cancel: Option<InputCancelCallback>,
+
+    /// Called when component gains focus.
+    pub on_focus: Option<FocusCallback>,
+
+    /// Called when component loses focus.
+    pub on_blur: Option<BlurCallback>,
+
+    // =========================================================================
+    // Mouse Callbacks
+    // =========================================================================
+
+    /// Click callback (fires on mouse up if down was on same component).
+    pub on_click: Option<MouseCallback>,
+
+    /// Mouse down callback.
+    pub on_mouse_down: Option<MouseCallback>,
+
+    /// Mouse up callback.
+    pub on_mouse_up: Option<MouseCallback>,
+
+    /// Mouse enter callback (hover starts).
+    pub on_mouse_enter: Option<MouseCallback>,
+
+    /// Mouse leave callback (hover ends).
+    pub on_mouse_leave: Option<MouseCallback>,
+
+    /// Scroll callback (mouse wheel).
+    pub on_scroll: Option<MouseCallbackConsuming>,
+}
+
+impl InputProps {
+    /// Create new InputProps with the given value signal.
+    ///
+    /// This is the recommended way to create InputProps since value is required.
+    pub fn new(value: Signal<String>) -> Self {
+        Self {
+            id: None,
+            value,
+            placeholder: None,
+            placeholder_color: None,
+            attrs: None,
+            max_length: None,
+            password: false,
+            mask_char: None,
+            auto_focus: false,
+            cursor: None,
+            visible: None,
+            width: None,
+            height: None,
+            min_width: None,
+            max_width: None,
+            min_height: None,
+            max_height: None,
+            padding: None,
+            padding_top: None,
+            padding_right: None,
+            padding_bottom: None,
+            padding_left: None,
+            margin: None,
+            margin_top: None,
+            margin_right: None,
+            margin_bottom: None,
+            margin_left: None,
+            border: None,
+            border_top: None,
+            border_right: None,
+            border_bottom: None,
+            border_left: None,
+            border_color: None,
+            fg: None,
+            bg: None,
+            opacity: None,
+            tab_index: None,
+            on_change: None,
+            on_submit: None,
+            on_cancel: None,
+            on_focus: None,
+            on_blur: None,
+            on_click: None,
+            on_mouse_down: None,
+            on_mouse_up: None,
+            on_mouse_enter: None,
+            on_mouse_leave: None,
+            on_scroll: None,
         }
     }
 }
