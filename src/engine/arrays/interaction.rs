@@ -253,6 +253,48 @@ pub fn set_cursor_blink_fps(index: usize, fps: u8) {
     CURSOR_BLINK_FPS.with(|arr| arr.set_value(index, fps));
 }
 
+// =============================================================================
+// Selection
+// =============================================================================
+
+/// Get selection start at index (reactive).
+pub fn get_selection_start(index: usize) -> u16 {
+    SELECTION_START.with(|arr| arr.get(index))
+}
+
+/// Set selection start at index.
+pub fn set_selection_start(index: usize, pos: u16) {
+    SELECTION_START.with(|arr| arr.set_value(index, pos));
+}
+
+/// Get selection end at index (reactive).
+pub fn get_selection_end(index: usize) -> u16 {
+    SELECTION_END.with(|arr| arr.get(index))
+}
+
+/// Set selection end at index.
+pub fn set_selection_end(index: usize, pos: u16) {
+    SELECTION_END.with(|arr| arr.set_value(index, pos));
+}
+
+/// Set selection range at index (convenience function).
+pub fn set_selection(index: usize, start: u16, end: u16) {
+    SELECTION_START.with(|arr| arr.set_value(index, start));
+    SELECTION_END.with(|arr| arr.set_value(index, end));
+}
+
+/// Clear selection at index (set start == end).
+pub fn clear_selection(index: usize) {
+    set_selection(index, 0, 0);
+}
+
+/// Check if there is an active selection at index.
+pub fn has_selection(index: usize) -> bool {
+    let start = get_selection_start(index);
+    let end = get_selection_end(index);
+    start != end
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

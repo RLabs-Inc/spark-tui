@@ -418,97 +418,154 @@ pub fn input(props: InputProps) -> Cleanup {
         // Clamp cursor position to value length (handles external value changes)
         let pos = cursor_pos_for_key.get().min(char_count as u16) as usize;
 
-        match event.key.as_str() {
-            // Navigation
-            "ArrowLeft" => {
-                if pos > 0 {
-                    cursor_pos_for_key.set((pos - 1) as u16);
+        // Handle Ctrl+key combinations first
+        if event.modifiers.ctrl {
+            match event.key.as_str() {
+                // Word navigation
+                "ArrowLeft" => {
+                    let new_pos = find_word_start(&val, pos);
+                    cursor_pos_for_key.set(new_pos as u16);
+                    true
                 }
-                true
-            }
-            "ArrowRight" => {
-                if pos < char_count {
-                    cursor_pos_for_key.set((pos + 1) as u16);
+                "ArrowRight" => {
+                    let new_pos = find_word_end(&val, pos);
+                    cursor_pos_for_key.set(new_pos as u16);
+                    true
                 }
-                true
-            }
-            "Home" => {
-                cursor_pos_for_key.set(0);
-                true
-            }
-            "End" => {
-                cursor_pos_for_key.set(char_count as u16);
-                true
-            }
 
-            // Deletion
-            "Backspace" => {
-                if pos > 0 {
-                    let mut chars: Vec<char> = val.chars().collect();
-                    chars.remove(pos - 1);
-                    let new_val: String = chars.into_iter().collect();
-                    value_for_key.set(new_val.clone());
-                    cursor_pos_for_key.set((pos - 1) as u16);
-                    if let Some(ref cb) = on_change {
-                        cb(&new_val);
-                    }
-                }
-                true
-            }
-            "Delete" => {
-                if pos < char_count {
-                    let mut chars: Vec<char> = val.chars().collect();
-                    chars.remove(pos);
-                    let new_val: String = chars.into_iter().collect();
-                    value_for_key.set(new_val.clone());
-                    if let Some(ref cb) = on_change {
-                        cb(&new_val);
-                    }
-                }
-                true
-            }
-
-            // Submission
-            "Enter" => {
-                if let Some(ref cb) = on_submit {
-                    cb(&val);
-                }
-                true
-            }
-
-            // Cancel
-            "Escape" => {
-                if let Some(ref cb) = on_cancel {
-                    cb();
-                }
-                true
-            }
-
-            // Regular character input
-            key => {
-                // Only single printable characters, no modifiers
-                if key.len() == 1
-                    && !event.modifiers.ctrl
-                    && !event.modifiers.alt
-                    && !event.modifiers.meta
-                {
-                    // Check max length
-                    if max_length > 0 && char_count >= max_length {
-                        return true;
-                    }
-
-                    let ch = key.chars().next().unwrap();
-                    let mut chars: Vec<char> = val.chars().collect();
-                    chars.insert(pos, ch);
-                    let new_val: String = chars.into_iter().collect();
-                    value_for_key.set(new_val.clone());
-                    cursor_pos_for_key.set((pos + 1) as u16);
-                    if let Some(ref cb) = on_change {
-                        cb(&new_val);
+                // Word deletion
+                "Backspace" => {
+                    if pos > 0 {
+                        let word_start = find_word_start(&val, pos);
+                        let mut chars: Vec<char> = val.chars().collect();
+                        // Remove characters from word_start to pos
+                        chars.drain(word_start..pos);
+                        let new_val: String = chars.into_iter().collect();
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set(word_start as u16);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
                     }
                     true
-                } else {
-                    false
+                }
+                "Delete" => {
+                    if pos < char_count {
+                        let word_end = find_word_end(&val, pos);
+                        let mut chars: Vec<char> = val.chars().collect();
+                        // Remove characters from pos to word_end
+                        chars.drain(pos..word_end);
+                        let new_val: String = chars.into_iter().collect();
+                        value_for_key.set(new_val.clone());
+                        // Cursor stays at pos
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    }
+                    true
+                }
+
+                // Select all
+                "a" | "A" => {
+                    // Set selection to entire text
+                    interaction::set_selection(index, 0, char_count as u16);
+                    true
+                }
+
+                _ => false
+            }
+        } else {
+            match event.key.as_str() {
+                // Navigation
+                "ArrowLeft" => {
+                    if pos > 0 {
+                        cursor_pos_for_key.set((pos - 1) as u16);
+                    }
+                    true
+                }
+                "ArrowRight" => {
+                    if pos < char_count {
+                        cursor_pos_for_key.set((pos + 1) as u16);
+                    }
+                    true
+                }
+                "Home" => {
+                    cursor_pos_for_key.set(0);
+                    true
+                }
+                "End" => {
+                    cursor_pos_for_key.set(char_count as u16);
+                    true
+                }
+
+                // Deletion
+                "Backspace" => {
+                    if pos > 0 {
+                        let mut chars: Vec<char> = val.chars().collect();
+                        chars.remove(pos - 1);
+                        let new_val: String = chars.into_iter().collect();
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set((pos - 1) as u16);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    }
+                    true
+                }
+                "Delete" => {
+                    if pos < char_count {
+                        let mut chars: Vec<char> = val.chars().collect();
+                        chars.remove(pos);
+                        let new_val: String = chars.into_iter().collect();
+                        value_for_key.set(new_val.clone());
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                    }
+                    true
+                }
+
+                // Submission
+                "Enter" => {
+                    if let Some(ref cb) = on_submit {
+                        cb(&val);
+                    }
+                    true
+                }
+
+                // Cancel
+                "Escape" => {
+                    if let Some(ref cb) = on_cancel {
+                        cb();
+                    }
+                    true
+                }
+
+                // Regular character input
+                key => {
+                    // Only single printable characters, no modifiers
+                    if key.len() == 1
+                        && !event.modifiers.alt
+                        && !event.modifiers.meta
+                    {
+                        // Check max length
+                        if max_length > 0 && char_count >= max_length {
+                            return true;
+                        }
+
+                        let ch = key.chars().next().unwrap();
+                        let mut chars: Vec<char> = val.chars().collect();
+                        chars.insert(pos, ch);
+                        let new_val: String = chars.into_iter().collect();
+                        value_for_key.set(new_val.clone());
+                        cursor_pos_for_key.set((pos + 1) as u16);
+                        if let Some(ref cb) = on_change {
+                            cb(&new_val);
+                        }
+                        true
+                    } else {
+                        false
+                    }
                 }
             }
         }
