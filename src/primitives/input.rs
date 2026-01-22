@@ -478,6 +478,7 @@ pub fn input(props: InputProps) -> Cleanup {
     let on_change = props.on_change.clone();
     let on_submit = props.on_submit.clone();
     let on_cancel = props.on_cancel.clone();
+    let history = props.history.clone();
 
     let key_cleanup = keyboard::on_focused(index, move |event| {
         let val = value_for_key.get();
@@ -689,6 +690,10 @@ pub fn input(props: InputProps) -> Cleanup {
                             let new_val: String = new_chars.into_iter().collect();
                             value_for_key.set(new_val.clone());
                             cursor_pos_for_key.set((insert_pos + pasted_len) as u16);
+                            // Reset history position on edit
+                            if let Some(ref hist) = history {
+                                hist.borrow_mut().reset_position();
+                            }
                             if let Some(ref cb) = on_change {
                                 cb(&new_val);
                             }
@@ -723,6 +728,30 @@ pub fn input(props: InputProps) -> Cleanup {
                         clear_selection(index);
                     } else if pos < char_count {
                         cursor_pos_for_key.set((pos + 1) as u16);
+                    }
+                    true
+                }
+                // History navigation
+                "ArrowUp" => {
+                    if let Some(ref hist) = history {
+                        if let Some(entry) = hist.borrow_mut().up(&val) {
+                            let entry_owned = entry.to_string();
+                            value_for_key.set(entry_owned.clone());
+                            // Move cursor to end
+                            cursor_pos_for_key.set(entry_owned.chars().count() as u16);
+                            clear_selection(index);
+                        }
+                    }
+                    true
+                }
+                "ArrowDown" => {
+                    if let Some(ref hist) = history {
+                        if let Some(entry) = hist.borrow_mut().down() {
+                            value_for_key.set(entry.clone());
+                            // Move cursor to end
+                            cursor_pos_for_key.set(entry.chars().count() as u16);
+                            clear_selection(index);
+                        }
                     }
                     true
                 }
@@ -782,6 +811,10 @@ pub fn input(props: InputProps) -> Cleanup {
 
                 // Submission
                 "Enter" => {
+                    // Add to history if tracking
+                    if let Some(ref hist) = history {
+                        hist.borrow_mut().push(val.clone());
+                    }
                     if let Some(ref cb) = on_submit {
                         cb(&val);
                     }
@@ -826,6 +859,10 @@ pub fn input(props: InputProps) -> Cleanup {
                         let new_val: String = chars.into_iter().collect();
                         value_for_key.set(new_val.clone());
                         cursor_pos_for_key.set((insert_pos + 1) as u16);
+                        // Reset history position on edit
+                        if let Some(ref hist) = history {
+                            hist.borrow_mut().reset_position();
+                        }
                         if let Some(ref cb) = on_change {
                             cb(&new_val);
                         }
