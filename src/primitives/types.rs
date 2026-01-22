@@ -7,6 +7,8 @@ use std::rc::Rc;
 use spark_signals::Signal;
 
 use crate::types::{Rgba, Dimension, Attr, BorderStyle, TextAlign, TextWrap};
+use crate::state::mouse::MouseEvent;
+use crate::state::keyboard::KeyboardEvent;
 
 // =============================================================================
 // Cleanup Function
@@ -16,6 +18,29 @@ use crate::types::{Rgba, Dimension, Attr, BorderStyle, TextAlign, TextWrap};
 ///
 /// Call this to unmount the component and release resources.
 pub type Cleanup = Box<dyn FnOnce()>;
+
+// =============================================================================
+// Callback Types
+// =============================================================================
+
+/// Mouse event callback type (Rc for shared ownership in closures).
+///
+/// Using Rc<dyn Fn> instead of Box<dyn Fn> allows cloning callbacks
+/// into closures without ownership issues. This is the standard pattern
+/// for event callbacks in Rust when callbacks need to be captured in closures.
+pub type MouseCallback = Rc<dyn Fn(&MouseEvent)>;
+
+/// Mouse event callback that can consume the event.
+///
+/// Return true to indicate the event was consumed and should not
+/// propagate to other handlers.
+pub type MouseCallbackConsuming = Rc<dyn Fn(&MouseEvent) -> bool>;
+
+/// Keyboard event callback.
+///
+/// Return true to indicate the event was consumed and should not
+/// propagate to other handlers.
+pub type KeyCallback = Rc<dyn Fn(&KeyboardEvent) -> bool>;
 
 // =============================================================================
 // Prop Value - Reactive property wrapper
@@ -287,6 +312,31 @@ pub struct BoxProps {
 
     /// Overflow behavior: visible (default), hidden, scroll, auto.
     pub overflow: Option<PropValue<u8>>,
+
+    // =========================================================================
+    // Event Callbacks
+    // =========================================================================
+
+    /// Click callback (fires on mouse up if down was on same component).
+    pub on_click: Option<MouseCallback>,
+
+    /// Mouse down callback.
+    pub on_mouse_down: Option<MouseCallback>,
+
+    /// Mouse up callback.
+    pub on_mouse_up: Option<MouseCallback>,
+
+    /// Mouse enter callback (hover starts).
+    pub on_mouse_enter: Option<MouseCallback>,
+
+    /// Mouse leave callback (hover ends).
+    pub on_mouse_leave: Option<MouseCallback>,
+
+    /// Scroll callback (mouse wheel).
+    pub on_scroll: Option<MouseCallbackConsuming>,
+
+    /// Keyboard callback (when focused).
+    pub on_key: Option<KeyCallback>,
 
     // =========================================================================
     // Children

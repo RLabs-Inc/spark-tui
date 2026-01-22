@@ -39,6 +39,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use spark_signals::{signal, Signal};
 
 use super::keyboard::Modifiers;
@@ -336,15 +337,18 @@ pub type MouseHandler = Box<dyn Fn(&MouseEvent) -> bool>;
 /// Handler for enter/leave events (no return value).
 pub type MouseEnterLeaveHandler = Box<dyn Fn(&MouseEvent)>;
 
-/// Handlers for a component
+/// Handlers for a component.
+///
+/// Uses Rc<dyn Fn> for handlers to allow cloning callbacks into closures
+/// (e.g., wrapping user's on_click with click-to-focus behavior).
 #[derive(Default)]
 pub struct MouseHandlers {
-    pub on_mouse_down: Option<MouseHandler>,
-    pub on_mouse_up: Option<MouseHandler>,
-    pub on_click: Option<MouseHandler>,
-    pub on_mouse_enter: Option<MouseEnterLeaveHandler>,
-    pub on_mouse_leave: Option<MouseEnterLeaveHandler>,
-    pub on_scroll: Option<MouseHandler>,
+    pub on_mouse_down: Option<Rc<dyn Fn(&MouseEvent)>>,
+    pub on_mouse_up: Option<Rc<dyn Fn(&MouseEvent)>>,
+    pub on_click: Option<Rc<dyn Fn(&MouseEvent)>>,
+    pub on_mouse_enter: Option<Rc<dyn Fn(&MouseEvent)>>,
+    pub on_mouse_leave: Option<Rc<dyn Fn(&MouseEvent)>>,
+    pub on_scroll: Option<Rc<dyn Fn(&MouseEvent) -> bool>>,
 }
 
 // =============================================================================
@@ -594,20 +598,16 @@ fn dispatch_down(event: &MouseEvent) -> bool {
         interaction::set_pressed(idx, true);
     }
 
-    // Component handler first
+    // Component handler (non-consuming, just fires)
     if let Some(idx) = event.component_index {
-        let consumed = REGISTRY.with(|reg| {
+        REGISTRY.with(|reg| {
             let reg = reg.borrow();
             if let Some(handlers) = reg.component_handlers.get(&idx) {
                 if let Some(ref on_down) = handlers.on_mouse_down {
-                    return on_down(event);
+                    on_down(event);
                 }
             }
-            false
         });
-        if consumed {
-            return true;
-        }
     }
 
     // Global handlers
@@ -631,77 +631,55 @@ fn dispatch_up(event: &MouseEvent) -> bool {
         interaction::set_pressed(idx, false);
     }
 
-    // Component handler first (for mouse up)
-    let mut consumed = false;
+    // Component handler (non-consuming, just fires)
     if let Some(idx) = event.component_index {
-        consumed = REGISTRY.with(|reg| {
+        REGISTRY.with(|reg| {
             let reg = reg.borrow();
             if let Some(handlers) = reg.component_handlers.get(&idx) {
                 if let Some(ref on_up) = handlers.on_mouse_up {
-                    return on_up(event);
+                    on_up(event);
                 }
             }
-            false
         });
     }
 
-    if !consumed {
-        // Global up handlers
-        consumed = REGISTRY.with(|reg| {
+    // Global up handlers
+    let mut consumed = REGISTRY.with(|reg| {
+        let reg = reg.borrow();
+        for (_, handler) in &reg.global_up_handlers {
+            if handler(event) {
+                return true;
+            }
+        }
+        false
+    });
+
+    // Detect click (press and release on same component with same button)
+    if pressed_idx == event.component_index && pressed_btn == event.button {
+        // Component click handler (non-consuming, just fires)
+        if let Some(idx) = event.component_index {
+            REGISTRY.with(|reg| {
+                let reg = reg.borrow();
+                if let Some(handlers) = reg.component_handlers.get(&idx) {
+                    if let Some(ref on_click) = handlers.on_click {
+                        on_click(event);
+                    }
+                }
+            });
+        }
+
+        // Global click handlers (can consume)
+        let global_consumed = REGISTRY.with(|reg| {
             let reg = reg.borrow();
-            for (_, handler) in &reg.global_up_handlers {
+            for (_, handler) in &reg.global_click_handlers {
                 if handler(event) {
                     return true;
                 }
             }
             false
         });
-    }
-
-    // Detect click (press and release on same component with same button)
-    if pressed_idx == event.component_index && pressed_btn == event.button {
-        // Component click handler
-        if let Some(idx) = event.component_index {
-            let click_consumed = REGISTRY.with(|reg| {
-                let reg = reg.borrow();
-                if let Some(handlers) = reg.component_handlers.get(&idx) {
-                    if let Some(ref on_click) = handlers.on_click {
-                        return on_click(event);
-                    }
-                }
-                false
-            });
-            if click_consumed {
-                consumed = true;
-            } else {
-                // Global click handlers
-                let global_consumed = REGISTRY.with(|reg| {
-                    let reg = reg.borrow();
-                    for (_, handler) in &reg.global_click_handlers {
-                        if handler(event) {
-                            return true;
-                        }
-                    }
-                    false
-                });
-                if global_consumed {
-                    consumed = true;
-                }
-            }
-        } else {
-            // Click on empty space - global handlers only
-            let global_consumed = REGISTRY.with(|reg| {
-                let reg = reg.borrow();
-                for (_, handler) in &reg.global_click_handlers {
-                    if handler(event) {
-                        return true;
-                    }
-                }
-                false
-            });
-            if global_consumed {
-                consumed = true;
-            }
+        if global_consumed {
+            consumed = true;
         }
     }
 
@@ -897,9 +875,8 @@ mod tests {
         let called_clone = called.clone();
 
         let cleanup = on_component(5, MouseHandlers {
-            on_click: Some(Box::new(move |_| {
+            on_click: Some(Rc::new(move |_| {
                 called_clone.set(true);
-                true
             })),
             ..Default::default()
         });
@@ -982,10 +959,10 @@ mod tests {
 
         // Register handlers for component 5
         let _cleanup = on_component(5, MouseHandlers {
-            on_mouse_enter: Some(Box::new(move |_| {
+            on_mouse_enter: Some(Rc::new(move |_| {
                 enter_clone.set(enter_clone.get() + 1);
             })),
-            on_mouse_leave: Some(Box::new(move |_| {
+            on_mouse_leave: Some(Rc::new(move |_| {
                 leave_clone.set(leave_clone.get() + 1);
             })),
             ..Default::default()
@@ -1023,9 +1000,8 @@ mod tests {
         let click_clone = click_count.clone();
 
         let _cleanup = on_component(5, MouseHandlers {
-            on_click: Some(Box::new(move |_| {
+            on_click: Some(Rc::new(move |_| {
                 click_clone.set(click_clone.get() + 1);
-                true
             })),
             ..Default::default()
         });
@@ -1108,9 +1084,8 @@ mod tests {
         let called_clone = called.clone();
 
         let _cleanup = on_component(5, MouseHandlers {
-            on_click: Some(Box::new(move |_| {
+            on_click: Some(Rc::new(move |_| {
                 called_clone.set(true);
-                true
             })),
             ..Default::default()
         });
