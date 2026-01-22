@@ -1534,4 +1534,174 @@ mod tests {
         clipboard::copy(&selected);
         assert!(!clipboard::has_content());
     }
+
+    // =========================================================================
+    // InputHistory Tests
+    // =========================================================================
+
+    use super::super::types::InputHistory;
+
+    #[test]
+    fn test_input_history_navigation() {
+        let mut history = InputHistory::new(vec![
+            "first".to_string(),
+            "second".to_string(),
+            "third".to_string(),
+        ]);
+
+        // Navigate up (older entries)
+        assert_eq!(history.up("current"), Some("third"));
+        assert_eq!(history.up("current"), Some("second"));
+        assert_eq!(history.up("current"), Some("first"));
+        assert_eq!(history.up("current"), None); // At boundary
+
+        // Navigate down (newer entries)
+        assert_eq!(history.down(), Some("second".to_string()));
+        assert_eq!(history.down(), Some("third".to_string()));
+        assert_eq!(history.down(), Some("current".to_string())); // Back to editing value
+        assert_eq!(history.down(), None); // Not in history
+    }
+
+    #[test]
+    fn test_input_history_push() {
+        let mut history = InputHistory::default();
+
+        history.push("first".to_string());
+        history.push("second".to_string());
+
+        assert_eq!(history.entries, vec!["first", "second"]);
+
+        // Don't add duplicates of last entry
+        history.push("second".to_string());
+        assert_eq!(history.entries, vec!["first", "second"]);
+
+        // Don't add empty
+        history.push(String::new());
+        assert_eq!(history.entries, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn test_input_history_reset() {
+        let mut history = InputHistory::new(vec!["old".to_string()]);
+
+        // Enter history
+        history.up("current");
+        assert!(history.is_browsing());
+
+        // Reset
+        history.reset_position();
+        assert!(!history.is_browsing());
+    }
+
+    #[test]
+    fn test_input_history_max_entries() {
+        let mut history = InputHistory::default();
+        history.max_entries = 3;
+
+        history.push("a".to_string());
+        history.push("b".to_string());
+        history.push("c".to_string());
+        history.push("d".to_string());
+
+        // Should only keep the last 3
+        assert_eq!(history.entries.len(), 3);
+        assert_eq!(history.entries, vec!["b", "c", "d"]);
+    }
+
+    #[test]
+    fn test_input_history_preserves_editing_value() {
+        let mut history = InputHistory::new(vec!["old".to_string()]);
+
+        // Start editing "current", then go to history
+        history.up("current");
+        assert_eq!(history.editing_value, Some("current".to_string()));
+
+        // Return from history
+        let restored = history.down();
+        assert_eq!(restored, Some("current".to_string()));
+    }
+
+    #[test]
+    fn test_input_history_empty() {
+        let mut history = InputHistory::default();
+
+        // Can't navigate empty history
+        assert_eq!(history.up("current"), None);
+        assert_eq!(history.down(), None);
+        assert!(!history.is_browsing());
+    }
+
+    // =========================================================================
+    // Scroll Offset / ensure_cursor_visible Tests
+    // =========================================================================
+
+    #[test]
+    fn test_ensure_cursor_visible_at_start() {
+        // Cursor at start, no scroll needed
+        assert_eq!(ensure_cursor_visible(0, 100, 0, 40), 0);
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_in_view() {
+        // Cursor in view, no change
+        assert_eq!(ensure_cursor_visible(20, 100, 0, 40), 0);
+        assert_eq!(ensure_cursor_visible(39, 100, 0, 40), 0);
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_past_end() {
+        // Cursor past end of view, scroll right
+        assert_eq!(ensure_cursor_visible(50, 100, 0, 40), 11);
+        assert_eq!(ensure_cursor_visible(40, 100, 0, 40), 1);
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_before_view() {
+        // Cursor before view, scroll left
+        assert_eq!(ensure_cursor_visible(5, 100, 20, 40), 5);
+        assert_eq!(ensure_cursor_visible(0, 100, 10, 40), 0);
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_default_width() {
+        // With width=0, should use default of 40
+        assert_eq!(ensure_cursor_visible(50, 100, 0, 0), 11);
+    }
+
+    #[test]
+    fn test_scroll_offset_interaction_array() {
+        setup();
+
+        // Scroll offset should be stored in interaction arrays
+        interaction::set_scroll_offset(0, 10, 5);
+        assert_eq!(interaction::get_scroll_offset_x(0), 10);
+        assert_eq!(interaction::get_scroll_offset_y(0), 5);
+    }
+
+    // =========================================================================
+    // Input with History Integration Test
+    // =========================================================================
+
+    #[test]
+    fn test_input_with_history_prop() {
+        setup();
+
+        use std::rc::Rc;
+        use std::cell::RefCell;
+
+        let history = Rc::new(RefCell::new(InputHistory::default()));
+        let value = signal(String::new());
+
+        let mut props = InputProps::new(value.clone());
+        props.history = Some(history.clone());
+
+        let _cleanup = input(props);
+
+        // Add some history entries
+        history.borrow_mut().push("command1".to_string());
+        history.borrow_mut().push("command2".to_string());
+
+        // History should have 2 entries
+        assert_eq!(history.borrow().entries.len(), 2);
+    }
 }
