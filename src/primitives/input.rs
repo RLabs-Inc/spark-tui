@@ -43,6 +43,58 @@ use crate::types::{ComponentType, BorderStyle};
 use super::types::{InputProps, PropValue, Cleanup};
 
 // =============================================================================
+// Word Boundary Helpers
+// =============================================================================
+
+/// Find the start of the word before the given position.
+/// A word is defined as a sequence of alphanumeric characters.
+fn find_word_start(text: &str, pos: usize) -> usize {
+    if pos == 0 {
+        return 0;
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = pos;
+
+    // Skip whitespace/punctuation going backward
+    while i > 0 && !chars[i - 1].is_alphanumeric() {
+        i -= 1;
+    }
+
+    // Skip word characters going backward
+    while i > 0 && chars[i - 1].is_alphanumeric() {
+        i -= 1;
+    }
+
+    i
+}
+
+/// Find the end of the word after the given position.
+/// A word is defined as a sequence of alphanumeric characters.
+fn find_word_end(text: &str, pos: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+
+    if pos >= len {
+        return len;
+    }
+
+    let mut i = pos;
+
+    // Skip whitespace/punctuation going forward
+    while i < len && !chars[i].is_alphanumeric() {
+        i += 1;
+    }
+
+    // Skip word characters going forward
+    while i < len && chars[i].is_alphanumeric() {
+        i += 1;
+    }
+
+    i
+}
+
+// =============================================================================
 // Helper: Bind PropValue to Slot
 // =============================================================================
 
