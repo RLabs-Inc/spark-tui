@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 1 - Mouse System + Event Wiring
+**Current focus:** Phase 1 - Mouse System + Event Wiring (COMPLETE)
 
 ---
 
 ## Current Position
 
-**Phase:** 1 of 6 (Mouse System + Event Wiring)
-**Plan:** 2 of 3 complete
-**Status:** In progress
+**Phase:** 1 of 6 (Mouse System + Event Wiring) - COMPLETE
+**Plan:** 3 of 3 complete
+**Status:** Phase complete, ready for Phase 2
 
-Last activity: 2026-01-22 - Completed 01-02-PLAN.md
+Last activity: 2026-01-22 - Completed 01-03-PLAN.md
 
-Progress: [######----] 67%
+Progress: [##########] 100% (Phase 1)
 
 ---
 
@@ -25,7 +25,7 @@ Progress: [######----] 67%
 
 **Phase 1: Mouse System + Event Wiring**
 
-Status: IN PROGRESS (2/3 plans complete)
+Status: COMPLETE (3/3 plans complete)
 
 ### Requirements Progress
 - [x] R1.1: HitGrid for O(1) coordinate lookup (01-01)
@@ -33,12 +33,12 @@ Status: IN PROGRESS (2/3 plans complete)
 - [x] R1.3: Hover tracking (enter/leave) (01-01)
 - [x] R1.4: Click detection (01-01)
 - [x] R1.5: Event conversion and polling (01-02)
-- [ ] R1.6: Event callback wiring (01-03)
+- [x] R1.6: Event callback wiring (01-03)
 
 ### Plans
 - [x] 01-01: Mouse types, HitGrid, handlers, dispatch
 - [x] 01-02: Input module with event conversion and polling
-- [ ] 01-03: Event callback wiring
+- [x] 01-03: Event callback wiring
 
 ---
 
@@ -46,7 +46,7 @@ Status: IN PROGRESS (2/3 plans complete)
 
 | Phase | Status | Progress |
 |-------|--------|----------|
-| 1. Mouse + Events | In Progress | 67% (2/3) |
+| 1. Mouse + Events | Complete | 100% (3/3) |
 | 2. Theme System | Not Started | 0% |
 | 3. Input Component | Not Started | 0% |
 | 4. Scroll System | Not Started | 0% |
@@ -64,10 +64,22 @@ Status: IN PROGRESS (2/3 plans complete)
 | click-detection | Track pressed component+button, compare on up | Matches TypeScript exactly | 2026-01-22 |
 | scroll-info-struct | Use ScrollInfo struct matching mouse.rs | Consistency with existing mouse module types | 2026-01-22 |
 | meta-key-false | Meta key always false in convert_modifiers | crossterm doesn't expose meta key state | 2026-01-22 |
+| rc-callbacks | Use Rc<dyn Fn> instead of Box<dyn Fn> for MouseHandlers | Allows cloning callbacks into closures (e.g., click-to-focus) | 2026-01-22 |
+| click-to-focus-wrap | Wrap user on_click with focus::focus() for focusable boxes | Automatic focus on click matches expected behavior | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 01-03 Execution
+- Updated src/primitives/types.rs with callback type aliases
+- Added mouse/keyboard callback props to BoxProps
+- Added on_click to TextProps
+- Updated src/primitives/box_primitive.rs with handler registration
+- Implemented click-to-focus for focusable boxes
+- Updated src/primitives/text.rs with on_click wiring
+- Updated src/state/mouse.rs to use Rc<dyn Fn> for handlers
+- All 153 tests pass
 
 ### 2026-01-22 — Plan 01-02 Execution
 - Created src/state/input.rs (532 lines)
@@ -102,8 +114,8 @@ Status: IN PROGRESS (2/3 plans complete)
 ## Session Continuity
 
 Last session: 2026-01-22 13:38 UTC
-Stopped at: Completed 01-02-PLAN.md
-Resume file: .planning/phases/01-mouse-events/01-03-PLAN.md
+Stopped at: Completed Phase 1 (all 3 plans)
+Resume file: None - Phase 1 complete, ready for Phase 2
 
 ---
 
@@ -119,6 +131,7 @@ None currently.
 - Spec files at `crates/tui/docs/specs/` are comprehensive
 - spark-signals (crates/signals/) is complete and production-ready
 - TDD approach: write tests first
+- Phase 1 complete! Mouse system is fully wired up.
 
 ---
 
