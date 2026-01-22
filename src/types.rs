@@ -333,39 +333,58 @@ impl Rgba {
         }
 
         let (l, c, h) = fg.to_oklch()?;
-        let bg_lum = bg.relative_luminance();
+        let (bg_l, _, _) = bg.to_oklch()?;
 
-        // Try making lighter or darker based on background
-        let (mut lo, mut hi) = if bg_lum > 0.5 {
-            (0.0, l) // Make darker
-        } else {
-            (l, 1.0) // Make lighter
-        };
+        // Determine initial direction using OKLCH lightness (matches TypeScript):
+        // Dark bg (L <= 0.5) needs lighter fg; bright bg (L > 0.5) needs darker fg
+        let make_lighter = bg_l <= 0.5;
 
-        for _ in 0..20 {
-            let mid = (lo + hi) / 2.0;
-            let candidate = Self::oklch(mid, c, h, fg.a as u8);
-            let ratio = Self::contrast_ratio(candidate, bg);
-
-            if ratio >= min_ratio {
-                if bg_lum > 0.5 {
-                    lo = mid; // We can go lighter
-                } else {
-                    hi = mid; // We can go darker
-                }
-            } else if bg_lum > 0.5 {
-                hi = mid; // Need to go darker
+        // Helper to do binary search in a direction
+        fn search(l: f32, c: f32, h: f32, alpha: u8, bg: Rgba, min_ratio: f32, go_lighter: bool) -> Option<Rgba> {
+            let (mut lo, mut hi) = if go_lighter {
+                (l, 1.0)
             } else {
-                lo = mid; // Need to go lighter
+                (0.0, l)
+            };
+
+            // If no search range, return None
+            if (hi - lo).abs() < 0.001 {
+                return None;
             }
+
+            let mut best: Option<Rgba> = None;
+
+            for _ in 0..20 {
+                let mid = (lo + hi) / 2.0;
+                let candidate = Rgba::oklch(mid, c, h, alpha);
+                let ratio = Rgba::contrast_ratio(candidate, bg);
+
+                if ratio >= min_ratio {
+                    best = Some(candidate);
+                    if go_lighter {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                } else {
+                    if go_lighter {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+            }
+
+            best
         }
 
-        let result = Self::oklch((lo + hi) / 2.0, c, h, fg.a as u8);
-        if Self::contrast_ratio(result, bg) >= min_ratio {
-            Some(result)
-        } else {
-            None
+        // Try preferred direction first
+        if let Some(result) = search(l, c, h, fg.a as u8, bg, min_ratio, make_lighter) {
+            return Some(result);
         }
+
+        // If that didn't work (e.g., white on medium bg), try the other direction
+        search(l, c, h, fg.a as u8, bg, min_ratio, !make_lighter)
     }
 
     // =========================================================================
