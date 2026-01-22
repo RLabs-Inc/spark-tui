@@ -5,42 +5,37 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 2 - Theme System (COMPLETE)
+**Current focus:** Phase 3 - Input Component (IN PROGRESS)
 
 ---
 
 ## Current Position
 
-**Phase:** 2 of 6 (Theme System)
-**Plan:** 4 of 4 complete
-**Status:** Phase complete
+**Phase:** 3 of 6 (Input Component)
+**Plan:** 1 of 3 complete
+**Status:** In progress
 
-Last activity: 2026-01-22 - Completed 02-04-PLAN.md
+Last activity: 2026-01-22 - Completed 03-01-PLAN.md
 
-Progress: [########--] 67% (8/12 total plans)
+Progress: [#########-] 75% (9/12 total plans)
 
 ---
 
 ## Current Phase
 
-**Phase 2: Theme System**
+**Phase 3: Input Component**
 
-Status: COMPLETE (4/4 plans complete)
+Status: IN PROGRESS (1/3 plans complete)
 
 ### Requirements Progress
-- [x] R2.1: ThemeColor type (02-01)
-- [x] R2.2: Theme struct with 20 semantic colors (02-01)
-- [x] R2.3: 13 preset themes (02-01)
-- [x] R2.4: Reactive theme state (02-02)
-- [x] R2.5: Color resolution (02-03, 02-04)
-- [x] R2.6: t.* accessor deriveds (02-02)
-- [x] R2.7: Variant system (02-03, 02-04)
+- [x] R3.1: Input component foundation (03-01)
+- [ ] R3.2: Selection support (03-02)
+- [ ] R3.3: Advanced features (03-03)
 
 ### Plans
-- [x] 02-01: Theme types, ThemeColor, Theme struct, 13 presets
-- [x] 02-02: Reactive theme state
-- [x] 02-03: Variant system with WCAG contrast
-- [x] 02-04: Color modifiers and contrast methods
+- [x] 03-01: Input foundation, props, basic rendering
+- [ ] 03-02: Selection support
+- [ ] 03-03: Advanced features
 
 ---
 
@@ -50,7 +45,7 @@ Status: COMPLETE (4/4 plans complete)
 |-------|--------|----------|
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
-| 3. Input Component | Not Started | 0% |
+| 3. Input Component | In Progress | 33% (1/3) |
 | 4. Scroll System | Not Started | 0% |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
@@ -79,10 +74,23 @@ Status: COMPLETE (4/4 plans complete)
 | two-accessor-methods | .primary() returns Rgba, .primary_signal() returns Signal | Ergonomic access + reactive tracking support | 2026-01-22 |
 | oklch-contrast-direction | Use OKLCH lightness for contrast direction instead of relative luminance | Consistency with OKLCH-based adjustments | 2026-01-22 |
 | contrast-fallback | Try opposite direction if initial fails to achieve contrast | Handles white-on-medium-bg edge cases | 2026-01-22 |
+| input-props-new | InputProps::new(value) instead of Default | Signal<String> has no Default impl | 2026-01-22 |
+| input-always-focusable | Inputs always focusable (no focusable prop) | Matches expected input behavior | 2026-01-22 |
+| display-text-getter | Display text computed via getter for placeholder+masking | Ensures reactive correctness | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 03-01 Execution
+- Added CursorStyle enum (Block, Bar, Underline) to types.rs
+- Added BlinkConfig, CursorConfig, InputProps structs to primitives/types.rs
+- Added callback type aliases (InputChangeCallback, etc.)
+- Created src/primitives/input.rs (640 lines)
+- Input component with two-way value binding, keyboard handling
+- Placeholder, password mode, cursor position tracking
+- 7 new input tests
+- All 275 tests pass
 
 ### 2026-01-22 — Plan 02-04 Execution
 - Verified modifiers.rs complete (lighten/darken/alpha/mix/contrast)
@@ -169,9 +177,9 @@ Status: COMPLETE (4/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 18:00 UTC
-Stopped at: Completed 02-04-PLAN.md (Phase 2 Complete!)
-Resume file: None - continue with Phase 3
+Last session: 2026-01-22 19:45 UTC
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None - continue with 03-02
 
 ---
 
@@ -189,7 +197,7 @@ None currently.
 - TDD approach: write tests first
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
-- Ready for Phase 3: Input Component
+- Phase 3 in progress - 275 tests total.
 
 ---
 
