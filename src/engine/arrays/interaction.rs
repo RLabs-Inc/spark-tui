@@ -51,6 +51,12 @@ thread_local! {
 
     /// Cursor blink FPS (0 = no blink).
     static CURSOR_BLINK_FPS: TrackedSlotArray<u8> = TrackedSlotArray::new(Some(2));
+
+    /// Stick to bottom (auto-scroll on content growth).
+    static STICK_TO_BOTTOM: TrackedSlotArray<bool> = TrackedSlotArray::new(Some(false));
+
+    /// Previous max scroll Y (to detect content growth).
+    static PREV_MAX_SCROLL_Y: TrackedSlotArray<u16> = TrackedSlotArray::new(Some(0));
 }
 
 // =============================================================================
@@ -71,6 +77,8 @@ pub fn ensure_capacity(index: usize) {
     SELECTION_END.with(|arr| { let _ = arr.peek(index); });
     CURSOR_VISIBLE.with(|arr| { let _ = arr.peek(index); });
     CURSOR_BLINK_FPS.with(|arr| { let _ = arr.peek(index); });
+    STICK_TO_BOTTOM.with(|arr| { let _ = arr.peek(index); });
+    PREV_MAX_SCROLL_Y.with(|arr| { let _ = arr.peek(index); });
 }
 
 /// Clear values at index.
@@ -87,6 +95,8 @@ pub fn clear_at_index(index: usize) {
     SELECTION_END.with(|arr| arr.clear(index));
     CURSOR_VISIBLE.with(|arr| arr.clear(index));
     CURSOR_BLINK_FPS.with(|arr| arr.clear(index));
+    STICK_TO_BOTTOM.with(|arr| arr.clear(index));
+    PREV_MAX_SCROLL_Y.with(|arr| arr.clear(index));
 }
 
 /// Reset all arrays.
@@ -103,6 +113,8 @@ pub fn reset() {
     SELECTION_END.with(|arr| arr.clear_all());
     CURSOR_VISIBLE.with(|arr| arr.clear_all());
     CURSOR_BLINK_FPS.with(|arr| arr.clear_all());
+    STICK_TO_BOTTOM.with(|arr| arr.clear_all());
+    PREV_MAX_SCROLL_Y.with(|arr| arr.clear_all());
 }
 
 // =============================================================================
@@ -293,6 +305,34 @@ pub fn has_selection(index: usize) -> bool {
     let start = get_selection_start(index);
     let end = get_selection_end(index);
     start != end
+}
+
+// =============================================================================
+// Stick to Bottom
+// =============================================================================
+
+/// Get stick_to_bottom at index (reactive).
+pub fn get_stick_to_bottom(index: usize) -> bool {
+    STICK_TO_BOTTOM.with(|arr| arr.get(index))
+}
+
+/// Set stick_to_bottom at index.
+pub fn set_stick_to_bottom(index: usize, value: bool) {
+    STICK_TO_BOTTOM.with(|arr| arr.set_value(index, value));
+}
+
+// =============================================================================
+// Previous Max Scroll Y
+// =============================================================================
+
+/// Get previous max scroll Y at index (reactive).
+pub fn get_prev_max_scroll_y(index: usize) -> u16 {
+    PREV_MAX_SCROLL_Y.with(|arr| arr.get(index))
+}
+
+/// Set previous max scroll Y at index.
+pub fn set_prev_max_scroll_y(index: usize, value: u16) {
+    PREV_MAX_SCROLL_Y.with(|arr| arr.set_value(index, value));
 }
 
 #[cfg(test)]
