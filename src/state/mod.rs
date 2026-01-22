@@ -28,5 +28,7 @@ pub use scroll::{
     is_scrollable, get_scroll_offset, get_max_scroll,
     set_scroll_offset, scroll_by, scroll_to_top, scroll_to_bottom,
     scroll_to_start, scroll_to_end, scroll_by_with_chaining,
+    get_focused_scrollable, handle_arrow_scroll, handle_page_scroll,
+    handle_home_end, handle_wheel_scroll, scroll_into_view,
     LINE_SCROLL, WHEEL_SCROLL, PAGE_SCROLL_FACTOR,
 };
