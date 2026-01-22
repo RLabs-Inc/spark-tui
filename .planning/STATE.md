@@ -5,39 +5,39 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 3 - Input Component (COMPLETE)
+**Current focus:** Phase 4 - Scroll System (IN PROGRESS)
 
 ---
 
 ## Current Position
 
-**Phase:** 3 of 6 (Input Component)
-**Plan:** 4 of 4 complete
-**Status:** Phase complete
+**Phase:** 4 of 6 (Scroll System)
+**Plan:** 1 of 4 complete
+**Status:** In progress
 
-Last activity: 2026-01-22 - Completed 03-04-PLAN.md
+Last activity: 2026-01-22 - Completed 04-01-PLAN.md
 
-Progress: [############] 100% (12/12 total plans)
+Progress: [#############---] 81% (13/16 total plans)
 
 ---
 
 ## Current Phase
 
-**Phase 3: Input Component**
+**Phase 4: Scroll System**
 
-Status: COMPLETE (4/4 plans complete)
+Status: IN PROGRESS (1/4 plans complete)
 
 ### Requirements Progress
-- [x] R3.1: Input component foundation (03-01)
-- [x] R3.2: Selection support (03-02)
-- [x] R3.3: Clipboard and selection (03-03)
-- [x] R3.4: History and overflow (03-04)
+- [x] R4.1: Scroll module core (04-01)
+- [ ] R4.2: Keyboard scroll handlers (04-02)
+- [ ] R4.3: Mouse wheel scroll handlers (04-03)
+- [ ] R4.4: scrollIntoView (04-04)
 
 ### Plans
-- [x] 03-01: Input foundation, props, basic rendering
-- [x] 03-02: Word navigation and selection
-- [x] 03-03: Selection and clipboard
-- [x] 03-04: History and overflow
+- [x] 04-01: Scroll core module
+- [ ] 04-02: Keyboard handlers
+- [ ] 04-03: Mouse handlers
+- [ ] 04-04: scrollIntoView
 
 ---
 
@@ -48,7 +48,7 @@ Status: COMPLETE (4/4 plans complete)
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
-| 4. Scroll System | Not Started | 0% |
+| 4. Scroll System | In Progress | 25% (1/4) |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
 
@@ -86,10 +86,21 @@ Status: COMPLETE (4/4 plans complete)
 | history-position-negative-one | InputHistory uses position=-1 for "not browsing" state | Clear sentinel value, allows >= 0 check for browsing | 2026-01-22 |
 | history-skip-empty-duplicates | History push skips empty entries and consecutive duplicates | Cleaner history, matches shell behavior | 2026-01-22 |
 | scroll-offset-interaction-array | Scroll offset stored in interaction arrays | Renderer can access without prop drilling | 2026-01-22 |
+| layout-param | Pass &ComputedLayout as parameter to scroll functions | Rust functions can't access global derived like TypeScript | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 04-01 Execution
+- Created src/state/scroll.rs (409 lines)
+- Scroll constants: LINE_SCROLL, WHEEL_SCROLL, PAGE_SCROLL_FACTOR
+- State access: is_scrollable, get_scroll_offset, get_max_scroll
+- Operations: set_scroll_offset, scroll_by, scroll_to_top/bottom/start/end
+- Chaining: scroll_by_with_chaining for parent fallback
+- scroll_by returns bool for boundary detection
+- 14 new tests for scroll module
+- All 333 tests pass
 
 ### 2026-01-22 — Plan 03-04 Execution
 - Added InputHistory struct with navigation methods to types.rs
@@ -217,9 +228,9 @@ Status: COMPLETE (4/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 20:03 UTC
-Stopped at: Completed 03-04-PLAN.md (Phase 3 complete)
-Resume file: None - ready for Phase 4
+Last session: 2026-01-22 22:34 UTC
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None - continue with 04-02
 
 ---
 
@@ -238,6 +249,7 @@ None currently.
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
+- Phase 4 in progress: 333 tests total.
 
 ---
 
