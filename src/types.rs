@@ -367,6 +367,264 @@ impl Rgba {
             None
         }
     }
+
+    // =========================================================================
+    // Color Parsing
+    // =========================================================================
+
+    /// Create from 0xRRGGBB integer format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spark_tui::types::Rgba;
+    ///
+    /// let red = Rgba::from_rgb_int(0xff0000);
+    /// assert_eq!(red, Rgba::rgb(255, 0, 0));
+    ///
+    /// let dracula_bg = Rgba::from_rgb_int(0x282a36);
+    /// assert_eq!(dracula_bg, Rgba::rgb(40, 42, 54));
+    /// ```
+    pub const fn from_rgb_int(rgb: u32) -> Self {
+        Self::rgb(
+            ((rgb >> 16) & 0xFF) as u8,
+            ((rgb >> 8) & 0xFF) as u8,
+            (rgb & 0xFF) as u8,
+        )
+    }
+
+    /// Parse hex color string (#RGB, #RRGGBB, #RRGGBBAA).
+    ///
+    /// Returns None for invalid format.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spark_tui::types::Rgba;
+    ///
+    /// // #RRGGBB format
+    /// let red = Rgba::from_hex("#ff0000").unwrap();
+    /// assert_eq!(red, Rgba::rgb(255, 0, 0));
+    ///
+    /// // #RGB shorthand (expands each digit)
+    /// let white = Rgba::from_hex("#fff").unwrap();
+    /// assert_eq!(white, Rgba::rgb(255, 255, 255));
+    ///
+    /// // #RRGGBBAA format (with alpha)
+    /// let semi = Rgba::from_hex("#ff000080").unwrap();
+    /// assert_eq!(semi, Rgba::new(255, 0, 0, 128));
+    ///
+    /// // Without # prefix also works
+    /// let blue = Rgba::from_hex("0000ff").unwrap();
+    /// assert_eq!(blue, Rgba::rgb(0, 0, 255));
+    ///
+    /// // Invalid returns None
+    /// assert!(Rgba::from_hex("invalid").is_none());
+    /// assert!(Rgba::from_hex("#gg0000").is_none());
+    /// ```
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        let hex = hex.trim().trim_start_matches('#');
+
+        // Helper to parse a single hex digit
+        fn hex_digit(c: u8) -> Option<u8> {
+            match c {
+                b'0'..=b'9' => Some(c - b'0'),
+                b'a'..=b'f' => Some(c - b'a' + 10),
+                b'A'..=b'F' => Some(c - b'A' + 10),
+                _ => None,
+            }
+        }
+
+        // Helper to parse two hex digits
+        fn hex_byte(s: &[u8], i: usize) -> Option<u8> {
+            let high = hex_digit(s[i])?;
+            let low = hex_digit(s[i + 1])?;
+            Some((high << 4) | low)
+        }
+
+        let bytes = hex.as_bytes();
+        match bytes.len() {
+            // #RGB -> expand to #RRGGBB
+            3 => {
+                let r = hex_digit(bytes[0])?;
+                let g = hex_digit(bytes[1])?;
+                let b = hex_digit(bytes[2])?;
+                Some(Self::rgb((r << 4) | r, (g << 4) | g, (b << 4) | b))
+            }
+            // #RRGGBB
+            6 => {
+                let r = hex_byte(bytes, 0)?;
+                let g = hex_byte(bytes, 2)?;
+                let b = hex_byte(bytes, 4)?;
+                Some(Self::rgb(r, g, b))
+            }
+            // #RRGGBBAA
+            8 => {
+                let r = hex_byte(bytes, 0)?;
+                let g = hex_byte(bytes, 2)?;
+                let b = hex_byte(bytes, 4)?;
+                let a = hex_byte(bytes, 6)?;
+                Some(Self::new(r, g, b, a))
+            }
+            _ => None,
+        }
+    }
+
+    /// Parse OKLCH color string: "oklch(L C H)" or "oklch(L C H / A)".
+    ///
+    /// - L: Lightness 0-1 (or 0%-100%)
+    /// - C: Chroma 0-0.4 roughly (0.15 is good for vivid colors)
+    /// - H: Hue 0-360 degrees (or rad/turn units)
+    /// - A: Alpha 0-1 (or 0%-100%), optional
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spark_tui::types::Rgba;
+    ///
+    /// // Basic OKLCH
+    /// let purple = Rgba::from_oklch_str("oklch(0.75 0.15 300)").unwrap();
+    ///
+    /// // With percentage lightness
+    /// let bright = Rgba::from_oklch_str("oklch(80% 0.2 180)").unwrap();
+    ///
+    /// // With alpha
+    /// let semi = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 0.5)").unwrap();
+    /// assert_eq!(semi.a, 127); // ~0.5 * 255
+    ///
+    /// // With percentage alpha
+    /// let semi2 = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 50%)").unwrap();
+    /// assert_eq!(semi2.a, 127);
+    ///
+    /// // Invalid returns None
+    /// assert!(Rgba::from_oklch_str("not-oklch").is_none());
+    /// assert!(Rgba::from_oklch_str("oklch(invalid)").is_none());
+    /// ```
+    pub fn from_oklch_str(s: &str) -> Option<Self> {
+        let s = s.trim().to_lowercase();
+
+        // Must start with "oklch(" and end with ")"
+        if !s.starts_with("oklch(") || !s.ends_with(')') {
+            return None;
+        }
+
+        // Extract content between parentheses
+        let content = &s[6..s.len() - 1];
+
+        // Split by whitespace and "/" (for alpha separator)
+        let parts: Vec<&str> = content
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if parts.len() < 3 {
+            return None;
+        }
+
+        // Parse L (lightness)
+        let l_str = parts[0];
+        let l = if l_str.ends_with('%') {
+            l_str[..l_str.len() - 1].parse::<f32>().ok()? / 100.0
+        } else {
+            l_str.parse::<f32>().ok()?
+        };
+
+        // Parse C (chroma)
+        let c = parts[1].parse::<f32>().ok()?;
+
+        // Parse H (hue)
+        let h_str = parts[2];
+        let h = if h_str.ends_with("rad") {
+            h_str[..h_str.len() - 3].parse::<f32>().ok()? * (180.0 / std::f32::consts::PI)
+        } else if h_str.ends_with("turn") {
+            h_str[..h_str.len() - 4].parse::<f32>().ok()? * 360.0
+        } else if h_str.ends_with("deg") {
+            h_str[..h_str.len() - 3].parse::<f32>().ok()?
+        } else {
+            h_str.parse::<f32>().ok()?
+        };
+
+        // Parse A (alpha) if present
+        let a = if parts.len() > 3 {
+            let a_str = parts[3];
+            if a_str.ends_with('%') {
+                ((a_str[..a_str.len() - 1].parse::<f32>().ok()? / 100.0) * 255.0).round() as u8
+            } else {
+                (a_str.parse::<f32>().ok()? * 255.0).round() as u8
+            }
+        } else {
+            255
+        };
+
+        // Validate ranges
+        if l.is_nan() || c.is_nan() || h.is_nan() {
+            return None;
+        }
+
+        Some(Self::oklch(l.clamp(0.0, 1.0), c.max(0.0), h, a))
+    }
+
+    /// Parse any supported color format.
+    ///
+    /// Supports:
+    /// - hex (#RGB, #RRGGBB, #RRGGBBAA)
+    /// - oklch() function
+    /// - "transparent" keyword
+    /// - "default" or "inherit" for terminal default
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spark_tui::types::Rgba;
+    ///
+    /// // Hex colors
+    /// let red = Rgba::parse("#ff0000").unwrap();
+    /// assert_eq!(red, Rgba::rgb(255, 0, 0));
+    ///
+    /// // OKLCH colors
+    /// let purple = Rgba::parse("oklch(0.75 0.15 300)").unwrap();
+    ///
+    /// // Special keywords
+    /// let trans = Rgba::parse("transparent").unwrap();
+    /// assert_eq!(trans, Rgba::TRANSPARENT);
+    ///
+    /// let def = Rgba::parse("default").unwrap();
+    /// assert!(def.is_terminal_default());
+    ///
+    /// // Invalid returns None
+    /// assert!(Rgba::parse("invalid-color").is_none());
+    /// ```
+    pub fn parse(input: &str) -> Option<Self> {
+        let input = input.trim();
+
+        // Handle empty string
+        if input.is_empty() {
+            return None;
+        }
+
+        let lower = input.to_lowercase();
+
+        // Special keywords
+        match lower.as_str() {
+            "transparent" => return Some(Self::TRANSPARENT),
+            "default" | "inherit" | "initial" | "currentcolor" => {
+                return Some(Self::TERMINAL_DEFAULT)
+            }
+            _ => {}
+        }
+
+        // Hex colors
+        if input.starts_with('#') || input.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Self::from_hex(input);
+        }
+
+        // OKLCH colors
+        if lower.starts_with("oklch(") {
+            return Self::from_oklch_str(input);
+        }
+
+        None
+    }
 }
 
 // =============================================================================
@@ -845,4 +1103,348 @@ pub enum RenderMode {
     Inline,
     /// Active content at bottom, history via renderToHistory().
     Append,
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // Rgba::from_rgb_int tests
+    // =========================================================================
+
+    #[test]
+    fn test_rgba_from_rgb_int_basic() {
+        let red = Rgba::from_rgb_int(0xff0000);
+        assert_eq!(red, Rgba::rgb(255, 0, 0));
+
+        let green = Rgba::from_rgb_int(0x00ff00);
+        assert_eq!(green, Rgba::rgb(0, 255, 0));
+
+        let blue = Rgba::from_rgb_int(0x0000ff);
+        assert_eq!(blue, Rgba::rgb(0, 0, 255));
+
+        let black = Rgba::from_rgb_int(0x000000);
+        assert_eq!(black, Rgba::rgb(0, 0, 0));
+
+        let white = Rgba::from_rgb_int(0xffffff);
+        assert_eq!(white, Rgba::rgb(255, 255, 255));
+    }
+
+    #[test]
+    fn test_rgba_from_rgb_int_theme_colors() {
+        // Dracula theme colors
+        let dracula_bg = Rgba::from_rgb_int(0x282a36);
+        assert_eq!(dracula_bg, Rgba::rgb(40, 42, 54));
+
+        let dracula_fg = Rgba::from_rgb_int(0xf8f8f2);
+        assert_eq!(dracula_fg, Rgba::rgb(248, 248, 242));
+
+        let dracula_comment = Rgba::from_rgb_int(0x6272a4);
+        assert_eq!(dracula_comment, Rgba::rgb(98, 114, 164));
+    }
+
+    // =========================================================================
+    // Rgba::from_hex tests
+    // =========================================================================
+
+    #[test]
+    fn test_rgba_from_hex_rrggbb() {
+        let red = Rgba::from_hex("#ff0000").unwrap();
+        assert_eq!(red, Rgba::rgb(255, 0, 0));
+
+        let green = Rgba::from_hex("#00ff00").unwrap();
+        assert_eq!(green, Rgba::rgb(0, 255, 0));
+
+        let blue = Rgba::from_hex("#0000ff").unwrap();
+        assert_eq!(blue, Rgba::rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn test_rgba_from_hex_rgb_shorthand() {
+        let white = Rgba::from_hex("#fff").unwrap();
+        assert_eq!(white, Rgba::rgb(255, 255, 255));
+
+        let black = Rgba::from_hex("#000").unwrap();
+        assert_eq!(black, Rgba::rgb(0, 0, 0));
+
+        let red = Rgba::from_hex("#f00").unwrap();
+        assert_eq!(red, Rgba::rgb(255, 0, 0));
+
+        // #abc expands to #aabbcc
+        let abc = Rgba::from_hex("#abc").unwrap();
+        assert_eq!(abc, Rgba::rgb(0xaa, 0xbb, 0xcc));
+    }
+
+    #[test]
+    fn test_rgba_from_hex_with_alpha() {
+        let semi_transparent_red = Rgba::from_hex("#ff000080").unwrap();
+        assert_eq!(semi_transparent_red, Rgba::new(255, 0, 0, 128));
+
+        let fully_transparent = Rgba::from_hex("#00000000").unwrap();
+        assert_eq!(fully_transparent, Rgba::new(0, 0, 0, 0));
+
+        let fully_opaque = Rgba::from_hex("#ff0000ff").unwrap();
+        assert_eq!(fully_opaque, Rgba::new(255, 0, 0, 255));
+    }
+
+    #[test]
+    fn test_rgba_from_hex_without_hash() {
+        let red = Rgba::from_hex("ff0000").unwrap();
+        assert_eq!(red, Rgba::rgb(255, 0, 0));
+
+        let short = Rgba::from_hex("abc").unwrap();
+        assert_eq!(short, Rgba::rgb(0xaa, 0xbb, 0xcc));
+    }
+
+    #[test]
+    fn test_rgba_from_hex_case_insensitive() {
+        let upper = Rgba::from_hex("#AABBCC").unwrap();
+        let lower = Rgba::from_hex("#aabbcc").unwrap();
+        let mixed = Rgba::from_hex("#AaBbCc").unwrap();
+        assert_eq!(upper, lower);
+        assert_eq!(lower, mixed);
+    }
+
+    #[test]
+    fn test_rgba_from_hex_whitespace() {
+        let trimmed = Rgba::from_hex("  #ff0000  ").unwrap();
+        assert_eq!(trimmed, Rgba::rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn test_rgba_from_hex_invalid() {
+        // Invalid characters
+        assert!(Rgba::from_hex("#gg0000").is_none());
+        assert!(Rgba::from_hex("#xyz").is_none());
+
+        // Wrong length
+        assert!(Rgba::from_hex("#f").is_none());
+        assert!(Rgba::from_hex("#ff").is_none());
+        assert!(Rgba::from_hex("#ffff").is_none());
+        assert!(Rgba::from_hex("#fffff").is_none());
+        assert!(Rgba::from_hex("#fffffff").is_none());
+        assert!(Rgba::from_hex("#fffffffff").is_none());
+
+        // Empty string
+        assert!(Rgba::from_hex("").is_none());
+        assert!(Rgba::from_hex("#").is_none());
+    }
+
+    // =========================================================================
+    // Rgba::from_oklch_str tests
+    // =========================================================================
+
+    #[test]
+    fn test_rgba_from_oklch_str_basic() {
+        // Purple from Dracula theme
+        let purple = Rgba::from_oklch_str("oklch(0.75 0.15 300)").unwrap();
+        // Check it's in the purple range (hue 300 = magenta/purple)
+        assert!(purple.r > 100); // Has some red
+        assert!(purple.g < 200); // Less green
+        assert!(purple.b > 200); // High blue
+
+        // Bright yellow
+        let yellow = Rgba::from_oklch_str("oklch(0.9 0.15 100)").unwrap();
+        assert!(yellow.r > 200); // High red
+        assert!(yellow.g > 200); // High green
+        assert!(yellow.b < 150); // Low blue
+    }
+
+    #[test]
+    fn test_rgba_from_oklch_str_with_percentage_lightness() {
+        let bright = Rgba::from_oklch_str("oklch(80% 0.2 180)").unwrap();
+        // 80% = 0.8 lightness, should be fairly bright cyan (hue 180)
+        assert!(bright.r < 150);
+        assert!(bright.g > 150);
+        assert!(bright.b > 150);
+    }
+
+    #[test]
+    fn test_rgba_from_oklch_str_with_alpha() {
+        let semi = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 0.5)").unwrap();
+        // 0.5 * 255 = 127.5, rounds to 127 or 128 depending on rounding
+        assert!(semi.a >= 127 && semi.a <= 128);
+
+        let percent_alpha = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 50%)").unwrap();
+        assert!(percent_alpha.a >= 127 && percent_alpha.a <= 128);
+
+        let full_alpha = Rgba::from_oklch_str("oklch(0.7 0.15 200 / 1)").unwrap();
+        assert_eq!(full_alpha.a, 255);
+    }
+
+    #[test]
+    fn test_rgba_from_oklch_str_with_units() {
+        // With deg unit (should work the same as without)
+        let deg = Rgba::from_oklch_str("oklch(0.75 0.15 300deg)").unwrap();
+        let no_unit = Rgba::from_oklch_str("oklch(0.75 0.15 300)").unwrap();
+        assert_eq!(deg, no_unit);
+
+        // With rad unit (180 degrees = PI radians)
+        let rad = Rgba::from_oklch_str("oklch(0.75 0.1 3.14159rad)").unwrap();
+        // ~180 degrees = cyan/teal
+        assert!(rad.g > rad.r);
+        assert!(rad.b > rad.r);
+
+        // With turn unit (0.5 turn = 180 degrees)
+        let turn = Rgba::from_oklch_str("oklch(0.75 0.1 0.5turn)").unwrap();
+        // Should be similar to 180 degrees
+        assert!(turn.g > turn.r);
+    }
+
+    #[test]
+    fn test_rgba_from_oklch_str_edge_cases() {
+        // Black (L=0)
+        let black = Rgba::from_oklch_str("oklch(0 0 0)").unwrap();
+        assert_eq!(black.r, 0);
+        assert_eq!(black.g, 0);
+        assert_eq!(black.b, 0);
+
+        // White (L=1, C=0) - may be 254 or 255 due to gamma correction precision
+        let white = Rgba::from_oklch_str("oklch(1 0 0)").unwrap();
+        assert!(white.r >= 254);
+        assert!(white.g >= 254);
+        assert!(white.b >= 254);
+
+        // Gray (L=0.5, C=0) - OKLCH mid-gray in perceptual space
+        let gray = Rgba::from_oklch_str("oklch(0.5 0 0)").unwrap();
+        // L=0.5 in OKLCH is perceptual mid-gray (roughly sRGB ~99)
+        assert!(gray.r > 80 && gray.r < 120, "gray.r = {}", gray.r);
+        // Should be neutral gray (R=G=B within floating point tolerance)
+        assert!((gray.r - gray.g).abs() <= 1);
+        assert!((gray.g - gray.b).abs() <= 1);
+    }
+
+    #[test]
+    fn test_rgba_from_oklch_str_case_insensitive() {
+        let lower = Rgba::from_oklch_str("oklch(0.75 0.15 300)").unwrap();
+        let upper = Rgba::from_oklch_str("OKLCH(0.75 0.15 300)").unwrap();
+        let mixed = Rgba::from_oklch_str("OkLcH(0.75 0.15 300)").unwrap();
+        assert_eq!(lower, upper);
+        assert_eq!(upper, mixed);
+    }
+
+    #[test]
+    fn test_rgba_from_oklch_str_invalid() {
+        // Not oklch
+        assert!(Rgba::from_oklch_str("rgb(255, 0, 0)").is_none());
+        assert!(Rgba::from_oklch_str("#ff0000").is_none());
+        assert!(Rgba::from_oklch_str("oklch").is_none());
+
+        // Missing parentheses
+        assert!(Rgba::from_oklch_str("oklch 0.5 0.1 200").is_none());
+        assert!(Rgba::from_oklch_str("oklch(0.5 0.1 200").is_none());
+
+        // Too few values
+        assert!(Rgba::from_oklch_str("oklch(0.5 0.1)").is_none());
+        assert!(Rgba::from_oklch_str("oklch(0.5)").is_none());
+        assert!(Rgba::from_oklch_str("oklch()").is_none());
+
+        // Invalid numbers
+        assert!(Rgba::from_oklch_str("oklch(abc 0.1 200)").is_none());
+    }
+
+    // =========================================================================
+    // Rgba::parse tests
+    // =========================================================================
+
+    #[test]
+    fn test_rgba_parse_hex() {
+        let hex6 = Rgba::parse("#ff0000").unwrap();
+        assert_eq!(hex6, Rgba::rgb(255, 0, 0));
+
+        let hex3 = Rgba::parse("#f00").unwrap();
+        assert_eq!(hex3, Rgba::rgb(255, 0, 0));
+
+        let hex8 = Rgba::parse("#ff000080").unwrap();
+        assert_eq!(hex8, Rgba::new(255, 0, 0, 128));
+    }
+
+    #[test]
+    fn test_rgba_parse_oklch() {
+        let oklch = Rgba::parse("oklch(0.75 0.15 300)").unwrap();
+        // Should be purple
+        assert!(oklch.b > 200);
+    }
+
+    #[test]
+    fn test_rgba_parse_special_keywords() {
+        let trans = Rgba::parse("transparent").unwrap();
+        assert_eq!(trans, Rgba::TRANSPARENT);
+
+        let def = Rgba::parse("default").unwrap();
+        assert!(def.is_terminal_default());
+
+        let inherit = Rgba::parse("inherit").unwrap();
+        assert!(inherit.is_terminal_default());
+
+        let initial = Rgba::parse("initial").unwrap();
+        assert!(initial.is_terminal_default());
+
+        let current = Rgba::parse("currentColor").unwrap();
+        assert!(current.is_terminal_default());
+    }
+
+    #[test]
+    fn test_rgba_parse_case_insensitive() {
+        let upper = Rgba::parse("TRANSPARENT").unwrap();
+        let lower = Rgba::parse("transparent").unwrap();
+        let mixed = Rgba::parse("Transparent").unwrap();
+        assert_eq!(upper, lower);
+        assert_eq!(lower, mixed);
+
+        let default_upper = Rgba::parse("DEFAULT").unwrap();
+        assert!(default_upper.is_terminal_default());
+    }
+
+    #[test]
+    fn test_rgba_parse_whitespace() {
+        let trimmed = Rgba::parse("  #ff0000  ").unwrap();
+        assert_eq!(trimmed, Rgba::rgb(255, 0, 0));
+
+        let oklch_trimmed = Rgba::parse("  oklch(0.75 0.15 300)  ").unwrap();
+        assert!(oklch_trimmed.b > 200);
+    }
+
+    #[test]
+    fn test_rgba_parse_invalid() {
+        assert!(Rgba::parse("").is_none());
+        assert!(Rgba::parse("invalid").is_none());
+        assert!(Rgba::parse("rgb(255, 0, 0)").is_none()); // rgb() not supported
+        assert!(Rgba::parse("hsl(0, 100%, 50%)").is_none()); // hsl() not supported
+    }
+
+    // =========================================================================
+    // Rgba OKLCH round-trip tests
+    // =========================================================================
+
+    #[test]
+    fn test_rgba_oklch_round_trip() {
+        // Create a color with OKLCH
+        let original = Rgba::oklch(0.75, 0.15, 300.0, 255);
+
+        // Convert to OKLCH
+        let (l, c, h) = original.to_oklch().unwrap();
+
+        // Create new color from those values
+        let recreated = Rgba::oklch(l, c, h, 255);
+
+        // Should be very close (within 1 due to float precision)
+        assert!((original.r - recreated.r).abs() <= 1);
+        assert!((original.g - recreated.g).abs() <= 1);
+        assert!((original.b - recreated.b).abs() <= 1);
+    }
+
+    #[test]
+    fn test_rgba_to_oklch_special_colors() {
+        // Terminal default can't be converted
+        assert!(Rgba::TERMINAL_DEFAULT.to_oklch().is_none());
+
+        // ANSI colors can't be converted
+        assert!(Rgba::ansi(12).to_oklch().is_none());
+    }
 }
