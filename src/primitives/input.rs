@@ -744,4 +744,134 @@ mod tests {
 
         assert_eq!(interaction::get_tab_index(0), 5);
     }
+
+    // =========================================================================
+    // Word Boundary Helper Tests
+    // =========================================================================
+
+    #[test]
+    fn test_find_word_start_basic() {
+        // "hello world" - from position 8 (middle of "world") should go to 6 (start of "world")
+        assert_eq!(find_word_start("hello world", 8), 6);
+
+        // From end of "world" (11) should go to start of "world" (6)
+        assert_eq!(find_word_start("hello world", 11), 6);
+
+        // From middle of "hello" (3) should go to 0
+        assert_eq!(find_word_start("hello world", 3), 0);
+    }
+
+    #[test]
+    fn test_find_word_start_at_word_boundary() {
+        // At position 6 (start of "world"), should skip back over space to "hello"
+        assert_eq!(find_word_start("hello world", 6), 0);
+
+        // At position 5 (the space), should go to start of "hello"
+        assert_eq!(find_word_start("hello world", 5), 0);
+    }
+
+    #[test]
+    fn test_find_word_start_edge_cases() {
+        // At position 0 - stays at 0
+        assert_eq!(find_word_start("hello", 0), 0);
+
+        // Empty string
+        assert_eq!(find_word_start("", 0), 0);
+
+        // Single word - from end should go to 0
+        assert_eq!(find_word_start("hello", 5), 0);
+
+        // Multiple spaces: "hello   world" - from position 10 should go to 8 (start of "world")
+        assert_eq!(find_word_start("hello   world", 10), 8);
+    }
+
+    #[test]
+    fn test_find_word_start_with_punctuation() {
+        // "hello, world" - punctuation is non-alphanumeric, treated like space
+        // From position 9 (middle of "world"), should go to 7
+        assert_eq!(find_word_start("hello, world", 9), 7);
+
+        // From position 7 (start of "world"), skips ", " and goes to start of "hello"
+        assert_eq!(find_word_start("hello, world", 7), 0);
+    }
+
+    #[test]
+    fn test_find_word_end_basic() {
+        // "hello world" - from position 0 should go to 5 (end of "hello")
+        assert_eq!(find_word_end("hello world", 0), 5);
+
+        // From position 6 (start of "world") should go to 11 (end)
+        assert_eq!(find_word_end("hello world", 6), 11);
+
+        // From middle of "hello" (2) should go to 5
+        assert_eq!(find_word_end("hello world", 2), 5);
+    }
+
+    #[test]
+    fn test_find_word_end_at_word_boundary() {
+        // At position 5 (end of "hello", before space), should skip space and go to end of "world"
+        assert_eq!(find_word_end("hello world", 5), 11);
+    }
+
+    #[test]
+    fn test_find_word_end_edge_cases() {
+        // At end of string - stays at end
+        assert_eq!(find_word_end("hello", 5), 5);
+
+        // Empty string
+        assert_eq!(find_word_end("", 0), 0);
+
+        // Beyond string length
+        assert_eq!(find_word_end("hello", 10), 5);
+
+        // Multiple spaces: "hello   world" - from position 5 should skip spaces to end of "world"
+        assert_eq!(find_word_end("hello   world", 5), 13);
+    }
+
+    #[test]
+    fn test_find_word_end_with_punctuation() {
+        // "hello, world" - from position 0 should go to 5 (end of "hello")
+        assert_eq!(find_word_end("hello, world", 0), 5);
+
+        // From position 5 (end of "hello"), skips ", " and ends at "world"
+        assert_eq!(find_word_end("hello, world", 5), 12);
+    }
+
+    // =========================================================================
+    // Selection Tests (using interaction arrays directly)
+    // =========================================================================
+
+    #[test]
+    fn test_selection_getters_setters() {
+        setup();
+
+        // Default selection is 0,0
+        assert_eq!(interaction::get_selection_start(0), 0);
+        assert_eq!(interaction::get_selection_end(0), 0);
+
+        // Set selection
+        interaction::set_selection(0, 5, 10);
+        assert_eq!(interaction::get_selection_start(0), 5);
+        assert_eq!(interaction::get_selection_end(0), 10);
+
+        // Has selection
+        assert!(interaction::has_selection(0));
+
+        // Clear selection
+        interaction::clear_selection(0);
+        assert_eq!(interaction::get_selection_start(0), 0);
+        assert_eq!(interaction::get_selection_end(0), 0);
+        assert!(!interaction::has_selection(0));
+    }
+
+    #[test]
+    fn test_selection_individual_setters() {
+        setup();
+
+        interaction::set_selection_start(0, 3);
+        interaction::set_selection_end(0, 7);
+
+        assert_eq!(interaction::get_selection_start(0), 3);
+        assert_eq!(interaction::get_selection_end(0), 7);
+    }
 }
