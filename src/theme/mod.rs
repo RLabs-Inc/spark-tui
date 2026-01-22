@@ -23,6 +23,7 @@
 //! let primary = dracula.primary.resolve();
 //! ```
 
+use spark_signals::Reactive;
 use crate::types::Rgba;
 
 pub mod presets;
@@ -159,7 +160,11 @@ impl From<Option<u32>> for ThemeColor {
 /// - Text: text, text_muted, text_dim, text_disabled, text_bright
 /// - Background: background, background_muted, surface, overlay
 /// - Border: border, border_focus
-#[derive(Debug, Clone)]
+///
+/// The `#[derive(Reactive)]` macro generates `ReactiveTheme` where each field
+/// becomes a `Signal<T>`. This enables fine-grained reactivity - changing one
+/// color only notifies deriveds reading that specific color.
+#[derive(Debug, Clone, Reactive)]
 pub struct Theme {
     /// Theme name (e.g., "dracula", "nord").
     pub name: String,

@@ -9,7 +9,7 @@ keywords = ["tui", "terminal", "ui", "reactive", "signals"]
 categories = ["command-line-interface", "gui"]
 
 [dependencies]
-spark-signals = { path = "../signals" }
+spark-signals = "0.1.0"
 bitflags = "2.9"
 taffy = "0.7"
 crossterm = "0.28"
