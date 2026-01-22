@@ -92,13 +92,13 @@ Plans:
 
 **Plans:** 4 plans
 
-**Status:** PLANNED
+**Status:** COMPLETE (2026-01-22)
 
 Plans:
-- [ ] 03-01-PLAN.md - Types and foundation (InputProps, CursorStyle, basic rendering)
-- [ ] 03-02-PLAN.md - Word navigation and Ctrl+A (Ctrl+arrows, Ctrl+Backspace/Delete)
-- [ ] 03-03-PLAN.md - Selection and clipboard (Shift+arrows, Ctrl+C/V/X)
-- [ ] 03-04-PLAN.md - History and overflow (Up/Down arrows, scroll offset)
+- [x] 03-01-PLAN.md - Types and foundation (InputProps, CursorStyle, basic rendering)
+- [x] 03-02-PLAN.md - Word navigation and Ctrl+A (Ctrl+arrows, Ctrl+Backspace/Delete)
+- [x] 03-03-PLAN.md - Selection and clipboard (Shift+arrows, Ctrl+C/V/X)
+- [x] 03-04-PLAN.md - History and overflow (Up/Down arrows, scroll offset)
 
 ---
 
