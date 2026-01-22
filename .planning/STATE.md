@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 3 - Input Component (IN PROGRESS)
+**Current focus:** Phase 3 - Input Component (COMPLETE)
 
 ---
 
 ## Current Position
 
 **Phase:** 3 of 6 (Input Component)
-**Plan:** 2 of 3 complete
-**Status:** In progress
+**Plan:** 3 of 3 complete
+**Status:** Phase complete
 
-Last activity: 2026-01-22 - Completed 03-02-PLAN.md
+Last activity: 2026-01-22 - Completed 03-03-PLAN.md
 
-Progress: [##########] 83% (10/12 total plans)
+Progress: [###########] 92% (11/12 total plans)
 
 ---
 
@@ -25,17 +25,17 @@ Progress: [##########] 83% (10/12 total plans)
 
 **Phase 3: Input Component**
 
-Status: IN PROGRESS (2/3 plans complete)
+Status: COMPLETE (3/3 plans complete)
 
 ### Requirements Progress
 - [x] R3.1: Input component foundation (03-01)
 - [x] R3.2: Selection support (03-02)
-- [ ] R3.3: Advanced features (03-03)
+- [x] R3.3: Clipboard and selection (03-03)
 
 ### Plans
 - [x] 03-01: Input foundation, props, basic rendering
 - [x] 03-02: Word navigation and selection
-- [ ] 03-03: Advanced features
+- [x] 03-03: Selection and clipboard
 
 ---
 
@@ -45,7 +45,7 @@ Status: IN PROGRESS (2/3 plans complete)
 |-------|--------|----------|
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
-| 3. Input Component | In Progress | 67% (2/3) |
+| 3. Input Component | Complete | 100% (3/3) |
 | 4. Scroll System | Not Started | 0% |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
@@ -79,10 +79,23 @@ Status: IN PROGRESS (2/3 plans complete)
 | display-text-getter | Display text computed via getter for placeholder+masking | Ensures reactive correctness | 2026-01-22 |
 | word-boundary-alphanumeric | Word boundary uses is_alphanumeric() | Simple, handles Unicode, matches common editor behavior | 2026-01-22 |
 | punctuation-word-separator | Punctuation treated as word separator like whitespace | Consistent with most text editors | 2026-01-22 |
+| internal-clipboard-buffer | Clipboard uses internal thread_local buffer | No external dependencies, works in all environments | 2026-01-22 |
+| navigation-clears-selection | Arrow without Shift clears selection and moves to boundary | Matches standard editor behavior | 2026-01-22 |
 
 ---
 
 ## Session Log
+
+### 2026-01-22 — Plan 03-03 Execution
+- Created src/state/clipboard.rs with copy/paste/cut functions
+- Added selection helpers to input.rs (has_selection, get_selected_text, delete_selection)
+- Shift+Arrow character selection
+- Shift+Ctrl+Arrow word selection
+- Shift+Home/End boundary selection
+- Ctrl+C copies, Ctrl+V pastes, Ctrl+X cuts
+- Typing with selection replaces selection
+- 21 new tests for clipboard and selection
+- All 306 tests pass
 
 ### 2026-01-22 — Plan 03-02 Execution
 - Added find_word_start/find_word_end helpers to input.rs
@@ -189,9 +202,9 @@ Status: IN PROGRESS (2/3 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 19:49 UTC
-Stopped at: Completed 03-02-PLAN.md
-Resume file: None - continue with 03-03
+Last session: 2026-01-22 19:56 UTC
+Stopped at: Completed 03-03-PLAN.md (Phase 3 complete)
+Resume file: None - ready for Phase 4
 
 ---
 
@@ -209,7 +222,7 @@ None currently.
 - TDD approach: write tests first
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
-- Phase 3 in progress - 285 tests total.
+- Phase 3 complete! 306 tests total.
 
 ---
 
