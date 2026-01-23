@@ -119,7 +119,16 @@ Plans:
 **Dependencies:**
 - Phase 1 (mouse wheel events)
 
-**Plans:** 0 plans
+**Plans:** 5 plans
+
+**Status:** GAPS FOUND - Gap closure plan created
+
+Plans:
+- [x] 04-01-PLAN.md - Scroll core module (offset, bounds, operations)
+- [x] 04-02-PLAN.md - Keyboard scroll handlers (arrow, page, home/end)
+- [x] 04-03-PLAN.md - Mouse wheel scroll handlers (chaining, scrollIntoView)
+- [x] 04-04-PLAN.md - Scrollbar rendering + stick_to_bottom
+- [ ] 04-05-PLAN.md - Gap closure: pipeline integration (layout accessor, stick_to_bottom effect)
 
 ---
 
