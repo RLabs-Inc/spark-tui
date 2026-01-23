@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 **Phase:** 5 of 6 (Cursor System)
-**Plan:** 2 of 4 complete
+**Plan:** 3 of 4 complete
 **Status:** In Progress
 
-Last activity: 2026-01-23 - Completed 05-02-PLAN.md
+Last activity: 2026-01-23 - Completed 05-03-PLAN.md
 
-Progress: [##################-] 90% (19/21 total plans)
+Progress: [###################] 95% (20/21 total plans)
 
 ---
 
@@ -25,18 +25,18 @@ Progress: [##################-] 90% (19/21 total plans)
 
 **Phase 5: Cursor System**
 
-Status: IN PROGRESS (2/4 plans complete)
+Status: IN PROGRESS (3/4 plans complete)
 
 ### Requirements Progress
 - [x] R5.1: Blink animation module (05-01)
 - [x] R5.2: Terminal cursor API + arrays (05-02)
-- [ ] R5.3: Drawn cursor module (05-03)
+- [x] R5.3: Drawn cursor module (05-03)
 - [ ] R5.4: Pipeline integration (05-04)
 
 ### Plans
 - [x] 05-01: Blink animation module
 - [x] 05-02: Terminal cursor API and arrays
-- [ ] 05-03: Drawn cursor module
+- [x] 05-03: Drawn cursor module
 - [ ] 05-04: Pipeline integration
 
 ---
@@ -49,7 +49,7 @@ Status: IN PROGRESS (2/4 plans complete)
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Complete | 100% (5/5) |
-| 5. Cursor System | In Progress | 50% (2/4) |
+| 5. Cursor System | In Progress | 75% (3/4) |
 | 6. Control Flow | Not Started | 0% |
 
 ---
@@ -95,10 +95,23 @@ Status: IN PROGRESS (2/4 plans complete)
 | global-layout-accessor | Thread-local cache with set/get/clear for layout | Scroll handlers can't receive layout as parameter from keyboard/mouse dispatch | 2026-01-22 |
 | cursor-shape-vs-style | Keep CursorShape (ansi.rs) and CursorStyle (types.rs) separate | They serve different purposes: Shape for terminal control, Style for component config | 2026-01-23 |
 | atomic-blink-phase | Use Arc<AtomicBool> for cross-thread blink phase | Signal<T> uses Rc<RefCell> which isn't Send | 2026-01-23 |
+| box-tests-for-cursor | Use Box primitives in drawn_cursor tests | Input creates its own cursor, tests need focusable-only components | 2026-01-23 |
 
 ---
 
 ## Session Log
+
+### 2026-01-23 — Plan 05-03 Execution
+- Created src/state/drawn_cursor.rs (587 lines) with DrawnCursor control object
+- DrawnCursorConfig for style, char, blink, fps, alt_char configuration
+- create_cursor() sets arrays and creates cursor_visible getter closure
+- Focus callbacks trigger blink subscribe (on_focus) / unsubscribe (on_blur)
+- cursor_visible getter checks: manual override -> focus state -> blink phase
+- dispose_cursor() for cleanup
+- Integrated into Input component: creates cursor on mount, disposes on cleanup
+- Fixed tests to use Box primitives (Input now creates its own cursor)
+- 8 new tests for drawn cursor module
+- All 421 tests pass (402 unit + 19 doc)
 
 ### 2026-01-23 — Plan 05-02 Execution
 - Created src/state/cursor.rs (343 lines) with terminal cursor API
@@ -291,9 +304,9 @@ Status: IN PROGRESS (2/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-23 14:17 UTC
-Stopped at: Completed 05-02-PLAN.md
-Resume file: None - ready for 05-03
+Last session: 2026-01-23 15:30 UTC
+Stopped at: Completed 05-03-PLAN.md
+Resume file: None - ready for 05-04
 
 ---
 
@@ -312,8 +325,8 @@ None currently.
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
-- Phase 4 complete! 398 tests total. (gap closure: 379 → 398)
-- Phase 5 in progress! 413 tests total.
+- Phase 4 complete! 398 tests total. (gap closure: 379 -> 398)
+- Phase 5 in progress! 421 tests total.
 
 ---
 
