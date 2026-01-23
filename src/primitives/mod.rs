@@ -3,6 +3,11 @@
 //! This module provides the core UI primitives:
 //! - [`box_primitive`] - Container with flexbox layout, borders, and background
 //! - [`text`] - Text display with styling and wrapping
+//! - [`input`] - Single-line text input with two-way binding
+//!
+//! # Control Flow
+//!
+//! - [`show`] - Conditional rendering based on reactive conditions
 //!
 //! # Architecture
 //!
@@ -33,8 +38,10 @@ mod types;
 mod box_primitive;
 mod text;
 mod input;
+mod control_flow;
 
 pub use types::*;
 pub use box_primitive::box_primitive;
 pub use text::text;
 pub use input::input;
+pub use control_flow::{show, AsyncState, WhenOptions};
