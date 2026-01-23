@@ -149,11 +149,13 @@ Plans:
 
 **Plans:** 4 plans
 
+**Status:** COMPLETE (2026-01-23)
+
 Plans:
-- [ ] 05-01-PLAN.md - Blink animation system (shared clocks per FPS)
-- [ ] 05-02-PLAN.md - Terminal cursor API and cursor arrays
-- [ ] 05-03-PLAN.md - Drawn cursor module and Input integration
-- [ ] 05-04-PLAN.md - Cursor and selection rendering in FrameBuffer
+- [x] 05-01-PLAN.md - Blink animation system (shared clocks per FPS)
+- [x] 05-02-PLAN.md - Terminal cursor API and cursor arrays
+- [x] 05-03-PLAN.md - Drawn cursor module and Input integration
+- [x] 05-04-PLAN.md - Cursor and selection rendering in FrameBuffer
 
 ---
 

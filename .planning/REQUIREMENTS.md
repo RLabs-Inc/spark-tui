@@ -217,11 +217,13 @@ Complete port of TypeScript TUI framework to Rust with identical ergonomics and 
 - Hide cursor when input blurred
 - Reset blink phase on focus
 
+**Status:** COMPLETE (2026-01-23)
+
 **Success Criteria:**
-- [ ] Cursor visible at correct position in Input
-- [ ] Cursor blinks at correct rate
-- [ ] Cursor hidden when Input not focused
-- [ ] Different cursor styles render correctly
+- [x] Cursor visible at correct position in Input
+- [x] Cursor blinks at correct rate
+- [x] Cursor hidden when Input not focused
+- [x] Different cursor styles render correctly
 
 ---
 
