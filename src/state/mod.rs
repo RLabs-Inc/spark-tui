@@ -9,9 +9,12 @@
 //! - **Global Keys** - Global keyboard shortcuts (Ctrl+C, Tab navigation)
 //! - **Clipboard** - Text copy/paste with internal buffer
 //! - **Scroll** - Scrollable containers, scroll chaining
-//! - **Cursor** - Drawn cursor for inputs, blink animation (future)
+//! - **Cursor** - Terminal native cursor API
+//! - **Animate** - Blink animation with shared clocks per FPS
 
+pub mod animate;
 pub mod clipboard;
+pub mod cursor;
 pub mod focus;
 pub mod global_keys;
 pub mod input;
@@ -19,7 +22,16 @@ pub mod keyboard;
 pub mod mouse;
 pub mod scroll;
 
+pub use animate::{
+    subscribe_to_blink, get_blink_phase, get_blink_phase_signal,
+    is_blink_running, get_subscriber_count, reset_blink_registries,
+};
 pub use clipboard::{copy, paste, cut, clear as clear_clipboard, has_content as clipboard_has_content};
+pub use cursor::{
+    CursorShape, cursor_show, cursor_hide, cursor_move_to, cursor_set_shape,
+    cursor_save, cursor_restore, cursor_is_visible, cursor_position, cursor_shape,
+    cursor_is_blinking, reset_cursor_state,
+};
 pub use focus::*;
 pub use global_keys::*;
 pub use input::*;
