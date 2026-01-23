@@ -172,7 +172,12 @@ Plans:
 
 **Dependencies:** None (orthogonal to other phases)
 
-**Plans:** 0 plans
+**Plans:** 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md - show() conditional rendering
+- [ ] 06-02-PLAN.md - each() list rendering with fine-grained updates
+- [ ] 06-03-PLAN.md - when() async state handling
 
 ---
 
