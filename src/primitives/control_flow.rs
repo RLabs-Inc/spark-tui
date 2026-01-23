@@ -1150,4 +1150,384 @@ mod tests {
             "duplicate key should be skipped, not crash"
         );
     }
+
+    // =========================================================================
+    // when() tests
+    // =========================================================================
+
+    /// Type alias for simple test async state
+    type TestState = AsyncState<String, String>;
+
+    #[test]
+    fn test_when_renders_pending() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Pending);
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(|| create_test_component()),
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Pending component should be created
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 1,
+            "pending branch should create one component"
+        );
+    }
+
+    #[test]
+    fn test_when_renders_resolved() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Resolved("data".to_string()));
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(|| create_test_component()),
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Then component should be created
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 1,
+            "then branch should create one component for Resolved"
+        );
+    }
+
+    #[test]
+    fn test_when_renders_rejected() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Rejected("error".to_string()));
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(|| create_test_component()),
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Catch component should be created
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 1,
+            "catch branch should create one component for Rejected"
+        );
+    }
+
+    #[test]
+    fn test_when_transitions_pending_to_resolved() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Pending);
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        // Track which branch was rendered
+        let pending_count = Rc::new(Cell::new(0));
+        let pending_clone = pending_count.clone();
+        let then_count = Rc::new(Cell::new(0));
+        let then_clone = then_count.clone();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(move || {
+                    pending_clone.set(pending_clone.get() + 1);
+                    create_test_component()
+                }),
+                then_fn: move |_data: String| {
+                    then_clone.set(then_clone.get() + 1);
+                    create_test_component()
+                },
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Initially pending
+        assert_eq!(pending_count.get(), 1);
+        assert_eq!(then_count.get(), 0);
+        assert_eq!(get_allocated_count(), initial_count + 1);
+
+        // Transition to Resolved
+        state.set(AsyncState::Resolved("data".to_string()));
+
+        // Pending destroyed, then created
+        assert_eq!(pending_count.get(), 1); // Not called again
+        assert_eq!(then_count.get(), 1); // Called once
+        assert_eq!(get_allocated_count(), initial_count + 1); // Still one component
+    }
+
+    #[test]
+    fn test_when_transitions_pending_to_rejected() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Pending);
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        // Track which branch was rendered
+        let pending_count = Rc::new(Cell::new(0));
+        let pending_clone = pending_count.clone();
+        let catch_count = Rc::new(Cell::new(0));
+        let catch_clone = catch_count.clone();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(move || {
+                    pending_clone.set(pending_clone.get() + 1);
+                    create_test_component()
+                }),
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: Some(move |_err: String| {
+                    catch_clone.set(catch_clone.get() + 1);
+                    create_test_component()
+                }),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Initially pending
+        assert_eq!(pending_count.get(), 1);
+        assert_eq!(catch_count.get(), 0);
+
+        // Transition to Rejected
+        state.set(AsyncState::Rejected("error".to_string()));
+
+        // Pending destroyed, catch created
+        assert_eq!(pending_count.get(), 1); // Not called again
+        assert_eq!(catch_count.get(), 1); // Called once
+        assert_eq!(get_allocated_count(), initial_count + 1); // Still one component
+    }
+
+    #[test]
+    fn test_when_no_pending_handler() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Pending);
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        // No pending handler - should not crash
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: None::<fn() -> Cleanup>,
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // No component created (no pending handler)
+        assert_eq!(
+            get_allocated_count(),
+            initial_count,
+            "no pending handler means no component in Pending state"
+        );
+    }
+
+    #[test]
+    fn test_when_no_catch_handler() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Rejected("error".to_string()));
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        // No catch handler - should log to stderr but not crash
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(|| create_test_component()),
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: None::<fn(String) -> Cleanup>,
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // No component created (error logged to stderr)
+        assert_eq!(
+            get_allocated_count(),
+            initial_count,
+            "no catch handler means no component in Rejected state (error logged)"
+        );
+    }
+
+    #[test]
+    fn test_when_cleanup_destroys_current() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Resolved("data".to_string()));
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        let cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(|| create_test_component()),
+                then_fn: |_data: String| create_test_component(),
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Component exists
+        assert_eq!(get_allocated_count(), initial_count + 1);
+
+        // Cleanup destroys it
+        cleanup();
+        assert_eq!(
+            get_allocated_count(),
+            initial_count,
+            "cleanup should destroy current component"
+        );
+    }
+
+    #[test]
+    fn test_when_nested_parent_context() {
+        use crate::engine::arrays::core::set_parent_index;
+
+        reset_registry();
+
+        // Create a parent component
+        let parent_index = allocate_index(Some("parent"));
+
+        // Push parent context as if we're inside parent's children
+        push_parent_context(parent_index);
+
+        let state: Signal<TestState> = signal(AsyncState::Resolved("data".to_string()));
+        let state_clone = state.clone();
+
+        // Track the created component's parent
+        let created_parent: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let created_parent_clone = created_parent.clone();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(|| create_test_component()),
+                then_fn: move |_data: String| {
+                    let index = allocate_index(None);
+                    // Get current parent and store it
+                    let current_parent = get_current_parent_index();
+                    created_parent_clone.set(current_parent);
+                    // Set parent in arrays
+                    if let Some(p) = current_parent {
+                        set_parent_index(index, Some(p));
+                    }
+                    Box::new(move || release_index(index)) as Cleanup
+                },
+                catch_fn: Some(|_err: String| create_test_component()),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        pop_parent_context();
+
+        // Verify the created component has correct parent
+        assert_eq!(
+            created_parent.get(),
+            Some(parent_index),
+            "component created inside when() should have correct parent"
+        );
+
+        // Clean up parent
+        release_index(parent_index);
+    }
+
+    #[test]
+    fn test_when_multiple_state_changes() {
+        reset_registry();
+
+        let state: Signal<TestState> = signal(AsyncState::Pending);
+        let state_clone = state.clone();
+
+        let initial_count = get_allocated_count();
+
+        // Track render counts
+        let pending_count = Rc::new(Cell::new(0));
+        let pending_clone = pending_count.clone();
+        let then_count = Rc::new(Cell::new(0));
+        let then_clone = then_count.clone();
+        let catch_count = Rc::new(Cell::new(0));
+        let catch_clone = catch_count.clone();
+
+        let _cleanup = when(
+            move || state_clone.get(),
+            WhenOptions {
+                pending: Some(move || {
+                    pending_clone.set(pending_clone.get() + 1);
+                    create_test_component()
+                }),
+                then_fn: move |_data: String| {
+                    then_clone.set(then_clone.get() + 1);
+                    create_test_component()
+                },
+                catch_fn: Some(move |_err: String| {
+                    catch_clone.set(catch_clone.get() + 1);
+                    create_test_component()
+                }),
+                _marker: std::marker::PhantomData,
+            },
+        );
+
+        // Pending
+        assert_eq!(pending_count.get(), 1);
+        assert_eq!(then_count.get(), 0);
+        assert_eq!(catch_count.get(), 0);
+        assert_eq!(get_allocated_count(), initial_count + 1);
+
+        // Pending -> Resolved
+        state.set(AsyncState::Resolved("data1".to_string()));
+        assert_eq!(pending_count.get(), 1);
+        assert_eq!(then_count.get(), 1);
+        assert_eq!(catch_count.get(), 0);
+        assert_eq!(get_allocated_count(), initial_count + 1);
+
+        // Resolved -> Rejected
+        state.set(AsyncState::Rejected("error".to_string()));
+        assert_eq!(pending_count.get(), 1);
+        assert_eq!(then_count.get(), 1);
+        assert_eq!(catch_count.get(), 1);
+        assert_eq!(get_allocated_count(), initial_count + 1);
+
+        // Rejected -> Resolved again
+        state.set(AsyncState::Resolved("data2".to_string()));
+        assert_eq!(pending_count.get(), 1);
+        assert_eq!(then_count.get(), 2); // Called again
+        assert_eq!(catch_count.get(), 1);
+        assert_eq!(get_allocated_count(), initial_count + 1);
+    }
 }
