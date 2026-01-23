@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 4 - Scroll System (COMPLETE)
+**Current focus:** Phase 4 - Scroll System (COMPLETE with gap closure)
 
 ---
 
 ## Current Position
 
 **Phase:** 4 of 6 (Scroll System)
-**Plan:** 4 of 4 complete
+**Plan:** 5 of 5 complete (including gap closure plan)
 **Status:** Phase complete
 
-Last activity: 2026-01-22 - Completed 04-04-PLAN.md
+Last activity: 2026-01-22 - Completed 04-05-PLAN.md (gap closure)
 
-Progress: [################] 100% (16/16 total plans)
+Progress: [#################] 100% (17/17 total plans)
 
 ---
 
@@ -25,19 +25,21 @@ Progress: [################] 100% (16/16 total plans)
 
 **Phase 4: Scroll System**
 
-Status: COMPLETE (4/4 plans complete)
+Status: COMPLETE (5/5 plans complete, including gap closure)
 
 ### Requirements Progress
 - [x] R4.1: Scroll module core (04-01)
 - [x] R4.2: Keyboard scroll handlers (04-02)
 - [x] R4.3: Mouse wheel scroll handlers (04-03)
 - [x] R4.4: Scrollbar rendering + stick_to_bottom (04-04)
+- [x] R4.5: Pipeline integration (04-05, gap closure)
 
 ### Plans
 - [x] 04-01: Scroll core module
 - [x] 04-02: Keyboard handlers
 - [x] 04-03: Mouse handlers
 - [x] 04-04: Scrollbar rendering + stick_to_bottom
+- [x] 04-05: Pipeline integration (gap closure)
 
 ---
 
@@ -48,7 +50,7 @@ Status: COMPLETE (4/4 plans complete)
 | 1. Mouse + Events | Complete | 100% (4/4) |
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
-| 4. Scroll System | Complete | 100% (4/4) |
+| 4. Scroll System | Complete | 100% (5/5) |
 | 5. Cursor System | Not Started | 0% |
 | 6. Control Flow | Not Started | 0% |
 
@@ -86,24 +88,34 @@ Status: COMPLETE (4/4 plans complete)
 | history-position-negative-one | InputHistory uses position=-1 for "not browsing" state | Clear sentinel value, allows >= 0 check for browsing | 2026-01-22 |
 | history-skip-empty-duplicates | History push skips empty entries and consecutive duplicates | Cleaner history, matches shell behavior | 2026-01-22 |
 | scroll-offset-interaction-array | Scroll offset stored in interaction arrays | Renderer can access without prop drilling | 2026-01-22 |
-| layout-param | Pass &ComputedLayout as parameter to scroll functions | Rust functions can't access global derived like TypeScript | 2026-01-22 |
-| layout-accessor-pattern | Thread-local CURRENT_LAYOUT with set/with/clear functions | Keyboard handlers need layout access but can't receive it as parameter | 2026-01-22 |
 | keyboard-no-chaining | Keyboard scroll does NOT chain to parent | Would conflict with focus management; mouse wheel chains, keyboard doesn't | 2026-01-22 |
 | arrow-key-conditions | Arrow keys only scroll without Ctrl/Alt modifiers | Ctrl+Arrow used for word navigation in inputs | 2026-01-22 |
 | scrollbar-inside-borders | Scrollbar on right edge inside borders | Standard UI convention, visible with content | 2026-01-22 |
 | overflow-scroll-full-bar | overflow:scroll shows full scrollbar (track + thumb) | Full track + thumb for explicit scroll mode | 2026-01-22 |
 | overflow-auto-indicator | overflow:auto shows minimal scroll indicator | Less intrusive for auto mode | 2026-01-22 |
 | prev-max-for-growth | prev_max_scroll_y for content growth detection | Compare before/after to detect content addition | 2026-01-22 |
+| global-layout-accessor | Thread-local cache with set/get/clear for layout | Scroll handlers can't receive layout as parameter from keyboard/mouse dispatch | 2026-01-22 |
 
 ---
 
 ## Session Log
 
+### 2026-01-22 — Plan 04-05 Execution (Gap Closure)
+- Added global layout accessor to layout_derived.rs (set_layout, get_layout, try_get_layout, clear_layout)
+- Render effect in mount.rs now calls set_layout() after layout computation
+- Refactored scroll handlers to use get_layout() internally (no layout parameter)
+- Fixed mouse wheel focused fallback to use chaining (was missing)
+- Added stick_to_bottom reactive effect in Box component
+- Effect watches layout via try_get_layout() and calls handle_stick_to_bottom()
+- Effect cleans up when Box is destroyed
+- Updated global_keys.rs, mouse.rs, focus.rs to use new scroll API
+- All 379 tests pass
+
 ### 2026-01-22 — Plan 04-04 Execution
 - Added STICK_TO_BOTTOM and PREV_MAX_SCROLL_Y arrays to interaction.rs
 - Implemented scrollbar rendering: render_scrollbar, render_full_scrollbar, render_scroll_indicator
-- overflow:scroll shows track (░) and thumb (█)
-- overflow:auto shows position indicator (▐)
+- overflow:scroll shows track (o) and thumb (X)
+- overflow:auto shows position indicator (|)
 - Added stick_to_bottom prop to BoxProps
 - handle_stick_to_bottom for auto-scroll on content growth
 - update_stick_to_bottom_on_scroll for user scroll handling
@@ -268,8 +280,8 @@ Status: COMPLETE (4/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-22 22:49 UTC
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-01-22 23:15 UTC
+Stopped at: Completed 04-05-PLAN.md (gap closure)
 Resume file: None - Phase 4 complete, ready for Phase 5
 
 ---
@@ -289,7 +301,7 @@ None currently.
 - Phase 1 complete!
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
-- Phase 4 complete! 370 tests total.
+- Phase 4 complete! 379 tests total.
 
 ---
 
