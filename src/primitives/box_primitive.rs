@@ -35,12 +35,15 @@
 
 use std::rc::Rc;
 
+use spark_signals::effect;
+
 use crate::engine::{
     allocate_index, release_index, create_flex_node,
     get_current_parent_index, push_parent_context, pop_parent_context,
 };
 use crate::engine::arrays::{core, visual, interaction};
-use crate::state::{mouse, keyboard, focus::{self, FocusCallbacks}};
+use crate::pipeline::try_get_layout;
+use crate::state::{mouse, keyboard, focus::{self, FocusCallbacks}, scroll};
 use crate::types::{ComponentType, BorderStyle};
 use super::types::{BoxProps, PropValue, Cleanup};
 
@@ -236,8 +239,30 @@ pub fn box_primitive(props: BoxProps) -> Cleanup {
     }
 
     // Stick to bottom (auto-scroll on content growth)
+    // When enabled, we create a reactive effect that watches for layout changes
+    // and auto-scrolls to bottom when content grows
+    let mut stick_effect_cleanup: Option<Box<dyn FnOnce()>> = None;
+
     if props.stick_to_bottom {
         interaction::set_stick_to_bottom(index, true);
+
+        // Create reactive effect that watches layout and auto-scrolls
+        // This effect will re-run whenever layout changes (content grows)
+        let effect_index = index;
+        let stop_effect = effect(move || {
+            // Guard: Layout may not be initialized during component creation
+            // or before mount() sets up the render pipeline
+            if let Some(layout) = try_get_layout() {
+                // Call the existing handler which checks:
+                // - Is stick_to_bottom enabled?
+                // - Is component scrollable?
+                // - Did content grow (max_scroll_y > prev_max_scroll_y)?
+                // - Were we at bottom before growth?
+                scroll::handle_stick_to_bottom(&layout, effect_index);
+            }
+        });
+
+        stick_effect_cleanup = Some(Box::new(stop_effect));
     }
 
     // Position
@@ -445,6 +470,10 @@ pub fn box_primitive(props: BoxProps) -> Cleanup {
         }
         // Clean up focus callbacks
         if let Some(cleanup) = focus_cleanup {
+            cleanup();
+        }
+        // Clean up stick_to_bottom effect
+        if let Some(cleanup) = stick_effect_cleanup {
             cleanup();
         }
         // Clean up component state in mouse/keyboard modules
