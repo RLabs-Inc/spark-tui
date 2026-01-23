@@ -12,12 +12,12 @@ See: .planning/PROJECT.md (updated 2026-01-22)
 ## Current Position
 
 **Phase:** 6 of 6 (Control Flow)
-**Plan:** 2 of 4 complete
+**Plan:** 3 of 4 complete
 **Status:** In Progress
 
-Last activity: 2026-01-23 - Completed 06-02-PLAN.md
+Last activity: 2026-01-23 - Completed 06-03-PLAN.md
 
-Progress: [#######################] 92% (23/25 total plans)
+Progress: [########################] 96% (24/25 total plans)
 
 ---
 
@@ -25,18 +25,18 @@ Progress: [#######################] 92% (23/25 total plans)
 
 **Phase 6: Control Flow**
 
-Status: In Progress (2/4 plans complete)
+Status: In Progress (3/4 plans complete)
 
 ### Requirements Progress
 - [x] R6.1: show() conditional rendering (06-01)
 - [x] R6.2: each() list rendering (06-02)
-- [ ] R6.3: when() async handling (06-03)
+- [x] R6.3: when() async handling (06-03)
 - [ ] R6.4: Integration tests (06-04)
 
 ### Plans
 - [x] 06-01: show() conditional rendering
 - [x] 06-02: each() list rendering
-- [ ] 06-03: when() async handling
+- [x] 06-03: when() async handling
 - [ ] 06-04: Integration and edge cases
 
 ---
@@ -50,7 +50,7 @@ Status: In Progress (2/4 plans complete)
 | 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Complete | 100% (5/5) |
 | 5. Cursor System | Complete | 100% (4/4) |
-| 6. Control Flow | In Progress | 50% (2/4) |
+| 6. Control Flow | In Progress | 75% (3/4) |
 
 ---
 
@@ -102,10 +102,22 @@ Status: In Progress (2/4 plans complete)
 | each-per-item-signals | each() gives each item its own Signal for fine-grained updates | Updates don't recreate components, only update signals | 2026-01-23 |
 | each-getter-pattern | render_fn receives Rc<dyn Fn() -> T> getter | Enables reactive item access without recreating components | 2026-01-23 |
 | each-duplicate-warning | Duplicate keys get eprintln warning, skip item, no crash | Matches TypeScript console.warn behavior | 2026-01-23 |
+| when-polling-based | Polling-based when() rather than Future integration | Users manage their own async, when() just renders based on AsyncState | 2026-01-23 |
+| when-struct-literal | WhenOptions uses struct literal (no new() constructor) | Function types don't have sensible Default impls | 2026-01-23 |
+| when-then-by-value | then_fn receives T by value (ownership transferred) | Enables move semantics for owned data | 2026-01-23 |
+| when-unhandled-log | Unhandled rejections logged to stderr without crash | Graceful error handling, user can observe error | 2026-01-23 |
 
 ---
 
 ## Session Log
+
+### 2026-01-23 — Plan 06-03 Execution
+- Added AsyncState<T, E> enum with Pending/Resolved/Rejected variants
+- Added WhenOptions struct for configuring when() render functions
+- Implemented when() function with state machine rendering
+- Unhandled rejections logged to stderr (no crash)
+- 10 comprehensive tests for when()
+- All 447 tests pass (428 unit + 19 doc)
 
 ### 2026-01-23 — Plan 06-02 Execution
 - Added each() function to control_flow.rs (1024 lines total)
@@ -336,9 +348,9 @@ Status: In Progress (2/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-23 15:55 UTC
-Stopped at: Completed 06-02-PLAN.md
-Resume file: None - continue to 06-03
+Last session: 2026-01-23 16:00 UTC
+Stopped at: Completed 06-03-PLAN.md
+Resume file: None - continue to 06-04
 
 ---
 
@@ -359,8 +371,8 @@ None currently.
 - Phase 3 complete! 319 tests total.
 - Phase 4 complete! 398 tests total. (gap closure: 379 -> 398)
 - Phase 5 complete! 421 tests total.
-- Phase 6 in progress: 437 tests total (418 unit + 19 doc after 06-02).
+- Phase 6 in progress: 447 tests total (428 unit + 19 doc after 06-03).
 
 ---
 
-*Last updated: 2026-01-23 15:55 UTC*
+*Last updated: 2026-01-23 16:00 UTC*
