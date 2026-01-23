@@ -180,12 +180,14 @@ Complete port of TypeScript TUI framework to Rust with identical ergonomics and 
 - Smooth scrolling optional
 - Respect component padding
 
+**Status:** COMPLETE (2026-01-23)
+
 **Success Criteria:**
-- [ ] Content larger than container scrolls
-- [ ] Arrow keys scroll focused scrollable
-- [ ] Mouse wheel scrolls hovered scrollable
-- [ ] Scroll chaining works at boundaries
-- [ ] Focus change auto-scrolls to focused component
+- [x] Content larger than container scrolls
+- [x] Arrow keys scroll focused scrollable
+- [x] Mouse wheel scrolls hovered scrollable
+- [x] Scroll chaining works at boundaries
+- [x] Focus change auto-scrolls to focused component
 
 ---
 
