@@ -684,4 +684,341 @@ mod tests {
             "toggling back should recreate then branch"
         );
     }
+
+    // =========================================================================
+    // each() tests
+    // =========================================================================
+
+    #[test]
+    fn test_each_renders_all_items() {
+        reset_registry();
+
+        let items = signal(vec!["a", "b", "c"]);
+        let items_clone = items.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            |_get_item, _key| create_test_component(),
+            |item| item.to_string(),
+        );
+
+        // 3 items = 3 components
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 3,
+            "each should create one component per item"
+        );
+    }
+
+    #[test]
+    fn test_each_adds_new_items() {
+        reset_registry();
+
+        let items = signal(vec!["a", "b"]);
+        let items_clone = items.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            |_get_item, _key| create_test_component(),
+            |item| item.to_string(),
+        );
+
+        // 2 items initially
+        assert_eq!(get_allocated_count(), initial_count + 2);
+
+        // Add "c"
+        items.set(vec!["a", "b", "c"]);
+
+        // Now 3 items
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 3,
+            "adding item should create one new component"
+        );
+    }
+
+    #[test]
+    fn test_each_removes_items() {
+        reset_registry();
+
+        let items = signal(vec!["a", "b", "c"]);
+        let items_clone = items.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            |_get_item, _key| create_test_component(),
+            |item| item.to_string(),
+        );
+
+        // 3 items initially
+        assert_eq!(get_allocated_count(), initial_count + 3);
+
+        // Remove "b"
+        items.set(vec!["a", "c"]);
+
+        // Now 2 items
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 2,
+            "removing item should destroy that component"
+        );
+    }
+
+    #[test]
+    fn test_each_updates_existing_items() {
+        use spark_signals::effect;
+
+        reset_registry();
+
+        /// Test item with id and value
+        #[derive(Clone, PartialEq)]
+        struct TestItem {
+            id: i32,
+            value: String,
+        }
+
+        let items = signal(vec![TestItem {
+            id: 1,
+            value: "old".to_string(),
+        }]);
+        let items_clone = items.clone();
+
+        // Track how many times render_fn is called
+        let render_count = Rc::new(Cell::new(0));
+        let render_count_clone = render_count.clone();
+
+        // Track current value seen via getter
+        let seen_value = Rc::new(RefCell::new(String::new()));
+        let seen_value_clone = seen_value.clone();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            move |get_item, _key| {
+                render_count_clone.set(render_count_clone.get() + 1);
+
+                // Create effect to track value changes
+                let seen_clone = seen_value_clone.clone();
+                let _effect = effect(move || {
+                    let item = get_item();
+                    *seen_clone.borrow_mut() = item.value.clone();
+                });
+
+                create_test_component()
+            },
+            |item| item.id.to_string(),
+        );
+
+        // Initial render
+        assert_eq!(render_count.get(), 1, "should render once initially");
+        assert_eq!(
+            *seen_value.borrow(),
+            "old",
+            "should see initial value"
+        );
+
+        // Update item (same key)
+        items.set(vec![TestItem {
+            id: 1,
+            value: "new".to_string(),
+        }]);
+
+        // Should NOT have created new component
+        assert_eq!(
+            render_count.get(),
+            1,
+            "updating existing item should NOT re-render component"
+        );
+
+        // But effect should have seen the update
+        assert_eq!(
+            *seen_value.borrow(),
+            "new",
+            "getter should return updated value"
+        );
+    }
+
+    #[test]
+    fn test_each_cleanup_destroys_all() {
+        reset_registry();
+
+        let items = signal(vec!["a", "b", "c"]);
+        let items_clone = items.clone();
+
+        let initial_count = get_allocated_count();
+
+        let cleanup = each(
+            move || items_clone.get(),
+            |_get_item, _key| create_test_component(),
+            |item| item.to_string(),
+        );
+
+        // 3 components
+        assert_eq!(get_allocated_count(), initial_count + 3);
+
+        // Cleanup all
+        cleanup();
+
+        // All destroyed
+        assert_eq!(
+            get_allocated_count(),
+            initial_count,
+            "cleanup should destroy all components"
+        );
+    }
+
+    #[test]
+    fn test_each_empty_list() {
+        reset_registry();
+
+        let items: Signal<Vec<&str>> = signal(vec![]);
+        let items_clone = items.clone();
+
+        let initial_count = get_allocated_count();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            |_get_item, _key| create_test_component(),
+            |item| item.to_string(),
+        );
+
+        // 0 items = 0 components
+        assert_eq!(
+            get_allocated_count(),
+            initial_count,
+            "empty list should create no components"
+        );
+    }
+
+    #[test]
+    fn test_each_reorder_preserves_components() {
+        reset_registry();
+
+        let items = signal(vec!["a", "b", "c"]);
+        let items_clone = items.clone();
+
+        // Track render count per key
+        let render_counts: Rc<RefCell<HashMap<String, usize>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+        let render_counts_clone = render_counts.clone();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            move |_get_item, key: String| {
+                let mut counts = render_counts_clone.borrow_mut();
+                *counts.entry(key).or_insert(0) += 1;
+                create_test_component()
+            },
+            |item| item.to_string(),
+        );
+
+        // Initial render - each key rendered once
+        {
+            let counts = render_counts.borrow();
+            assert_eq!(counts.get("a"), Some(&1));
+            assert_eq!(counts.get("b"), Some(&1));
+            assert_eq!(counts.get("c"), Some(&1));
+        }
+
+        // Reorder (same keys)
+        items.set(vec!["c", "a", "b"]);
+
+        // Should NOT re-render any component (same keys)
+        {
+            let counts = render_counts.borrow();
+            assert_eq!(
+                counts.get("a"),
+                Some(&1),
+                "reorder should not re-render 'a'"
+            );
+            assert_eq!(
+                counts.get("b"),
+                Some(&1),
+                "reorder should not re-render 'b'"
+            );
+            assert_eq!(
+                counts.get("c"),
+                Some(&1),
+                "reorder should not re-render 'c'"
+            );
+        }
+    }
+
+    #[test]
+    fn test_each_nested_parent_context() {
+        use crate::engine::arrays::core::set_parent_index;
+
+        reset_registry();
+
+        // Create a parent component
+        let parent_index = allocate_index(Some("parent"));
+
+        // Push parent context as if we're inside parent's children
+        push_parent_context(parent_index);
+
+        let items = signal(vec!["a"]);
+        let items_clone = items.clone();
+
+        // Track the created component's parent
+        let created_parent: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let created_parent_clone = created_parent.clone();
+
+        let _cleanup = each(
+            move || items_clone.get(),
+            move |_get_item, _key| {
+                let index = allocate_index(None);
+                // Get current parent and store it
+                let current_parent = get_current_parent_index();
+                created_parent_clone.set(current_parent);
+                // Set parent in arrays
+                if let Some(p) = current_parent {
+                    set_parent_index(index, Some(p));
+                }
+                Box::new(move || release_index(index)) as Cleanup
+            },
+            |item| item.to_string(),
+        );
+
+        pop_parent_context();
+
+        // Verify the created component has correct parent
+        assert_eq!(
+            created_parent.get(),
+            Some(parent_index),
+            "component created inside each() should have correct parent"
+        );
+
+        // Clean up parent
+        release_index(parent_index);
+    }
+
+    #[test]
+    fn test_each_duplicate_key_no_crash() {
+        reset_registry();
+
+        // Items with duplicate keys
+        let items = signal(vec!["a", "a", "b"]);
+        let items_clone = items.clone();
+
+        let initial_count = get_allocated_count();
+
+        // Should not panic
+        let _cleanup = each(
+            move || items_clone.get(),
+            |_get_item, _key| create_test_component(),
+            |item| item.to_string(),
+        );
+
+        // Only 2 components (duplicate "a" skipped)
+        assert_eq!(
+            get_allocated_count(),
+            initial_count + 2,
+            "duplicate key should be skipped, not crash"
+        );
+    }
 }
