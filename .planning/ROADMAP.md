@@ -147,7 +147,13 @@ Plans:
 **Dependencies:**
 - Phase 3 (Input needs cursor)
 
-**Plans:** 0 plans
+**Plans:** 4 plans
+
+Plans:
+- [ ] 05-01-PLAN.md - Blink animation system (shared clocks per FPS)
+- [ ] 05-02-PLAN.md - Terminal cursor API and cursor arrays
+- [ ] 05-03-PLAN.md - Drawn cursor module and Input integration
+- [ ] 05-04-PLAN.md - Cursor and selection rendering in FrameBuffer
 
 ---
 
