@@ -44,4 +44,4 @@ pub use types::*;
 pub use box_primitive::box_primitive;
 pub use text::text;
 pub use input::input;
-pub use control_flow::{show, AsyncState, WhenOptions};
+pub use control_flow::{each, show, AsyncState, WhenOptions};

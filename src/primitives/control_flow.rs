@@ -2,7 +2,7 @@
 //!
 //! This module provides control flow primitives for dynamic UI:
 //! - [`show`] - Conditional rendering based on reactive conditions
-//! - [`each`] - List rendering with fine-grained updates (TODO: Plan 02)
+//! - [`each`] - List rendering with fine-grained updates
 //! - [`when`] - Async handling with pending/then/catch states (TODO: Plan 03)
 //!
 //! # Pattern: EffectScope-based Cleanup
@@ -36,15 +36,25 @@
 //!
 //! # Component Lifecycle
 //!
+//! ## show()
 //! - When condition becomes true: `then_fn` is called, component created
 //! - When condition becomes false: previous cleanup runs, component destroyed
 //! - If `else_fn` provided: it renders when condition is false
 //! - On show() cleanup: current branch cleaned up, scope stopped
+//!
+//! ## each()
+//! - Items tracked by key (from `key_fn`)
+//! - New keys: create signal + render component
+//! - Existing keys: update signal (NO component recreation!)
+//! - Removed keys: cleanup + destroy component
+//! - On each() cleanup: all items cleaned up, scope stopped
 
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::rc::Rc;
 
-use spark_signals::{effect, effect_scope, on_scope_dispose};
+use spark_signals::{effect, effect_scope, on_scope_dispose, signal, Signal};
 
 use crate::engine::{get_current_parent_index, pop_parent_context, push_parent_context};
 use crate::primitives::Cleanup;
@@ -170,6 +180,217 @@ where
             if let Some(cleanup_fn) = cleanup_for_dispose.borrow_mut().take() {
                 cleanup_fn();
             }
+        });
+    });
+
+    // Return cleanup that stops the scope
+    Box::new(move || {
+        scope.stop();
+    })
+}
+
+// =============================================================================
+// each() - List rendering with fine-grained reactivity
+// =============================================================================
+
+/// Render a list of components reactively with fine-grained updates.
+///
+/// Creates one component per item, tracked by unique keys. When the list changes:
+/// - New items: create signal + component
+/// - Existing items: update signal only (NO component recreation!)
+/// - Removed items: cleanup + destroy component
+///
+/// # Arguments
+///
+/// * `items_getter` - Getter that returns the items (creates reactive dependency)
+/// * `render_fn` - Function receiving (getItem getter, key) that renders one item
+/// * `key_fn` - Function to extract unique key from each item
+///
+/// # Returns
+///
+/// A cleanup function that destroys all components and stops tracking.
+///
+/// # Example
+///
+/// ```ignore
+/// use spark_tui::primitives::{each, text, TextProps, Cleanup};
+/// use spark_signals::signal;
+///
+/// let items = signal(vec!["apple", "banana", "cherry"]);
+/// let items_clone = items.clone();
+///
+/// let cleanup = each(
+///     move || items_clone.get(),
+///     |get_item, key| {
+///         text(TextProps {
+///             content: (move || get_item().to_string()).into(),
+///             ..Default::default()
+///         })
+///     },
+///     |item| item.to_string(),
+/// );
+///
+/// // Add item - only creates 1 new component
+/// items.set(vec!["apple", "banana", "cherry", "date"]);
+///
+/// // Remove item - only destroys 1 component
+/// items.set(vec!["apple", "cherry", "date"]);
+///
+/// // Reorder - no component recreation (same keys)
+/// items.set(vec!["date", "apple", "cherry"]);
+///
+/// // Cleanup everything
+/// cleanup();
+/// ```
+///
+/// # Fine-grained Item Updates
+///
+/// Each item gets its own signal. When an item's value changes (but key stays same),
+/// only that item's signal is updated - components using `get_item()` will react.
+///
+/// ```ignore
+/// #[derive(Clone, PartialEq)]
+/// struct Todo { id: i32, text: String, done: bool }
+///
+/// let todos = signal(vec![
+///     Todo { id: 1, text: "First".into(), done: false },
+/// ]);
+///
+/// let cleanup = each(
+///     move || todos.get(),
+///     |get_item, _key| {
+///         // get_item() returns current Todo value
+///         // When todo changes, this getter returns updated value
+///         text(TextProps {
+///             content: (move || get_item().text.clone()).into(),
+///             ..Default::default()
+///         })
+///     },
+///     |todo| todo.id.to_string(),
+/// );
+///
+/// // Update todo text - component NOT recreated, signal updated
+/// todos.set(vec![
+///     Todo { id: 1, text: "Updated".into(), done: true },
+/// ]);
+/// ```
+///
+/// # Duplicate Key Handling
+///
+/// Duplicate keys are warned but don't crash. Only the first occurrence is tracked.
+pub fn each<T, K, RenderF, R>(
+    items_getter: impl Fn() -> Vec<T> + 'static,
+    render_fn: RenderF,
+    key_fn: impl Fn(&T) -> K + 'static,
+) -> Cleanup
+where
+    T: Clone + PartialEq + 'static,
+    K: Clone + Eq + Hash + std::fmt::Debug + 'static,
+    RenderF: Fn(Rc<dyn Fn() -> T>, K) -> R + Clone + 'static,
+    R: Into<Cleanup>,
+{
+    // Capture parent index at creation time
+    let parent_index = get_current_parent_index();
+
+    // Create scope for cleanup management
+    let scope = effect_scope();
+
+    // Maps for tracking items by key
+    // Key -> Cleanup for destroying component
+    let cleanups: Rc<RefCell<HashMap<K, Cleanup>>> = Rc::new(RefCell::new(HashMap::new()));
+    // Key -> Signal<T> for fine-grained updates
+    let item_signals: Rc<RefCell<HashMap<K, Signal<T>>>> = Rc::new(RefCell::new(HashMap::new()));
+
+    // Clones for move into effect
+    let cleanups_effect = cleanups.clone();
+    let item_signals_effect = item_signals.clone();
+
+    // Clones for move into dispose callback
+    let cleanups_dispose = cleanups.clone();
+    let item_signals_dispose = item_signals.clone();
+
+    scope.run(move || {
+        // Effect establishes reactive dependency on items_getter
+        let _effect_cleanup = effect(move || {
+            let items = items_getter();
+            let mut current_keys = HashSet::new();
+
+            // Push parent context for component creation
+            if let Some(parent) = parent_index {
+                push_parent_context(parent);
+            }
+
+            // Process each item
+            for item in items.iter() {
+                let key = key_fn(item);
+
+                // Check for duplicate keys
+                if current_keys.contains(&key) {
+                    eprintln!(
+                        "[spark-tui each()] Duplicate key detected: {:?}. \
+                        Keys must be unique. This may cause unexpected behavior.",
+                        key
+                    );
+                    continue; // Skip duplicate
+                }
+                current_keys.insert(key.clone());
+
+                let mut signals = item_signals_effect.borrow_mut();
+                let mut cleanup_map = cleanups_effect.borrow_mut();
+
+                if signals.contains_key(&key) {
+                    // EXISTING item - just update the signal (fine-grained!)
+                    if let Some(sig) = signals.get(&key) {
+                        sig.set(item.clone());
+                    }
+                } else {
+                    // NEW item - create signal and component
+                    let item_signal = signal(item.clone());
+                    signals.insert(key.clone(), item_signal.clone());
+
+                    // Create getter closure that reads from signal
+                    let getter: Rc<dyn Fn() -> T> = Rc::new(move || item_signal.get());
+
+                    // Render and store cleanup
+                    let render_fn_clone = render_fn.clone();
+                    let cleanup = render_fn_clone(getter, key.clone()).into();
+                    cleanup_map.insert(key.clone(), cleanup);
+                }
+            }
+
+            // Pop parent context
+            if parent_index.is_some() {
+                pop_parent_context();
+            }
+
+            // Cleanup removed items
+            let mut signals = item_signals_effect.borrow_mut();
+            let mut cleanup_map = cleanups_effect.borrow_mut();
+
+            // Collect keys to remove (can't modify while iterating)
+            let keys_to_remove: Vec<K> = cleanup_map
+                .keys()
+                .filter(|k| !current_keys.contains(*k))
+                .cloned()
+                .collect();
+
+            for key in keys_to_remove {
+                if let Some(cleanup) = cleanup_map.remove(&key) {
+                    cleanup();
+                }
+                signals.remove(&key);
+            }
+        });
+
+        // Cleanup all items when scope is disposed
+        on_scope_dispose(move || {
+            let mut cleanup_map = cleanups_dispose.borrow_mut();
+            let mut signals = item_signals_dispose.borrow_mut();
+
+            for cleanup in cleanup_map.drain().map(|(_, c)| c) {
+                cleanup();
+            }
+            signals.clear();
         });
     });
 
