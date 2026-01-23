@@ -433,10 +433,12 @@ mod tests {
     fn test_cursor_blinks_when_focused() {
         setup();
 
-        // Create a focusable component first
-        use crate::primitives::{input, InputProps};
-        let value = spark_signals::signal("test".to_string());
-        let _cleanup = input(InputProps::new(value));
+        // Create a focusable Box component (not Input, which creates its own cursor)
+        use crate::primitives::{box_primitive, BoxProps};
+        let _cleanup = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
 
         let _cursor = create_cursor(0, DrawnCursorConfig {
             blink: true,
@@ -456,12 +458,18 @@ mod tests {
     fn test_cursor_stops_blink_on_blur() {
         setup();
 
-        // Create two focusable components
-        use crate::primitives::{input, InputProps};
-        let value1 = spark_signals::signal("test1".to_string());
-        let value2 = spark_signals::signal("test2".to_string());
-        let _cleanup1 = input(InputProps::new(value1));
-        let _cleanup2 = input(InputProps::new(value2));
+        // Create two focusable Box components (not Input, which creates its own cursor)
+        use crate::primitives::{box_primitive, BoxProps};
+        let _cleanup1 = box_primitive(BoxProps {
+            focusable: Some(true),
+            tab_index: Some(0),
+            ..Default::default()
+        });
+        let _cleanup2 = box_primitive(BoxProps {
+            focusable: Some(true),
+            tab_index: Some(1),
+            ..Default::default()
+        });
 
         let _cursor = create_cursor(0, DrawnCursorConfig {
             blink: true,
@@ -477,8 +485,7 @@ mod tests {
         focus::focus(1);
 
         // Blink should stop (no subscribers at fps=2 for component 0's cursor)
-        // Note: The blink may still be running if component 1 also has a cursor
-        // For this test, component 1 doesn't have a drawn cursor
+        // Component 1 doesn't have a drawn cursor
         assert!(!animate::is_blink_running(2));
     }
 
@@ -505,10 +512,12 @@ mod tests {
     fn test_manual_show_hide_override() {
         setup();
 
-        // Create a focusable component
-        use crate::primitives::{input, InputProps};
-        let value = spark_signals::signal("test".to_string());
-        let _cleanup = input(InputProps::new(value));
+        // Create a focusable Box component (not Input, which creates its own cursor)
+        use crate::primitives::{box_primitive, BoxProps};
+        let _cleanup = box_primitive(BoxProps {
+            focusable: Some(true),
+            ..Default::default()
+        });
 
         let cursor = create_cursor(0, DrawnCursorConfig::default());
 
