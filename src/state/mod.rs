@@ -11,10 +11,12 @@
 //! - **Scroll** - Scrollable containers, scroll chaining
 //! - **Cursor** - Terminal native cursor API
 //! - **Animate** - Blink animation with shared clocks per FPS
+//! - **Drawn Cursor** - Cursor management for input components with blink
 
 pub mod animate;
 pub mod clipboard;
 pub mod cursor;
+pub mod drawn_cursor;
 pub mod focus;
 pub mod global_keys;
 pub mod input;
@@ -45,4 +47,9 @@ pub use scroll::{
     handle_stick_to_bottom, update_stick_to_bottom_on_scroll, is_at_bottom,
     scroll_focused_into_view, find_scrollable_ancestor,
     LINE_SCROLL, WHEEL_SCROLL, PAGE_SCROLL_FACTOR,
+};
+pub use drawn_cursor::{
+    create_cursor, dispose_cursor, has_cursor, reset_cursors,
+    DrawnCursor, DrawnCursorConfig,
+    CURSOR_CHAR_BLOCK, CURSOR_CHAR_BAR, CURSOR_CHAR_UNDERLINE,
 };
