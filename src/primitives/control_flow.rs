@@ -401,41 +401,170 @@ where
 }
 
 // =============================================================================
-// Placeholder types for future plans
+// when() - Async state rendering
 // =============================================================================
 
-/// State for async `when()` primitive.
+/// Async state for when() rendering.
 ///
-/// Tracks the current state of an async operation.
-#[derive(Debug, Clone, PartialEq)]
+/// Users manage their own async operations and update a Signal<AsyncState<T, E>>
+/// to trigger UI changes. This polling-based approach avoids runtime dependencies.
+///
+/// # Example
+/// ```ignore
+/// let state: Signal<AsyncState<Data, String>> = signal(AsyncState::Pending);
+///
+/// // In your async code (tokio, async-std, etc.):
+/// // On success: state.set(AsyncState::Resolved(data));
+/// // On error: state.set(AsyncState::Rejected("error".to_string()));
+/// ```
+#[derive(Clone, Debug, PartialEq)]
 pub enum AsyncState<T, E> {
-    /// Operation is pending.
+    /// Loading state - async operation in progress.
     Pending,
-    /// Operation completed successfully with value.
+    /// Success state - operation completed with value.
     Resolved(T),
-    /// Operation failed with error.
+    /// Error state - operation failed with error.
     Rejected(E),
 }
 
-/// Options for the `when()` primitive.
+/// Options for when() async rendering.
 ///
-/// Provides render functions for each async state.
+/// Construct directly with struct literal syntax:
+/// ```ignore
+/// WhenOptions {
+///     pending: Some(|| text(TextProps { content: "Loading...".into(), ..default() })),
+///     then_fn: |data| text(TextProps { content: data.to_string().into(), ..default() }),
+///     catch_fn: Some(|err| text(TextProps { content: format!("Error: {}", err).into(), ..default() })),
+///     _marker: PhantomData,
+/// }
+/// ```
 pub struct WhenOptions<T, E, PendingF, ThenF, CatchF>
 where
-    PendingF: Fn() -> Cleanup,
-    ThenF: Fn(&T) -> Cleanup,
-    CatchF: Fn(&E) -> Cleanup,
+    T: Clone + 'static,
+    E: Clone + std::fmt::Display + 'static,
 {
-    /// Render while pending.
+    /// Render function for Pending state (optional).
+    /// If None, nothing is rendered during pending.
     pub pending: Option<PendingF>,
-    /// Render on success (receives resolved value).
-    pub then: ThenF,
-    /// Render on error (receives error).
-    pub catch: Option<CatchF>,
-    /// Marker for T type.
-    pub _t: std::marker::PhantomData<T>,
-    /// Marker for E type.
-    pub _e: std::marker::PhantomData<E>,
+    /// Render function for Resolved state (required).
+    pub then_fn: ThenF,
+    /// Render function for Rejected state (optional).
+    /// If None, errors are logged but nothing rendered.
+    pub catch_fn: Option<CatchF>,
+    /// PhantomData for T and E type inference.
+    pub _marker: std::marker::PhantomData<(T, E)>,
+}
+
+/// Render based on async state (polling-based).
+///
+/// Unlike Promise-based when() in JavaScript, this version works with
+/// a reactive getter that returns AsyncState<T, E>. Users manage their
+/// own async operations and update the state signal accordingly.
+///
+/// # Example
+/// ```ignore
+/// let fetch_state = signal(AsyncState::Pending);
+/// let fetch_state_clone = fetch_state.clone();
+///
+/// // Start async operation (user's responsibility)
+/// spawn(async move {
+///     match fetch_data().await {
+///         Ok(data) => fetch_state_clone.set(AsyncState::Resolved(data)),
+///         Err(e) => fetch_state_clone.set(AsyncState::Rejected(e.to_string())),
+///     }
+/// });
+///
+/// // Render based on state
+/// when(
+///     move || fetch_state.get(),
+///     WhenOptions {
+///         pending: Some(|| text(TextProps { content: "Loading...".into(), ..default() })),
+///         then_fn: |data| text(TextProps { content: data.to_string().into(), ..default() }),
+///         catch_fn: Some(|err| text(TextProps { content: format!("Error: {}", err).into(), ..default() })),
+///         _marker: PhantomData,
+///     },
+/// )
+/// ```
+pub fn when<T, E, PendingF, ThenF, CatchF, PendingR, ThenR, CatchR>(
+    state_getter: impl Fn() -> AsyncState<T, E> + 'static,
+    options: WhenOptions<T, E, PendingF, ThenF, CatchF>,
+) -> Cleanup
+where
+    T: Clone + 'static,
+    E: Clone + std::fmt::Display + 'static,
+    PendingF: Fn() -> PendingR + 'static,
+    ThenF: Fn(T) -> ThenR + 'static,
+    CatchF: Fn(E) -> CatchR + 'static,
+    PendingR: Into<Cleanup>,
+    ThenR: Into<Cleanup>,
+    CatchR: Into<Cleanup>,
+{
+    // Capture parent index at creation time
+    let parent_index = get_current_parent_index();
+
+    // Create scope for cleanup management
+    let scope = effect_scope();
+
+    // Storage for current cleanup
+    let current_cleanup: Rc<RefCell<Option<Cleanup>>> = Rc::new(RefCell::new(None));
+    let cleanup_for_effect = current_cleanup.clone();
+    let cleanup_for_dispose = current_cleanup.clone();
+
+    scope.run(move || {
+        // Effect reads state to establish dependency
+        let _effect_cleanup = effect(move || {
+            let state = state_getter();
+
+            // Cleanup previous render
+            if let Some(prev_cleanup) = cleanup_for_effect.borrow_mut().take() {
+                prev_cleanup();
+            }
+
+            // Push parent context for component creation
+            if let Some(parent) = parent_index {
+                push_parent_context(parent);
+            }
+
+            // Render based on state
+            let new_cleanup: Option<Cleanup> = match state {
+                AsyncState::Pending => {
+                    if let Some(ref pending_fn) = options.pending {
+                        Some(pending_fn().into())
+                    } else {
+                        None
+                    }
+                }
+                AsyncState::Resolved(data) => Some((options.then_fn)(data).into()),
+                AsyncState::Rejected(err) => {
+                    if let Some(ref catch_fn) = options.catch_fn {
+                        Some(catch_fn(err).into())
+                    } else {
+                        eprintln!("[when] Unhandled rejection: {}", err);
+                        None
+                    }
+                }
+            };
+
+            // Pop parent context
+            if parent_index.is_some() {
+                pop_parent_context();
+            }
+
+            *cleanup_for_effect.borrow_mut() = new_cleanup;
+        });
+
+        // Cleanup when scope is disposed
+        on_scope_dispose(move || {
+            if let Some(cleanup_fn) = cleanup_for_dispose.borrow_mut().take() {
+                cleanup_fn();
+            }
+        });
+    });
+
+    // Return cleanup that stops the scope
+    Box::new(move || {
+        scope.stop();
+    })
 }
 
 // =============================================================================
