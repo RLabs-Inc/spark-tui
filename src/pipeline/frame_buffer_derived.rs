@@ -9,6 +9,7 @@ use spark_signals::{derived, Derived};
 
 use crate::engine::arrays::{core, visual, text, interaction};
 use crate::engine::{get_allocated_indices, get_flex_node};
+use crate::state::focus;
 use crate::layout::ComputedLayout;
 use crate::renderer::FrameBuffer;
 use crate::types::{Attr, BorderStyle, ClipRect, ComponentType, Overflow, Rgba, TextAlign, TextWrap};
@@ -270,7 +271,7 @@ fn render_component(
             render_text(buffer, index, content_x, content_y, content_w, content_h, effective_fg, &content_clip);
         }
         ComponentType::Input => {
-            render_input(buffer, index, content_x, content_y, content_w, content_h, effective_fg, &content_clip);
+            render_input(buffer, index, content_x, content_y, content_w, content_h, effective_fg, effective_bg, &content_clip);
         }
         ComponentType::Progress => {
             render_progress(buffer, index, content_x, content_y, content_w, content_h, effective_fg, &content_clip);
@@ -495,6 +496,193 @@ fn render_scroll_indicator(
     }
 }
 
+// =============================================================================
+// Input Cursor and Selection Rendering
+// =============================================================================
+
+/// Render selection highlighting for an input field.
+///
+/// Selection is rendered with INVERSE attribute (swap fg/bg).
+#[allow(clippy::too_many_arguments)]
+fn render_input_selection(
+    buffer: &mut FrameBuffer,
+    index: usize,
+    content_x: u16,
+    content_y: u16,
+    content_w: u16,
+    text: &str,
+    fg: Rgba,
+    bg: Rgba,
+    scroll_x: u16,
+    clip: &ClipRect,
+) {
+    // Get selection range
+    let sel_start = interaction::get_selection_start(index) as usize;
+    let sel_end = interaction::get_selection_end(index) as usize;
+
+    if sel_start >= sel_end {
+        return; // No selection
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let scroll_x = scroll_x as usize;
+
+    // Render each selected character
+    for pos in sel_start..sel_end {
+        let screen_pos = pos.saturating_sub(scroll_x);
+        if screen_pos >= content_w as usize {
+            break; // Off screen to the right
+        }
+        if pos < scroll_x {
+            continue; // Off screen to the left
+        }
+
+        let render_x = content_x + screen_pos as u16;
+        let ch = chars.get(pos).copied().unwrap_or(' ');
+
+        // Draw with INVERSE (swap fg/bg for selection)
+        buffer.set_cell(
+            render_x,
+            content_y,
+            ch as u32,
+            bg,  // Selection uses bg as fg (inverse)
+            fg,  // Selection uses fg as bg (inverse)
+            Attr::INVERSE,
+            Some(clip),
+        );
+    }
+}
+
+/// Render cursor for an input field.
+///
+/// Only renders when:
+/// 1. Input is focused
+/// 2. Cursor is visible (respects blink state)
+///
+/// Cursor styles:
+/// - Block (style=0): Render text char with INVERSE
+/// - Bar (style=1): Render | character
+/// - Underline (style=2): Render _ character
+#[allow(clippy::too_many_arguments)]
+fn render_input_cursor(
+    buffer: &mut FrameBuffer,
+    index: usize,
+    content_x: u16,
+    content_y: u16,
+    content_w: u16,
+    text: &str,
+    fg: Rgba,
+    bg: Rgba,
+    scroll_x: u16,
+    clip: &ClipRect,
+) {
+    // Only render cursor when focused
+    if !focus::is_focused(index) {
+        return;
+    }
+
+    // Check cursor visibility (respects blink state)
+    if !interaction::get_cursor_visible(index) {
+        return;
+    }
+
+    let cursor_pos = interaction::get_cursor_position(index) as usize;
+    let scroll_x = scroll_x as usize;
+
+    // Calculate screen position
+    let screen_pos = cursor_pos.saturating_sub(scroll_x);
+    if screen_pos >= content_w as usize {
+        return; // Cursor off screen
+    }
+
+    let render_x = content_x + screen_pos as u16;
+
+    // Get character at cursor position (or space if at end)
+    let chars: Vec<char> = text.chars().collect();
+    let char_at_cursor = chars.get(cursor_pos).copied().unwrap_or(' ');
+
+    // Get cursor style (0=Block, 1=Bar, 2=Underline)
+    let cursor_style = interaction::get_cursor_style(index);
+
+    match cursor_style {
+        0 => {
+            // Block cursor: render character with INVERSE
+            buffer.set_cell(
+                render_x,
+                content_y,
+                char_at_cursor as u32,
+                bg,  // Swap colors for inverse effect
+                fg,
+                Attr::INVERSE,
+                Some(clip),
+            );
+        }
+        1 => {
+            // Bar cursor: render | character at cursor position
+            // First render the text character normally
+            buffer.set_cell(
+                render_x,
+                content_y,
+                char_at_cursor as u32,
+                fg,
+                bg,
+                Attr::NONE,
+                Some(clip),
+            );
+            // Then overlay the bar (this will be visible on left edge)
+            // For a proper bar, we'd need half-character rendering
+            // Compromise: show bar character
+            buffer.set_cell(
+                render_x,
+                content_y,
+                0x2502, // |
+                fg,
+                bg,
+                Attr::NONE,
+                Some(clip),
+            );
+        }
+        2 => {
+            // Underline cursor: render character with underline attribute
+            buffer.set_cell(
+                render_x,
+                content_y,
+                char_at_cursor as u32,
+                fg,
+                bg,
+                Attr::UNDERLINE,
+                Some(clip),
+            );
+        }
+        _ => {
+            // Custom cursor char - get from cursor_char array
+            let cursor_char = interaction::get_cursor_char(index);
+            if cursor_char == 0 {
+                // 0 = block (inverse)
+                buffer.set_cell(
+                    render_x,
+                    content_y,
+                    char_at_cursor as u32,
+                    bg,
+                    fg,
+                    Attr::INVERSE,
+                    Some(clip),
+                );
+            } else {
+                buffer.set_cell(
+                    render_x,
+                    content_y,
+                    cursor_char,
+                    fg,
+                    bg,
+                    Attr::NONE,
+                    Some(clip),
+                );
+            }
+        }
+    }
+}
+
 /// Render text content.
 fn render_text(
     buffer: &mut FrameBuffer,
@@ -549,6 +737,7 @@ fn render_text(
 }
 
 /// Render input field.
+#[allow(clippy::too_many_arguments)]
 fn render_input(
     buffer: &mut FrameBuffer,
     index: usize,
@@ -557,21 +746,41 @@ fn render_input(
     w: u16,
     _h: u16,
     fg: Rgba,
+    bg: Rgba,
     clip: &ClipRect,
 ) {
     let content = text::get_text_content(index);
     let attrs = text::get_text_attrs(index);
 
-    // For now, simple single-line input
-    let display_text = if crate::layout::string_width(&content) > w {
-        crate::layout::truncate_text(&content, w)
+    // Get scroll offset for horizontal scrolling
+    let scroll_x = interaction::get_scroll_offset_x(index);
+
+    // Get the portion of text visible after scroll offset
+    let chars: Vec<char> = content.chars().collect();
+    let visible_start = (scroll_x as usize).min(chars.len());
+    let visible_chars: String = chars.iter().skip(visible_start).collect();
+
+    // Truncate to fit width
+    let display_text = if crate::layout::string_width(&visible_chars) > w {
+        crate::layout::truncate_text(&visible_chars, w)
     } else {
-        content
+        visible_chars
     };
 
+    // Render the text
     buffer.draw_text(x, y, &display_text, fg, None, attrs, Some(clip));
 
-    // TODO: Render cursor if focused
+    // Render selection highlighting (overlays text)
+    render_input_selection(
+        buffer, index, x, y, w,
+        &content, fg, bg, scroll_x, clip
+    );
+
+    // Render cursor (overlays selection)
+    render_input_cursor(
+        buffer, index, x, y, w,
+        &content, fg, bg, scroll_x, clip
+    );
 }
 
 /// Render progress bar.
