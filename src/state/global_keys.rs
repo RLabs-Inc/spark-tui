@@ -167,30 +167,33 @@ pub fn route_keyboard_event(event: &KeyboardEvent, running: &Arc<AtomicBool>) ->
 /// Route framework default handlers (scroll keys).
 ///
 /// These are the LAST resort - only fire if no component or user handler consumed the event.
+///
+/// Note: The scroll handlers use `pipeline::get_layout()` internally.
+/// If no layout is set (before mount), they will panic.
+/// We guard against this by checking `pipeline::try_get_layout()` first.
 fn route_framework_defaults(event: &KeyboardEvent) -> bool {
+    use crate::pipeline::try_get_layout;
+
+    // Guard: If no layout is set, don't try to scroll
+    if try_get_layout().is_none() {
+        return false;
+    }
+
     // Arrow keys for scrolling (without modifiers, or with just shift)
     // Note: Ctrl+Arrow is used for word navigation in inputs
     if !event.modifiers.ctrl && !event.modifiers.alt {
         match event.key.as_str() {
             "ArrowUp" if !event.modifiers.shift => {
-                return scroll::with_current_layout(|layout| {
-                    scroll::handle_arrow_scroll(layout, ScrollDirection::Up)
-                }).unwrap_or(false);
+                return scroll::handle_arrow_scroll(ScrollDirection::Up);
             }
             "ArrowDown" if !event.modifiers.shift => {
-                return scroll::with_current_layout(|layout| {
-                    scroll::handle_arrow_scroll(layout, ScrollDirection::Down)
-                }).unwrap_or(false);
+                return scroll::handle_arrow_scroll(ScrollDirection::Down);
             }
             "ArrowLeft" if !event.modifiers.shift => {
-                return scroll::with_current_layout(|layout| {
-                    scroll::handle_arrow_scroll(layout, ScrollDirection::Left)
-                }).unwrap_or(false);
+                return scroll::handle_arrow_scroll(ScrollDirection::Left);
             }
             "ArrowRight" if !event.modifiers.shift => {
-                return scroll::with_current_layout(|layout| {
-                    scroll::handle_arrow_scroll(layout, ScrollDirection::Right)
-                }).unwrap_or(false);
+                return scroll::handle_arrow_scroll(ScrollDirection::Right);
             }
             _ => {}
         }
@@ -199,14 +202,10 @@ fn route_framework_defaults(event: &KeyboardEvent) -> bool {
     // PageUp/PageDown (no modifiers needed)
     match event.key.as_str() {
         "PageUp" => {
-            return scroll::with_current_layout(|layout| {
-                scroll::handle_page_scroll(layout, ScrollDirection::Up)
-            }).unwrap_or(false);
+            return scroll::handle_page_scroll(ScrollDirection::Up);
         }
         "PageDown" => {
-            return scroll::with_current_layout(|layout| {
-                scroll::handle_page_scroll(layout, ScrollDirection::Down)
-            }).unwrap_or(false);
+            return scroll::handle_page_scroll(ScrollDirection::Down);
         }
         _ => {}
     }
@@ -215,14 +214,10 @@ fn route_framework_defaults(event: &KeyboardEvent) -> bool {
     if event.modifiers.ctrl {
         match event.key.as_str() {
             "Home" => {
-                return scroll::with_current_layout(|layout| {
-                    scroll::handle_home_end(layout, true)
-                }).unwrap_or(false);
+                return scroll::handle_home_end(true);
             }
             "End" => {
-                return scroll::with_current_layout(|layout| {
-                    scroll::handle_home_end(layout, false)
-                }).unwrap_or(false);
+                return scroll::handle_home_end(false);
             }
             _ => {}
         }
@@ -295,6 +290,7 @@ mod tests {
     use super::*;
     use crate::state::keyboard::{KeyboardEvent, Modifiers, reset_keyboard_state};
     use crate::engine::reset_registry;
+    use crate::pipeline::{set_layout, clear_layout};
     use crate::state::focus::reset_focus_state;
     use crate::primitives::{box_primitive, BoxProps};
     use std::rc::Rc;
@@ -304,7 +300,7 @@ mod tests {
         reset_registry();
         reset_focus_state();
         reset_keyboard_state();
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     /// Helper to route an event through the new central router
@@ -435,7 +431,7 @@ mod tests {
 
         // Set up layout where component 0 is scrollable
         let layout = create_test_layout(&[(0, 10, 50)]);
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -451,7 +447,7 @@ mod tests {
         // Scroll should NOT have happened (component consumed the event)
         assert_eq!(interaction::get_scroll_offset_y(0), 0);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     #[test]
@@ -471,7 +467,7 @@ mod tests {
 
         // Set up layout where component 0 is scrollable
         let layout = create_test_layout(&[(0, 10, 50)]);
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -485,7 +481,7 @@ mod tests {
         // Scroll SHOULD have happened
         assert_eq!(interaction::get_scroll_offset_y(0), scroll::LINE_SCROLL);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     #[test]
@@ -674,7 +670,7 @@ mod tests {
 
         // Set up layout where component 0 is scrollable
         let layout = create_test_layout(&[(0, 10, 50)]);
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -686,7 +682,7 @@ mod tests {
         // Should have scrolled
         assert_eq!(interaction::get_scroll_offset_y(0), scroll::LINE_SCROLL);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     #[test]
@@ -703,7 +699,7 @@ mod tests {
         // Layout with height=10, max_scroll=100
         let mut layout = create_test_layout(&[(0, 10, 100)]);
         layout.height[0] = 10;
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -715,7 +711,7 @@ mod tests {
         // Should scroll by viewport * 0.9 = 9
         assert_eq!(interaction::get_scroll_offset_y(0), 9);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     #[test]
@@ -730,7 +726,7 @@ mod tests {
         focus::focus(0);
 
         let layout = create_test_layout(&[(0, 10, 50)]);
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -742,7 +738,7 @@ mod tests {
         // Should be at bottom
         assert_eq!(interaction::get_scroll_offset_y(0), 50);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     #[test]
@@ -757,7 +753,7 @@ mod tests {
         focus::focus(0);
 
         let layout = create_test_layout(&[(0, 10, 50)]);
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         // Start in middle
         interaction::set_scroll_offset(0, 0, 25);
@@ -772,7 +768,7 @@ mod tests {
         // Should be at top
         assert_eq!(interaction::get_scroll_offset_y(0), 0);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 
     #[test]
@@ -787,7 +783,7 @@ mod tests {
         focus::focus(0);
 
         // No layout set
-        scroll::clear_current_layout();
+        clear_layout();
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -820,7 +816,7 @@ mod tests {
 
         // Layout where ONLY component 1 is scrollable (0 is not)
         let layout = create_test_layout(&[(1, 10, 50)]);
-        scroll::set_current_layout(layout);
+        set_layout(layout);
 
         let running = Arc::new(AtomicBool::new(true));
         let _handle = setup_global_keys(running.clone());
@@ -833,6 +829,6 @@ mod tests {
         assert_eq!(interaction::get_scroll_offset_y(0), 0);
         assert_eq!(interaction::get_scroll_offset_y(1), 0);
 
-        scroll::clear_current_layout();
+        clear_layout();
     }
 }

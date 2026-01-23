@@ -30,6 +30,7 @@ pub use scroll::{
     scroll_to_start, scroll_to_end, scroll_by_with_chaining,
     get_focused_scrollable, handle_arrow_scroll, handle_page_scroll,
     handle_home_end, handle_wheel_scroll, scroll_into_view,
-    set_current_layout, with_current_layout, clear_current_layout,
+    handle_stick_to_bottom, update_stick_to_bottom_on_scroll, is_at_bottom,
+    scroll_focused_into_view, find_scrollable_ancestor,
     LINE_SCROLL, WHEEL_SCROLL, PAGE_SCROLL_FACTOR,
 };

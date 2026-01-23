@@ -603,9 +603,12 @@ fn dispatch_scroll(event: &MouseEvent) -> bool {
     // and parent chaining at boundaries
     if let Some(scroll_info) = &event.scroll {
         use super::scroll;
-        return scroll::with_current_layout(|layout| {
-            scroll::handle_wheel_scroll(layout, event.x, event.y, scroll_info.direction)
-        }).unwrap_or(false);
+        use crate::pipeline::try_get_layout;
+
+        // Guard: If no layout is set, can't scroll
+        if try_get_layout().is_some() {
+            return scroll::handle_wheel_scroll(event.x, event.y, scroll_info.direction);
+        }
     }
 
     false

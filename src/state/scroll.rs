@@ -11,6 +11,11 @@
 //! - scrollOffsetX/Y = user state (interaction arrays)
 //! - scrollable/maxScrollX/Y = computed by TITAN (read from ComputedLayout)
 //!
+//! # Global Layout Access
+//!
+//! Keyboard scroll handlers use `crate::pipeline::get_layout()` to access
+//! the current computed layout. This is set by the render effect in mount().
+//!
 //! # Example
 //!
 //! ```ignore
@@ -24,47 +29,17 @@
 //! // Scroll by delta (returns true if scrolled)
 //! let scrolled = scroll::scroll_by(&layout, index, 0, 1);
 //!
-//! // Keyboard scroll handlers
-//! scroll::handle_arrow_scroll(&layout, ScrollDirection::Down);
-//! scroll::handle_page_scroll(&layout, ScrollDirection::Up);
-//! scroll::handle_home_end(&layout, true); // to_top
+//! // Keyboard scroll handlers (no layout parameter - use global accessor)
+//! scroll::handle_arrow_scroll(ScrollDirection::Down);
+//! scroll::handle_page_scroll(ScrollDirection::Up);
+//! scroll::handle_home_end(true); // to_top
 //! ```
-
-use std::cell::RefCell;
 
 use crate::engine::arrays::{core, interaction};
 use crate::layout::ComputedLayout;
+use crate::pipeline::get_layout;
 use crate::state::focus;
 use crate::state::mouse::ScrollDirection;
-
-// =============================================================================
-// CURRENT LAYOUT ACCESSOR
-// =============================================================================
-
-thread_local! {
-    /// Current computed layout for scroll handlers.
-    /// Updated by the render pipeline after each layout computation.
-    static CURRENT_LAYOUT: RefCell<Option<ComputedLayout>> = RefCell::new(None);
-}
-
-/// Set the current layout (called by pipeline before input processing).
-pub fn set_current_layout(layout: ComputedLayout) {
-    CURRENT_LAYOUT.with(|l| *l.borrow_mut() = Some(layout));
-}
-
-/// Get current layout reference for handlers.
-/// Returns None if no layout has been set.
-pub fn with_current_layout<F, R>(f: F) -> Option<R>
-where
-    F: FnOnce(&ComputedLayout) -> R,
-{
-    CURRENT_LAYOUT.with(|l| l.borrow().as_ref().map(f))
-}
-
-/// Clear the current layout (for cleanup/testing).
-pub fn clear_current_layout() {
-    CURRENT_LAYOUT.with(|l| *l.borrow_mut() = None);
-}
 
 // =============================================================================
 // SCROLL CONSTANTS
@@ -229,27 +204,33 @@ pub fn get_focused_scrollable(layout: &ComputedLayout) -> i32 {
 /// Handle arrow key scroll for focused scrollable.
 /// Returns true if scroll occurred.
 ///
+/// Uses global layout accessor `get_layout()` set by the render pipeline.
+///
 /// Note: Keyboard scroll does NOT chain (per design decision -
 /// would conflict with focus management).
-pub fn handle_arrow_scroll(layout: &ComputedLayout, direction: ScrollDirection) -> bool {
-    let scrollable = get_focused_scrollable(layout);
+pub fn handle_arrow_scroll(direction: ScrollDirection) -> bool {
+    let layout = get_layout();
+    let scrollable = get_focused_scrollable(&layout);
     if scrollable < 0 {
         return false;
     }
 
     let idx = scrollable as usize;
     match direction {
-        ScrollDirection::Up => scroll_by(layout, idx, 0, -(LINE_SCROLL as i32)),
-        ScrollDirection::Down => scroll_by(layout, idx, 0, LINE_SCROLL as i32),
-        ScrollDirection::Left => scroll_by(layout, idx, -(LINE_SCROLL as i32), 0),
-        ScrollDirection::Right => scroll_by(layout, idx, LINE_SCROLL as i32, 0),
+        ScrollDirection::Up => scroll_by(&layout, idx, 0, -(LINE_SCROLL as i32)),
+        ScrollDirection::Down => scroll_by(&layout, idx, 0, LINE_SCROLL as i32),
+        ScrollDirection::Left => scroll_by(&layout, idx, -(LINE_SCROLL as i32), 0),
+        ScrollDirection::Right => scroll_by(&layout, idx, LINE_SCROLL as i32, 0),
     }
 }
 
 /// Handle PageUp/PageDown scroll.
 /// Returns true if scroll occurred.
-pub fn handle_page_scroll(layout: &ComputedLayout, direction: ScrollDirection) -> bool {
-    let scrollable = get_focused_scrollable(layout);
+///
+/// Uses global layout accessor `get_layout()` set by the render pipeline.
+pub fn handle_page_scroll(direction: ScrollDirection) -> bool {
+    let layout = get_layout();
+    let scrollable = get_focused_scrollable(&layout);
     if scrollable < 0 {
         return false;
     }
@@ -259,25 +240,28 @@ pub fn handle_page_scroll(layout: &ComputedLayout, direction: ScrollDirection) -
     let page_amount = (viewport_height * PAGE_SCROLL_FACTOR).max(1.0) as i32;
 
     match direction {
-        ScrollDirection::Up => scroll_by(layout, idx, 0, -page_amount),
-        ScrollDirection::Down => scroll_by(layout, idx, 0, page_amount),
+        ScrollDirection::Up => scroll_by(&layout, idx, 0, -page_amount),
+        ScrollDirection::Down => scroll_by(&layout, idx, 0, page_amount),
         _ => false, // No horizontal page scroll
     }
 }
 
 /// Handle Ctrl+Home/End for scroll to top/bottom.
 /// Returns true if action performed.
-pub fn handle_home_end(layout: &ComputedLayout, to_top: bool) -> bool {
-    let scrollable = get_focused_scrollable(layout);
+///
+/// Uses global layout accessor `get_layout()` set by the render pipeline.
+pub fn handle_home_end(to_top: bool) -> bool {
+    let layout = get_layout();
+    let scrollable = get_focused_scrollable(&layout);
     if scrollable < 0 {
         return false;
     }
 
     let idx = scrollable as usize;
     if to_top {
-        scroll_to_top(layout, idx);
+        scroll_to_top(&layout, idx);
     } else {
-        scroll_to_bottom(layout, idx);
+        scroll_to_bottom(&layout, idx);
     }
     true
 }
@@ -288,41 +272,45 @@ pub fn handle_home_end(layout: &ComputedLayout, to_top: bool) -> bool {
 
 /// Handle mouse wheel scroll at coordinates.
 /// First tries element under cursor, then falls back to focused scrollable.
-/// Uses chaining for mouse wheel (unlike keyboard scroll).
+/// Uses chaining for BOTH cases (unlike keyboard scroll which doesn't chain).
+///
+/// Uses global layout accessor `get_layout()` set by the render pipeline.
 pub fn handle_wheel_scroll(
-    layout: &ComputedLayout,
     x: u16,
     y: u16,
     direction: ScrollDirection,
 ) -> bool {
     use crate::state::mouse::hit_test;
 
+    let layout = get_layout();
+
     // Try element under cursor via hit test
     let component_at = hit_test(x, y);
 
     // If component at cursor is scrollable, scroll it (with chaining)
     if let Some(idx) = component_at {
-        if is_scrollable(layout, idx) {
+        if is_scrollable(&layout, idx) {
             let delta = match direction {
                 ScrollDirection::Up => (0, -(WHEEL_SCROLL as i32)),
                 ScrollDirection::Down => (0, WHEEL_SCROLL as i32),
                 ScrollDirection::Left => (-(WHEEL_SCROLL as i32), 0),
                 ScrollDirection::Right => (WHEEL_SCROLL as i32, 0),
             };
-            return scroll_by_with_chaining(layout, idx, delta.0, delta.1);
+            return scroll_by_with_chaining(&layout, idx, delta.0, delta.1);
         }
     }
 
-    // Fallback to focused scrollable (no chaining for focused)
-    let scrollable = get_focused_scrollable(layout);
+    // Fallback to focused scrollable (NOW WITH CHAINING - fixed from previous version)
+    let scrollable = get_focused_scrollable(&layout);
     if scrollable >= 0 {
         let idx = scrollable as usize;
-        match direction {
-            ScrollDirection::Up => scroll_by(layout, idx, 0, -(WHEEL_SCROLL as i32)),
-            ScrollDirection::Down => scroll_by(layout, idx, 0, WHEEL_SCROLL as i32),
-            ScrollDirection::Left => scroll_by(layout, idx, -(WHEEL_SCROLL as i32), 0),
-            ScrollDirection::Right => scroll_by(layout, idx, WHEEL_SCROLL as i32, 0),
-        }
+        let delta = match direction {
+            ScrollDirection::Up => (0, -(WHEEL_SCROLL as i32)),
+            ScrollDirection::Down => (0, WHEEL_SCROLL as i32),
+            ScrollDirection::Left => (-(WHEEL_SCROLL as i32), 0),
+            ScrollDirection::Right => (WHEEL_SCROLL as i32, 0),
+        };
+        scroll_by_with_chaining(&layout, idx, delta.0, delta.1)
     } else {
         false
     }
@@ -502,6 +490,7 @@ mod tests {
     use super::*;
     use crate::engine::arrays::interaction;
     use crate::engine::reset_registry;
+    use crate::pipeline::{set_layout, clear_layout};
     use crate::state::focus::reset_focus_state;
 
     fn create_test_layout(scrollable_indices: &[(usize, u16, u16)]) -> ComputedLayout {
@@ -537,6 +526,14 @@ mod tests {
         reset_registry();
         reset_focus_state();
         interaction::reset();
+        clear_layout();
+    }
+
+    /// Setup with a layout for the global accessor.
+    /// Handlers that use get_layout() need this.
+    fn setup_with_layout(layout: ComputedLayout) {
+        setup();
+        set_layout(layout);
     }
 
     #[test]
@@ -781,8 +778,11 @@ mod tests {
 
     #[test]
     fn test_handle_arrow_scroll_down() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        // Create layout where component 0 is scrollable
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         // Create focusable component
         let _cleanup = box_primitive(BoxProps {
@@ -793,17 +793,16 @@ mod tests {
         // Focus it
         focus::focus(0);
 
-        // Create layout where component 0 is scrollable
-        let layout = create_test_layout(&[(0, 10, 50)]);
-
-        assert!(handle_arrow_scroll(&layout, ScrollDirection::Down));
+        assert!(handle_arrow_scroll(ScrollDirection::Down));
         assert_eq!(interaction::get_scroll_offset_y(0), LINE_SCROLL);
     }
 
     #[test]
     fn test_handle_arrow_scroll_up() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -811,19 +810,19 @@ mod tests {
         });
         focus::focus(0);
 
-        let layout = create_test_layout(&[(0, 10, 50)]);
-
         // Start in middle
         interaction::set_scroll_offset(0, 0, 25);
 
-        assert!(handle_arrow_scroll(&layout, ScrollDirection::Up));
+        assert!(handle_arrow_scroll(ScrollDirection::Up));
         assert_eq!(interaction::get_scroll_offset_y(0), 25 - LINE_SCROLL);
     }
 
     #[test]
     fn test_handle_arrow_scroll_at_boundary() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -831,17 +830,17 @@ mod tests {
         });
         focus::focus(0);
 
-        let layout = create_test_layout(&[(0, 10, 50)]);
-
         // Already at top
-        assert!(!handle_arrow_scroll(&layout, ScrollDirection::Up));
+        assert!(!handle_arrow_scroll(ScrollDirection::Up));
         assert_eq!(interaction::get_scroll_offset_y(0), 0);
     }
 
     #[test]
     fn test_handle_arrow_scroll_horizontal() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        let layout = create_test_layout(&[(0, 50, 50)]);
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -849,24 +848,26 @@ mod tests {
         });
         focus::focus(0);
 
-        let layout = create_test_layout(&[(0, 50, 50)]);
-
         // Scroll right
-        assert!(handle_arrow_scroll(&layout, ScrollDirection::Right));
+        assert!(handle_arrow_scroll(ScrollDirection::Right));
         assert_eq!(interaction::get_scroll_offset_x(0), LINE_SCROLL);
 
         // Scroll left
-        assert!(handle_arrow_scroll(&layout, ScrollDirection::Left));
+        assert!(handle_arrow_scroll(ScrollDirection::Left));
         assert_eq!(interaction::get_scroll_offset_x(0), 0);
 
         // At left boundary
-        assert!(!handle_arrow_scroll(&layout, ScrollDirection::Left));
+        assert!(!handle_arrow_scroll(ScrollDirection::Left));
     }
 
     #[test]
     fn test_handle_page_scroll() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        // Create layout with known height
+        let mut layout = create_test_layout(&[(0, 10, 100)]);
+        layout.height[0] = 10; // Viewport height
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -874,19 +875,18 @@ mod tests {
         });
         focus::focus(0);
 
-        // Create layout with known height
-        let mut layout = create_test_layout(&[(0, 10, 100)]);
-        layout.height[0] = 10; // Viewport height
-
-        assert!(handle_page_scroll(&layout, ScrollDirection::Down));
+        assert!(handle_page_scroll(ScrollDirection::Down));
         // Should scroll by 10 * 0.9 = 9
         assert_eq!(interaction::get_scroll_offset_y(0), 9);
     }
 
     #[test]
     fn test_handle_page_scroll_up() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        let mut layout = create_test_layout(&[(0, 10, 100)]);
+        layout.height[0] = 10;
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -894,21 +894,20 @@ mod tests {
         });
         focus::focus(0);
 
-        let mut layout = create_test_layout(&[(0, 10, 100)]);
-        layout.height[0] = 10;
-
         // Start at position 50
         interaction::set_scroll_offset(0, 0, 50);
 
-        assert!(handle_page_scroll(&layout, ScrollDirection::Up));
+        assert!(handle_page_scroll(ScrollDirection::Up));
         // Should scroll up by 10 * 0.9 = 9
         assert_eq!(interaction::get_scroll_offset_y(0), 41);
     }
 
     #[test]
     fn test_handle_home_end() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -916,34 +915,34 @@ mod tests {
         });
         focus::focus(0);
 
-        let layout = create_test_layout(&[(0, 10, 50)]);
-
         // Scroll to bottom
-        assert!(handle_home_end(&layout, false));
+        assert!(handle_home_end(false));
         assert_eq!(interaction::get_scroll_offset_y(0), 50);
 
         // Scroll to top
-        assert!(handle_home_end(&layout, true));
+        assert!(handle_home_end(true));
         assert_eq!(interaction::get_scroll_offset_y(0), 0);
     }
 
     #[test]
     fn test_no_scroll_when_not_focused() {
-        setup();
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         reset_focus_state(); // Ensure no focus
 
-        let layout = create_test_layout(&[(0, 10, 50)]);
-
-        assert!(!handle_arrow_scroll(&layout, ScrollDirection::Down));
-        assert!(!handle_page_scroll(&layout, ScrollDirection::Down));
-        assert!(!handle_home_end(&layout, true));
+        assert!(!handle_arrow_scroll(ScrollDirection::Down));
+        assert!(!handle_page_scroll(ScrollDirection::Down));
+        assert!(!handle_home_end(true));
     }
 
     #[test]
     fn test_no_scroll_when_focused_not_scrollable() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        // Empty layout - component 0 not scrollable
+        let layout = ComputedLayout::default();
+        setup_with_layout(layout);
 
         let _cleanup = box_primitive(BoxProps {
             focusable: Some(true),
@@ -951,12 +950,9 @@ mod tests {
         });
         focus::focus(0);
 
-        // Empty layout - component 0 not scrollable
-        let layout = ComputedLayout::default();
-
-        assert!(!handle_arrow_scroll(&layout, ScrollDirection::Down));
-        assert!(!handle_page_scroll(&layout, ScrollDirection::Down));
-        assert!(!handle_home_end(&layout, false));
+        assert!(!handle_arrow_scroll(ScrollDirection::Down));
+        assert!(!handle_page_scroll(ScrollDirection::Down));
+        assert!(!handle_home_end(false));
     }
 
     #[test]
@@ -1123,25 +1119,26 @@ mod tests {
 
     #[test]
     fn test_handle_wheel_scroll_uses_hovered_component() {
-        setup();
-
         // Create scrollable component at index 0
         let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         // Set up hit grid: component 0 occupies area
         mouse::clear_hit_grid();
         mouse::fill_hit_rect(0, 0, 10, 10, 0);
 
         // Mouse wheel at (5, 5) should scroll component 0
-        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Down);
+        let scrolled = handle_wheel_scroll(5, 5, ScrollDirection::Down);
         assert!(scrolled);
         assert_eq!(interaction::get_scroll_offset_y(0), WHEEL_SCROLL);
     }
 
     #[test]
     fn test_handle_wheel_scroll_falls_back_to_focused() {
-        setup();
         use crate::primitives::{box_primitive, BoxProps};
+
+        let layout = create_test_layout(&[(0, 10, 50)]);
+        setup_with_layout(layout);
 
         // Create focusable component that is scrollable
         let _cleanup = box_primitive(BoxProps {
@@ -1150,23 +1147,20 @@ mod tests {
         });
         focus::focus(0);
 
-        let layout = create_test_layout(&[(0, 10, 50)]);
-
         // Clear hit grid - no component under cursor
         mouse::clear_hit_grid();
 
         // Should fall back to focused scrollable
-        let scrolled = handle_wheel_scroll(&layout, 50, 50, ScrollDirection::Down);
+        let scrolled = handle_wheel_scroll(50, 50, ScrollDirection::Down);
         assert!(scrolled);
         assert_eq!(interaction::get_scroll_offset_y(0), WHEEL_SCROLL);
     }
 
     #[test]
     fn test_handle_wheel_scroll_with_chaining() {
-        setup();
-
         // Parent (index 0) and child (index 1) both scrollable
         let layout = create_test_layout(&[(0, 10, 50), (1, 5, 10)]);
+        setup_with_layout(layout);
 
         // Set up parent-child relationship
         core::set_parent_index(1, Some(0));
@@ -1179,7 +1173,7 @@ mod tests {
         mouse::fill_hit_rect(5, 5, 10, 10, 1);
 
         // Wheel scroll down should chain to parent
-        let scrolled = handle_wheel_scroll(&layout, 7, 7, ScrollDirection::Down);
+        let scrolled = handle_wheel_scroll(7, 7, ScrollDirection::Down);
         assert!(scrolled);
         assert_eq!(interaction::get_scroll_offset_y(1), 10); // Child unchanged
         assert_eq!(interaction::get_scroll_offset_y(0), WHEEL_SCROLL); // Parent scrolled
@@ -1187,36 +1181,34 @@ mod tests {
 
     #[test]
     fn test_handle_wheel_scroll_no_scrollable() {
-        setup();
-
         // Empty layout - nothing scrollable
         let layout = ComputedLayout::default();
+        setup_with_layout(layout);
 
         // Clear hit grid
         mouse::clear_hit_grid();
         reset_focus_state();
 
         // Should return false
-        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Down);
+        let scrolled = handle_wheel_scroll(5, 5, ScrollDirection::Down);
         assert!(!scrolled);
     }
 
     #[test]
     fn test_handle_wheel_scroll_horizontal() {
-        setup();
-
         let layout = create_test_layout(&[(0, 50, 50)]);
+        setup_with_layout(layout);
 
         mouse::clear_hit_grid();
         mouse::fill_hit_rect(0, 0, 10, 10, 0);
 
         // Scroll right
-        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Right);
+        let scrolled = handle_wheel_scroll(5, 5, ScrollDirection::Right);
         assert!(scrolled);
         assert_eq!(interaction::get_scroll_offset_x(0), WHEEL_SCROLL);
 
         // Scroll left
-        let scrolled = handle_wheel_scroll(&layout, 5, 5, ScrollDirection::Left);
+        let scrolled = handle_wheel_scroll(5, 5, ScrollDirection::Left);
         assert!(scrolled);
         assert_eq!(interaction::get_scroll_offset_x(0), 0);
     }
