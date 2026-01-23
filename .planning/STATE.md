@@ -5,41 +5,39 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 4 - Scroll System (COMPLETE with gap closure)
+**Current focus:** Phase 5 - Cursor System
 
 ---
 
 ## Current Position
 
-**Phase:** 4 of 6 (Scroll System)
-**Plan:** 5 of 5 complete (including gap closure plan)
-**Status:** Phase complete
+**Phase:** 5 of 6 (Cursor System)
+**Plan:** 2 of 4 complete
+**Status:** In Progress
 
-Last activity: 2026-01-22 - Completed 04-05-PLAN.md (gap closure)
+Last activity: 2026-01-23 - Completed 05-02-PLAN.md
 
-Progress: [#################] 100% (17/17 total plans)
+Progress: [##################-] 90% (19/21 total plans)
 
 ---
 
 ## Current Phase
 
-**Phase 4: Scroll System**
+**Phase 5: Cursor System**
 
-Status: COMPLETE (5/5 plans complete, verified 16/16 must-haves)
+Status: IN PROGRESS (2/4 plans complete)
 
 ### Requirements Progress
-- [x] R4.1: Scroll module core (04-01)
-- [x] R4.2: Keyboard scroll handlers (04-02)
-- [x] R4.3: Mouse wheel scroll handlers (04-03)
-- [x] R4.4: Scrollbar rendering + stick_to_bottom (04-04)
-- [x] R4.5: Pipeline integration (04-05, gap closure)
+- [x] R5.1: Blink animation module (05-01)
+- [x] R5.2: Terminal cursor API + arrays (05-02)
+- [ ] R5.3: Drawn cursor module (05-03)
+- [ ] R5.4: Pipeline integration (05-04)
 
 ### Plans
-- [x] 04-01: Scroll core module
-- [x] 04-02: Keyboard handlers
-- [x] 04-03: Mouse handlers
-- [x] 04-04: Scrollbar rendering + stick_to_bottom
-- [x] 04-05: Pipeline integration (gap closure)
+- [x] 05-01: Blink animation module
+- [x] 05-02: Terminal cursor API and arrays
+- [ ] 05-03: Drawn cursor module
+- [ ] 05-04: Pipeline integration
 
 ---
 
@@ -51,7 +49,7 @@ Status: COMPLETE (5/5 plans complete, verified 16/16 must-haves)
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Complete | 100% (5/5) |
-| 5. Cursor System | Not Started | 0% |
+| 5. Cursor System | In Progress | 50% (2/4) |
 | 6. Control Flow | Not Started | 0% |
 
 ---
@@ -95,10 +93,23 @@ Status: COMPLETE (5/5 plans complete, verified 16/16 must-haves)
 | overflow-auto-indicator | overflow:auto shows minimal scroll indicator | Less intrusive for auto mode | 2026-01-22 |
 | prev-max-for-growth | prev_max_scroll_y for content growth detection | Compare before/after to detect content addition | 2026-01-22 |
 | global-layout-accessor | Thread-local cache with set/get/clear for layout | Scroll handlers can't receive layout as parameter from keyboard/mouse dispatch | 2026-01-22 |
+| cursor-shape-vs-style | Keep CursorShape (ansi.rs) and CursorStyle (types.rs) separate | They serve different purposes: Shape for terminal control, Style for component config | 2026-01-23 |
+| atomic-blink-phase | Use Arc<AtomicBool> for cross-thread blink phase | Signal<T> uses Rc<RefCell> which isn't Send | 2026-01-23 |
 
 ---
 
 ## Session Log
+
+### 2026-01-23 — Plan 05-02 Execution
+- Created src/state/cursor.rs (343 lines) with terminal cursor API
+- cursor_show/hide, cursor_move_to, cursor_set_shape, cursor_save/restore
+- State query: cursor_is_visible, cursor_position, cursor_shape, cursor_is_blinking
+- Thread-local state tracking for persistence
+- Fixed animate.rs: Changed to Arc<AtomicBool> for cross-thread blink phase
+- Added CURSOR_CHAR, CURSOR_ALT_CHAR, CURSOR_STYLE arrays to interaction.rs
+- Added 6 accessor functions for cursor arrays
+- 8 new tests (5 cursor + 3 interaction arrays)
+- All 413 tests pass (394 unit + 19 doc)
 
 ### 2026-01-22 — Plan 04-05 Execution (Gap Closure)
 - Added global layout accessor to layout_derived.rs (set_layout, get_layout, try_get_layout, clear_layout)
@@ -280,9 +291,9 @@ Status: COMPLETE (5/5 plans complete, verified 16/16 must-haves)
 
 ## Session Continuity
 
-Last session: 2026-01-23 02:30 UTC
-Stopped at: Phase 4 verified (16/16 must-haves)
-Resume file: None - Phase 4 complete, ready for Phase 5
+Last session: 2026-01-23 14:17 UTC
+Stopped at: Completed 05-02-PLAN.md
+Resume file: None - ready for 05-03
 
 ---
 
@@ -302,6 +313,7 @@ None currently.
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
 - Phase 4 complete! 398 tests total. (gap closure: 379 → 398)
+- Phase 5 in progress! 413 tests total.
 
 ---
 
