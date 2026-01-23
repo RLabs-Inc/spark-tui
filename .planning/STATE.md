@@ -5,39 +5,39 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 5 - Cursor System (COMPLETE)
+**Current focus:** Phase 6 - Control Flow (In Progress)
 
 ---
 
 ## Current Position
 
-**Phase:** 5 of 6 (Cursor System)
-**Plan:** 4 of 4 complete
-**Status:** Phase Complete
+**Phase:** 6 of 6 (Control Flow)
+**Plan:** 1 of 4 complete
+**Status:** In Progress
 
-Last activity: 2026-01-23 - Completed 05-04-PLAN.md
+Last activity: 2026-01-23 - Completed 06-01-PLAN.md
 
-Progress: [####################] 100% (21/21 total plans)
+Progress: [######################] 100% (22/25 total plans)
 
 ---
 
 ## Current Phase
 
-**Phase 5: Cursor System**
+**Phase 6: Control Flow**
 
-Status: COMPLETE (4/4 plans complete)
+Status: In Progress (1/4 plans complete)
 
 ### Requirements Progress
-- [x] R5.1: Blink animation module (05-01)
-- [x] R5.2: Terminal cursor API + arrays (05-02)
-- [x] R5.3: Drawn cursor module (05-03)
-- [x] R5.4: Pipeline integration (05-04)
+- [x] R6.1: show() conditional rendering (06-01)
+- [ ] R6.2: each() list rendering (06-02)
+- [ ] R6.3: when() async handling (06-03)
+- [ ] R6.4: Integration tests (06-04)
 
 ### Plans
-- [x] 05-01: Blink animation module
-- [x] 05-02: Terminal cursor API and arrays
-- [x] 05-03: Drawn cursor module
-- [x] 05-04: Pipeline integration
+- [x] 06-01: show() conditional rendering
+- [ ] 06-02: each() list rendering
+- [ ] 06-03: when() async handling
+- [ ] 06-04: Integration and edge cases
 
 ---
 
@@ -50,7 +50,7 @@ Status: COMPLETE (4/4 plans complete)
 | 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Complete | 100% (5/5) |
 | 5. Cursor System | Complete | 100% (4/4) |
-| 6. Control Flow | Not Started | 0% |
+| 6. Control Flow | In Progress | 25% (1/4) |
 
 ---
 
@@ -96,10 +96,22 @@ Status: COMPLETE (4/4 plans complete)
 | cursor-shape-vs-style | Keep CursorShape (ansi.rs) and CursorStyle (types.rs) separate | They serve different purposes: Shape for terminal control, Style for component config | 2026-01-23 |
 | atomic-blink-phase | Use Arc<AtomicBool> for cross-thread blink phase | Signal<T> uses Rc<RefCell> which isn't Send | 2026-01-23 |
 | box-tests-for-cursor | Use Box primitives in drawn_cursor tests | Input creates its own cursor, tests need focusable-only components | 2026-01-23 |
+| effect-scope-cleanup | Effect registered with scope via spark-signals auto-registration | effect() returns cleanup but scope.stop() handles disposal | 2026-01-23 |
+| show-parent-capture | Parent index captured at show() call time, restored around render | Ensures nested components have correct hierarchy | 2026-01-23 |
+| condition-option-bool | Use Option<bool> for was_true to distinguish first run from unchanged | Allows initial render in effect while detecting no-change | 2026-01-23 |
 
 ---
 
 ## Session Log
+
+### 2026-01-23 — Plan 06-01 Execution
+- Created src/primitives/control_flow.rs (230+ lines) with show() function
+- EffectScope-based cleanup pattern for control flow
+- Parent context capture and restoration for nested components
+- Optional else branch support
+- Condition tracking prevents unnecessary re-renders
+- 7 comprehensive tests for show()
+- All 428 tests pass (409 unit + 19 doc)
 
 ### 2026-01-23 — Plan 05-04 Execution
 - Added render_input_selection() with INVERSE highlighting
@@ -313,9 +325,9 @@ Status: COMPLETE (4/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-23 14:35 UTC
-Stopped at: Completed 05-04-PLAN.md - Phase 5 Complete
-Resume file: None - ready for Phase 6
+Last session: 2026-01-23 15:49 UTC
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None - continue to 06-02
 
 ---
 
@@ -336,6 +348,7 @@ None currently.
 - Phase 3 complete! 319 tests total.
 - Phase 4 complete! 398 tests total. (gap closure: 379 -> 398)
 - Phase 5 complete! 421 tests total.
+- Phase 6 in progress: 428 tests total (after 06-01).
 
 ---
 
