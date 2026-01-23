@@ -133,13 +133,15 @@ Complete port of TypeScript TUI framework to Rust with identical ergonomics and 
 - autoFocus prop for initial focus
 - maxLength prop for character limit
 
+**Status:** COMPLETE (2026-01-22)
+
 **Success Criteria:**
-- [ ] Type characters and see them appear
-- [ ] Cursor moves with arrow keys
-- [ ] Backspace/Delete work correctly
-- [ ] Enter fires onSubmit, Escape fires onCancel
-- [ ] Password mode masks characters
-- [ ] Two-way binding updates external Signal
+- [x] Type characters and see them appear
+- [x] Cursor moves with arrow keys
+- [x] Backspace/Delete work correctly
+- [x] Enter fires onSubmit, Escape fires onCancel
+- [x] Password mode masks characters
+- [x] Two-way binding updates external Signal
 
 ---
 
@@ -251,11 +253,13 @@ Complete port of TypeScript TUI framework to Rust with identical ergonomics and 
 - catch(error): render on failure
 - Handle cleanup on unmount
 
+**Status:** COMPLETE (2026-01-23)
+
 **Success Criteria:**
-- [ ] show() toggles component visibility reactively
-- [ ] each() renders list with fine-grained updates
-- [ ] each() reorders without recreating all items
-- [ ] when() shows pending/then/catch states correctly
+- [x] show() toggles component visibility reactively
+- [x] each() renders list with fine-grained updates
+- [x] each() reorders without recreating all items
+- [x] when() shows pending/then/catch states correctly
 
 ---
 

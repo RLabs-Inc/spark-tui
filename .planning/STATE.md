@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 6 - Control Flow (In Progress)
+**Current focus:** Milestone 1 Complete - Full TUI Port
 
 ---
 
 ## Current Position
 
-**Phase:** 6 of 6 (Control Flow)
-**Plan:** 3 of 4 complete
-**Status:** In Progress
+**Phase:** 6 of 6 (Control Flow) - COMPLETE
+**Plan:** 3 of 3 complete
+**Status:** MILESTONE COMPLETE
 
-Last activity: 2026-01-23 - Completed 06-03-PLAN.md
+Last activity: 2026-01-23 - Completed Phase 6, all plans verified
 
-Progress: [########################] 96% (24/25 total plans)
+Progress: [########################] 100% (24/24 total plans)
 
 ---
 
@@ -25,19 +25,17 @@ Progress: [########################] 96% (24/25 total plans)
 
 **Phase 6: Control Flow**
 
-Status: In Progress (3/4 plans complete)
+Status: COMPLETE (3/3 plans complete)
 
 ### Requirements Progress
 - [x] R6.1: show() conditional rendering (06-01)
 - [x] R6.2: each() list rendering (06-02)
 - [x] R6.3: when() async handling (06-03)
-- [ ] R6.4: Integration tests (06-04)
 
 ### Plans
 - [x] 06-01: show() conditional rendering
 - [x] 06-02: each() list rendering
 - [x] 06-03: when() async handling
-- [ ] 06-04: Integration and edge cases
 
 ---
 
@@ -50,7 +48,7 @@ Status: In Progress (3/4 plans complete)
 | 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Complete | 100% (5/5) |
 | 5. Cursor System | Complete | 100% (4/4) |
-| 6. Control Flow | In Progress | 75% (3/4) |
+| 6. Control Flow | Complete | 100% (3/3) |
 
 ---
 
@@ -349,8 +347,8 @@ Status: In Progress (3/4 plans complete)
 ## Session Continuity
 
 Last session: 2026-01-23 16:00 UTC
-Stopped at: Completed 06-03-PLAN.md
-Resume file: None - continue to 06-04
+Stopped at: MILESTONE 1 COMPLETE - All 6 phases verified
+Resume file: None - ready for milestone audit
 
 ---
 
@@ -371,7 +369,8 @@ None currently.
 - Phase 3 complete! 319 tests total.
 - Phase 4 complete! 398 tests total. (gap closure: 379 -> 398)
 - Phase 5 complete! 421 tests total.
-- Phase 6 in progress: 447 tests total (428 unit + 19 doc after 06-03).
+- Phase 6 complete! 447 tests total (428 unit + 19 doc).
+- MILESTONE 1 COMPLETE! All 6 phases verified.
 
 ---
 

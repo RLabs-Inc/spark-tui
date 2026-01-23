@@ -174,10 +174,12 @@ Plans:
 
 **Plans:** 3 plans
 
+**Status:** COMPLETE (2026-01-23)
+
 Plans:
-- [ ] 06-01-PLAN.md - show() conditional rendering
-- [ ] 06-02-PLAN.md - each() list rendering with fine-grained updates
-- [ ] 06-03-PLAN.md - when() async state handling
+- [x] 06-01-PLAN.md - show() conditional rendering
+- [x] 06-02-PLAN.md - each() list rendering with fine-grained updates
+- [x] 06-03-PLAN.md - when() async state handling
 
 ---
 
