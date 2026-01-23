@@ -5,19 +5,19 @@
 See: .planning/PROJECT.md (updated 2026-01-22)
 
 **Core value:** Reactive correctness AND TypeScript-like ergonomics
-**Current focus:** Phase 5 - Cursor System
+**Current focus:** Phase 5 - Cursor System (COMPLETE)
 
 ---
 
 ## Current Position
 
 **Phase:** 5 of 6 (Cursor System)
-**Plan:** 3 of 4 complete
-**Status:** In Progress
+**Plan:** 4 of 4 complete
+**Status:** Phase Complete
 
-Last activity: 2026-01-23 - Completed 05-03-PLAN.md
+Last activity: 2026-01-23 - Completed 05-04-PLAN.md
 
-Progress: [###################] 95% (20/21 total plans)
+Progress: [####################] 100% (21/21 total plans)
 
 ---
 
@@ -25,19 +25,19 @@ Progress: [###################] 95% (20/21 total plans)
 
 **Phase 5: Cursor System**
 
-Status: IN PROGRESS (3/4 plans complete)
+Status: COMPLETE (4/4 plans complete)
 
 ### Requirements Progress
 - [x] R5.1: Blink animation module (05-01)
 - [x] R5.2: Terminal cursor API + arrays (05-02)
 - [x] R5.3: Drawn cursor module (05-03)
-- [ ] R5.4: Pipeline integration (05-04)
+- [x] R5.4: Pipeline integration (05-04)
 
 ### Plans
 - [x] 05-01: Blink animation module
 - [x] 05-02: Terminal cursor API and arrays
 - [x] 05-03: Drawn cursor module
-- [ ] 05-04: Pipeline integration
+- [x] 05-04: Pipeline integration
 
 ---
 
@@ -49,7 +49,7 @@ Status: IN PROGRESS (3/4 plans complete)
 | 2. Theme System | Complete | 100% (4/4) |
 | 3. Input Component | Complete | 100% (4/4) |
 | 4. Scroll System | Complete | 100% (5/5) |
-| 5. Cursor System | In Progress | 75% (3/4) |
+| 5. Cursor System | Complete | 100% (4/4) |
 | 6. Control Flow | Not Started | 0% |
 
 ---
@@ -100,6 +100,15 @@ Status: IN PROGRESS (3/4 plans complete)
 ---
 
 ## Session Log
+
+### 2026-01-23 — Plan 05-04 Execution
+- Added render_input_selection() with INVERSE highlighting
+- Added render_input_cursor() supporting Block/Bar/Underline styles
+- Updated render_input() to integrate selection and cursor rendering
+- Selection respects scroll offset and clips to content area
+- Cursor only renders when focused AND visible (respects blink)
+- All 421 tests pass (402 unit + 19 doc)
+- Phase 5 Complete!
 
 ### 2026-01-23 — Plan 05-03 Execution
 - Created src/state/drawn_cursor.rs (587 lines) with DrawnCursor control object
@@ -304,9 +313,9 @@ Status: IN PROGRESS (3/4 plans complete)
 
 ## Session Continuity
 
-Last session: 2026-01-23 15:30 UTC
-Stopped at: Completed 05-03-PLAN.md
-Resume file: None - ready for 05-04
+Last session: 2026-01-23 14:35 UTC
+Stopped at: Completed 05-04-PLAN.md - Phase 5 Complete
+Resume file: None - ready for Phase 6
 
 ---
 
@@ -326,7 +335,7 @@ None currently.
 - Phase 2 complete! 268 tests total.
 - Phase 3 complete! 319 tests total.
 - Phase 4 complete! 398 tests total. (gap closure: 379 -> 398)
-- Phase 5 in progress! 421 tests total.
+- Phase 5 complete! 421 tests total.
 
 ---
 
