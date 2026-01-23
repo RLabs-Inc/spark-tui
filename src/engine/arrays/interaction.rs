@@ -57,6 +57,18 @@ thread_local! {
 
     /// Previous max scroll Y (to detect content growth).
     static PREV_MAX_SCROLL_Y: TrackedSlotArray<u16> = TrackedSlotArray::new(Some(0));
+
+    /// Cursor character codepoint for drawn cursor.
+    /// 0 = block (inverse rendering), 0x2502 = bar (|), 0x5F = underline (_).
+    static CURSOR_CHAR: TrackedSlotArray<u32> = TrackedSlotArray::new(Some(0));
+
+    /// Alternate cursor character for blink "off" phase.
+    /// 0 = show original text character (default), non-zero = show this character.
+    static CURSOR_ALT_CHAR: TrackedSlotArray<u32> = TrackedSlotArray::new(Some(0));
+
+    /// Cursor style enum value: 0 = Block, 1 = Bar, 2 = Underline.
+    /// Allows renderer to know style without parsing cursor char.
+    static CURSOR_STYLE: TrackedSlotArray<u8> = TrackedSlotArray::new(Some(0));
 }
 
 // =============================================================================
@@ -79,6 +91,9 @@ pub fn ensure_capacity(index: usize) {
     CURSOR_BLINK_FPS.with(|arr| { let _ = arr.peek(index); });
     STICK_TO_BOTTOM.with(|arr| { let _ = arr.peek(index); });
     PREV_MAX_SCROLL_Y.with(|arr| { let _ = arr.peek(index); });
+    CURSOR_CHAR.with(|arr| { let _ = arr.peek(index); });
+    CURSOR_ALT_CHAR.with(|arr| { let _ = arr.peek(index); });
+    CURSOR_STYLE.with(|arr| { let _ = arr.peek(index); });
 }
 
 /// Clear values at index.
@@ -97,6 +112,9 @@ pub fn clear_at_index(index: usize) {
     CURSOR_BLINK_FPS.with(|arr| arr.clear(index));
     STICK_TO_BOTTOM.with(|arr| arr.clear(index));
     PREV_MAX_SCROLL_Y.with(|arr| arr.clear(index));
+    CURSOR_CHAR.with(|arr| arr.clear(index));
+    CURSOR_ALT_CHAR.with(|arr| arr.clear(index));
+    CURSOR_STYLE.with(|arr| arr.clear(index));
 }
 
 /// Reset all arrays.
@@ -115,6 +133,9 @@ pub fn reset() {
     CURSOR_BLINK_FPS.with(|arr| arr.clear_all());
     STICK_TO_BOTTOM.with(|arr| arr.clear_all());
     PREV_MAX_SCROLL_Y.with(|arr| arr.clear_all());
+    CURSOR_CHAR.with(|arr| arr.clear_all());
+    CURSOR_ALT_CHAR.with(|arr| arr.clear_all());
+    CURSOR_STYLE.with(|arr| arr.clear_all());
 }
 
 // =============================================================================
@@ -335,6 +356,61 @@ pub fn set_prev_max_scroll_y(index: usize, value: u16) {
     PREV_MAX_SCROLL_Y.with(|arr| arr.set_value(index, value));
 }
 
+// =============================================================================
+// Cursor Character (for drawn cursor)
+// =============================================================================
+
+/// Get cursor character at index (reactive).
+///
+/// Returns the Unicode codepoint for the cursor character:
+/// - 0 = block (inverse rendering)
+/// - 0x2502 = bar (|)
+/// - 0x5F = underline (_)
+pub fn get_cursor_char(index: usize) -> u32 {
+    CURSOR_CHAR.with(|arr| arr.get(index))
+}
+
+/// Set cursor character at index.
+pub fn set_cursor_char(index: usize, char: u32) {
+    CURSOR_CHAR.with(|arr| arr.set_value(index, char));
+}
+
+// =============================================================================
+// Cursor Alternate Character
+// =============================================================================
+
+/// Get cursor alternate character at index (reactive).
+///
+/// The alternate character is shown during blink "off" phase:
+/// - 0 = show original text character (default)
+/// - non-zero = show this character
+pub fn get_cursor_alt_char(index: usize) -> u32 {
+    CURSOR_ALT_CHAR.with(|arr| arr.get(index))
+}
+
+/// Set cursor alternate character at index.
+pub fn set_cursor_alt_char(index: usize, char: u32) {
+    CURSOR_ALT_CHAR.with(|arr| arr.set_value(index, char));
+}
+
+// =============================================================================
+// Cursor Style
+// =============================================================================
+
+/// Get cursor style at index (reactive).
+///
+/// Returns style as enum value: 0 = Block, 1 = Bar, 2 = Underline.
+pub fn get_cursor_style(index: usize) -> u8 {
+    CURSOR_STYLE.with(|arr| arr.get(index))
+}
+
+/// Set cursor style at index.
+///
+/// Style values: 0 = Block, 1 = Bar, 2 = Underline.
+pub fn set_cursor_style(index: usize, style: u8) {
+    CURSOR_STYLE.with(|arr| arr.set_value(index, style));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,5 +480,49 @@ mod tests {
         assert_eq!(get_cursor_position(0), 5);
         assert!(!get_cursor_visible(0));
         assert_eq!(get_cursor_blink_fps(0), 4);
+    }
+
+    #[test]
+    fn test_cursor_char() {
+        setup();
+
+        // Default is 0 (block)
+        assert_eq!(get_cursor_char(0), 0);
+
+        // Set to bar character (|)
+        set_cursor_char(0, 0x2502);
+        assert_eq!(get_cursor_char(0), 0x2502);
+
+        // Set to underline character (_)
+        set_cursor_char(0, 0x5F);
+        assert_eq!(get_cursor_char(0), 0x5F);
+    }
+
+    #[test]
+    fn test_cursor_alt_char() {
+        setup();
+
+        // Default is 0 (show original text)
+        assert_eq!(get_cursor_alt_char(0), 0);
+
+        // Set to space character
+        set_cursor_alt_char(0, 0x20);
+        assert_eq!(get_cursor_alt_char(0), 0x20);
+    }
+
+    #[test]
+    fn test_cursor_style() {
+        setup();
+
+        // Default is 0 (Block)
+        assert_eq!(get_cursor_style(0), 0);
+
+        // Set to Bar (1)
+        set_cursor_style(0, 1);
+        assert_eq!(get_cursor_style(0), 1);
+
+        // Set to Underline (2)
+        set_cursor_style(0, 2);
+        assert_eq!(get_cursor_style(0), 2);
     }
 }
