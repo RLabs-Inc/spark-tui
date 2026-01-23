@@ -38,8 +38,8 @@ use crate::engine::{
     get_current_parent_index,
 };
 use crate::engine::arrays::{core, visual, text as text_arrays, interaction};
-use crate::state::{mouse, keyboard, focus::{self, FocusCallbacks}, clipboard};
-use crate::types::{ComponentType, BorderStyle};
+use crate::state::{mouse, keyboard, focus::{self, FocusCallbacks}, clipboard, drawn_cursor};
+use crate::types::{ComponentType, BorderStyle, CursorStyle};
 use super::types::{InputProps, PropValue, Cleanup};
 
 // =============================================================================
@@ -323,8 +323,26 @@ pub fn input(props: InputProps) -> Cleanup {
         pos.min(len)
     });
 
-    // Cursor visible when focused (placeholder for focus integration)
-    interaction::set_cursor_visible(index, true);
+    // ==========================================================================
+    // DRAWN CURSOR - Manages blink and visibility
+    // ==========================================================================
+
+    // Build cursor config from props
+    let cursor_config = if let Some(ref cfg) = props.cursor {
+        drawn_cursor::DrawnCursorConfig {
+            style: cfg.style.unwrap_or(CursorStyle::Block),
+            char: cfg.char,
+            blink: cfg.blink.as_ref().map(|b| b.enabled).unwrap_or(true),
+            fps: cfg.blink.as_ref().map(|b| b.fps).unwrap_or(2),
+            alt_char: cfg.blink.as_ref().and_then(|b| b.alt_char),
+        }
+    } else {
+        // Default cursor config
+        drawn_cursor::DrawnCursorConfig::default()
+    };
+
+    // Create drawn cursor - handles blink and visibility via focus callbacks
+    let _drawn_cursor = drawn_cursor::create_cursor(index, cursor_config);
 
     // Initialize scroll offset in interaction arrays
     // This will be used by the renderer to show overflow indicators
@@ -1014,6 +1032,9 @@ pub fn input(props: InputProps) -> Cleanup {
         // Clean up mouse handlers
         mouse_cleanup();
         mouse::cleanup_index(index);
+
+        // Clean up drawn cursor (unsubscribes blink, clears arrays)
+        drawn_cursor::dispose_cursor(index);
 
         // Clear cursor position array
         interaction::set_cursor_position(index, 0);
