@@ -5,11 +5,68 @@
 //! - Render mode changes
 //! - Any FlexNode slot changes
 //! - Components are added/removed
+//!
+//! # Global Layout Accessor
+//!
+//! The `get_layout()` function provides global access to the current computed layout.
+//! This mirrors TypeScript's `layoutDerived.value` pattern and is used by:
+//! - Scroll handlers (keyboard and mouse wheel)
+//! - stick_to_bottom effects
+//! - Any code that needs layout data outside the render effect
+
+use std::cell::RefCell;
 
 use spark_signals::{derived, Derived};
 
 use crate::layout::{compute_layout, ComputedLayout};
 use super::terminal::{terminal_width_signal, terminal_height_signal, render_mode_signal, RenderMode};
+
+// =============================================================================
+// GLOBAL LAYOUT ACCESSOR
+// =============================================================================
+
+thread_local! {
+    /// Cached layout - updated by mount()'s render effect after each layout computation.
+    /// This provides global access to layout data for scroll handlers and effects.
+    static CURRENT_LAYOUT: RefCell<Option<ComputedLayout>> = const { RefCell::new(None) };
+}
+
+/// Update the cached layout. Called by render effect after layout computation.
+///
+/// This is an internal API used by the render pipeline to expose layout data
+/// to scroll handlers and other systems.
+pub fn set_layout(layout: ComputedLayout) {
+    CURRENT_LAYOUT.with(|l| *l.borrow_mut() = Some(layout));
+}
+
+/// Get the current computed layout.
+///
+/// This is the primary way scroll handlers access layout data.
+/// Mirrors TypeScript's `layoutDerived.value` pattern.
+///
+/// # Panics
+///
+/// Panics if called before mount() initializes the layout derived.
+/// Use `try_get_layout()` if you need to handle the uninitialized case.
+pub fn get_layout() -> ComputedLayout {
+    CURRENT_LAYOUT.with(|l| {
+        l.borrow().clone().expect("get_layout() called before layout computed")
+    })
+}
+
+/// Try to get the current computed layout.
+///
+/// Returns `None` if layout hasn't been computed yet (before mount() or during
+/// component initialization). Useful in effects that may run before the render
+/// pipeline is fully set up.
+pub fn try_get_layout() -> Option<ComputedLayout> {
+    CURRENT_LAYOUT.with(|l| l.borrow().clone())
+}
+
+/// Clear the cached layout (for unmount/testing).
+pub fn clear_layout() {
+    CURRENT_LAYOUT.with(|l| *l.borrow_mut() = None);
+}
 
 /// Create the layout derived.
 ///

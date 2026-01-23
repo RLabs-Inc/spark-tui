@@ -33,7 +33,7 @@ use spark_signals::effect;
 
 use crate::renderer::{DiffRenderer, InlineRenderer, AppendRenderer};
 use crate::state::{mouse, input, global_keys};
-use super::layout_derived::create_layout_derived;
+use super::layout_derived::{create_layout_derived, set_layout, clear_layout};
 use super::frame_buffer_derived::create_frame_buffer_derived;
 use super::terminal::{RenderMode, render_mode, detect_terminal_size};
 
@@ -61,9 +61,10 @@ impl MountHandle {
     /// This will:
     /// 1. Set running to false
     /// 2. Clean up global key handlers
-    /// 3. Disable mouse capture (fullscreen only)
-    /// 4. Restore terminal state (fullscreen only: raw mode, alternate screen)
-    /// 5. Stop the render effect
+    /// 3. Clear global layout cache
+    /// 4. Disable mouse capture (fullscreen only)
+    /// 5. Restore terminal state (fullscreen only: raw mode, alternate screen)
+    /// 6. Stop the render effect
     pub fn unmount(mut self) {
         self.running.store(false, Ordering::SeqCst);
 
@@ -71,6 +72,9 @@ impl MountHandle {
         if let Some(handle) = self.global_keys.take() {
             handle.cleanup();
         }
+
+        // Clear global layout cache
+        clear_layout();
 
         // Fullscreen mode needs extra cleanup
         if self.mode == RenderMode::Fullscreen {
@@ -106,6 +110,9 @@ impl MountHandle {
 
 impl Drop for MountHandle {
     fn drop(&mut self) {
+        // Clear global layout cache
+        clear_layout();
+
         // Fullscreen mode needs extra cleanup
         if self.mode == RenderMode::Fullscreen {
             // Disable mouse on drop (best effort)
@@ -191,11 +198,17 @@ pub fn mount() -> io::Result<MountHandle> {
         RenderMode::Fullscreen => {
             let mut renderer = DiffRenderer::new();
             renderer.enter_fullscreen()?;
+            let layout_d = layout_derived.clone();
 
             let stop_fn = effect(move || {
                 if !running_clone.load(Ordering::SeqCst) {
                     return;
                 }
+
+                // Update global layout cache BEFORE processing
+                // This makes layout available to scroll handlers and effects
+                let layout = layout_d.get();
+                set_layout(layout);
 
                 // Read from derived (creates dependency)
                 let result = fb_derived.get();
@@ -227,11 +240,16 @@ pub fn mount() -> io::Result<MountHandle> {
         }
         RenderMode::Inline => {
             let mut renderer = InlineRenderer::new();
+            let layout_d = layout_derived.clone();
 
             let stop_fn = effect(move || {
                 if !running_clone.load(Ordering::SeqCst) {
                     return;
                 }
+
+                // Update global layout cache BEFORE processing
+                let layout = layout_d.get();
+                set_layout(layout);
 
                 let result = fb_derived.get();
 
@@ -260,11 +278,16 @@ pub fn mount() -> io::Result<MountHandle> {
         }
         RenderMode::Append => {
             let mut renderer = AppendRenderer::new();
+            let layout_d = layout_derived.clone();
 
             let stop_fn = effect(move || {
                 if !running_clone.load(Ordering::SeqCst) {
                     return;
                 }
+
+                // Update global layout cache BEFORE processing
+                let layout = layout_d.get();
+                set_layout(layout);
 
                 let result = fb_derived.get();
 

@@ -29,6 +29,6 @@ pub mod mount;
 
 // Re-exports
 pub use terminal::{terminal_width, terminal_height, set_terminal_size, RenderMode, render_mode, set_render_mode};
-pub use layout_derived::create_layout_derived;
+pub use layout_derived::{create_layout_derived, get_layout, try_get_layout, set_layout, clear_layout};
 pub use frame_buffer_derived::{create_frame_buffer_derived, FrameBufferResult, HitRegion};
 pub use mount::{mount, unmount, MountHandle};
