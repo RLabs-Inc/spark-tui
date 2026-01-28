@@ -23,10 +23,13 @@
 //!         ONE effect. Fires because data changed. Period.
 //! ```
 //!
-//! The engine thread blocks on input events (stdin channel). When an event
-//! arrives OR TS writes wake flag, generation is incremented → reactive graph
-//! propagates → layout → framebuffer → render. No polling. No loop. Pure
-//! reactive propagation.
+//! Three threads feed a unified mpsc channel:
+//!
+//! - **stdin reader**: blocks on stdin.read(), sends Data messages
+//! - **wake watcher**: adaptive spin on SharedBuffer wake flag, sends Wake messages
+//! - **engine thread**: blocks on channel.recv(), processes both immediately
+//!
+//! No polling. No fixed timeout. Pure event-driven reactive propagation.
 
 use std::cell::RefCell;
 use std::io;
@@ -34,7 +37,6 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 use std::sync::mpsc;
 
 use spark_signals::{signal, derived, effect, Signal};
@@ -53,6 +55,7 @@ use crate::input::cursor::BlinkManager;
 use crate::input::events::{EventRingBuffer, EventType};
 use crate::input::reader::{StdinReader, StdinMessage};
 use super::terminal::TerminalSetup;
+use super::wake::WakeWatcher;
 
 // =============================================================================
 // Types
@@ -83,8 +86,9 @@ impl Engine {
     ///
     /// Spawns the engine thread which:
     /// 1. Sets up terminal
-    /// 2. Creates the reactive graph (generation → layout → framebuffer → render)
-    /// 3. Blocks on stdin events — increments generation on input or wake
+    /// 2. Creates unified channel (stdin + wake → engine)
+    /// 3. Creates the reactive graph (generation → layout → framebuffer → render)
+    /// 4. Blocks on channel events — increments generation on input or wake
     ///
     /// Returns an Engine handle for shutdown.
     pub fn start(buf: &'static SharedBuffer) -> io::Result<Self> {
@@ -123,17 +127,22 @@ impl Drop for Engine {
 // Reactive Pipeline
 // =============================================================================
 
-
 /// Main engine function. Runs on the engine thread.
 fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Result<()> {
     // 1. Setup terminal
     let mut terminal = TerminalSetup::new();
     terminal.enter_fullscreen()?;
 
-    // 2. Start stdin reader
-    let (stdin_reader, stdin_rx) = StdinReader::spawn()?;
+    // 2. Create unified channel — both stdin reader and wake watcher send here
+    let (tx, rx) = mpsc::channel();
 
-    // 3. Initialize input system state
+    // 3. Start stdin reader (sends Data/Closed messages)
+    let stdin_reader = StdinReader::spawn(tx.clone())?;
+
+    // 4. Start wake watcher (sends Wake messages when TS writes to SharedBuffer)
+    let _wake_watcher = WakeWatcher::spawn(buf, tx, running.clone());
+
+    // 5. Initialize input system state
     let mut parser = InputParser::new();
     let mut focus = FocusManager::new();
     let mut events = EventRingBuffer::new();
@@ -143,7 +152,7 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(buf.terminal_width(), buf.terminal_height())));
 
     // =========================================================================
-    // 4. Create the reactive graph
+    // 6. Create the reactive graph
     // =========================================================================
 
     // Root signal: generation counter.
@@ -219,22 +228,28 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
 
         // Diff render to terminal (side effect)
         let _ = renderer.render(&result.buffer);
+
+        // Increment render counter so TS can track FPS
+        buf.increment_render_count();
     });
 
     // =========================================================================
-    // 5. Event-driven blocking: wait for input, increment generation
+    // 7. Event-driven blocking: wait for input or wake, increment generation
     // =========================================================================
     //
-    // This is NOT a polling loop. It blocks on channel.recv() until
-    // an event arrives. When an event arrives or TS wake flag is set,
-    // we increment generation → reactive graph propagates automatically.
+    // The engine thread blocks on channel.recv(). It wakes IMMEDIATELY when
+    // either stdin data arrives OR the wake watcher detects TS wrote props.
+    // The only timeout is for cursor blink timers — a legitimate time-based
+    // signal source, not polling.
 
     while running.load(Ordering::SeqCst) {
-        // Calculate timeout based on blink state
-        let timeout = blink.next_deadline().unwrap_or(Duration::from_millis(100));
+        // Calculate timeout: only for blink timer, otherwise block indefinitely
+        let msg = match blink.next_deadline() {
+            Some(timeout) => rx.recv_timeout(timeout),
+            None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
 
-        // Block on stdin channel (NOT polling — OS-level event notification)
-        match stdin_rx.recv_timeout(timeout) {
+        match msg {
             Ok(StdinMessage::Data(data)) => {
                 // Parse and dispatch input
                 let parsed = parser.parse(&data);
@@ -262,19 +277,18 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
                 // Input changed state → increment generation → reactive propagation
                 generation.set(generation.get() + 1);
             }
+            Ok(StdinMessage::Wake) => {
+                // TS wrote props to SharedBuffer → increment generation → reactive propagation
+                generation.set(generation.get() + 1);
+            }
             Ok(StdinMessage::Closed) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Check blink timers (cursor blink is a signal SOURCE)
+                // Only blink timer expired — cursor blink is a signal SOURCE
                 if blink.tick(buf) {
                     generation.set(generation.get() + 1);
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        }
-
-        // Check if TS wrote new props (wake flag)
-        if buf.consume_wake() {
-            generation.set(generation.get() + 1);
         }
 
         // Flush incomplete escape sequences after timeout

@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rlabs-inc/signals": "^1.13.0"
+    "@rlabs-inc/signals": "^1.13.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

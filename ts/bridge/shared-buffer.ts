@@ -39,7 +39,8 @@ export const HEADER_WAKE_FLAG = 5
 export const HEADER_GENERATION = 6
 export const HEADER_TEXT_POOL_WRITE_PTR = 7
 export const HEADER_TEXT_POOL_CAPACITY = 8
-// 9-15 reserved
+export const HEADER_RENDER_COUNT = 9
+// 10-15 reserved
 
 // =============================================================================
 // SOA SECTION LAYOUT
@@ -337,7 +338,7 @@ export const META_BORDER_LEFT = U8_BORDER_LEFT_WIDTH
  * 0x00000000 = null/inherit (no color set).
  */
 export function packColor(r: number, g: number, b: number, a: number = 255): number {
-  return ((a & 0xFF) << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)
+  return (((a & 0xFF) << 24) | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)) >>> 0
 }
 
 /**

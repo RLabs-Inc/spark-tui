@@ -456,11 +456,11 @@ fn to_inset(val: f32) -> LengthPercentageAuto {
 
 fn to_flex_direction(val: u8) -> FlexDirection {
     match val {
-        0 => FlexDirection::Column,
-        1 => FlexDirection::Row,
-        2 => FlexDirection::ColumnReverse,
-        3 => FlexDirection::RowReverse,
-        _ => FlexDirection::Column,
+        0 => FlexDirection::Row,
+        1 => FlexDirection::Column,
+        2 => FlexDirection::RowReverse,
+        3 => FlexDirection::ColumnReverse,
+        _ => FlexDirection::Row,
     }
 }
 
@@ -743,7 +743,7 @@ mod tests {
 
         // Parent: 40x10, flex-direction: row
         setup_box(ptr, 0, 40.0, 10.0);
-        set_meta(ptr, 0, META_FLEX_DIRECTION, 1); // Row
+        set_meta(ptr, 0, META_FLEX_DIRECTION, 0); // Row (0=row in TS convention)
 
         // Child 1: 10x5
         setup_box(ptr, 1, 10.0, 5.0);
@@ -819,7 +819,7 @@ mod tests {
 
         // Parent: 100x10, row, justify-content: center
         setup_box(ptr, 0, 100.0, 10.0);
-        set_meta(ptr, 0, META_FLEX_DIRECTION, 1); // Row
+        set_meta(ptr, 0, META_FLEX_DIRECTION, 0); // Row (0=row in TS convention)
         set_meta(ptr, 0, META_JUSTIFY_CONTENT, 1); // Center
 
         // Child: 20x5
@@ -885,8 +885,9 @@ mod tests {
         let (data, ptr) = make_test_buffer(2);
         let buf = unsafe { SharedBuffer::from_ptr(ptr, data.len()) };
 
-        // Parent: 80x24, default align_items (Stretch)
+        // Parent: 80x24, column direction, default align_items (Stretch)
         setup_box(ptr, 0, 80.0, 24.0);
+        set_meta(ptr, 0, META_FLEX_DIRECTION, 1); // Column (1=column in TS convention)
 
         // Text node stretches to parent width in column direction
         set_meta(ptr, 1, META_COMPONENT_TYPE, 2); // Text

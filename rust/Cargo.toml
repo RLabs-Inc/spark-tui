@@ -16,6 +16,10 @@ taffy = { version = "0.7", features = ["content_size"] }
 bitflags = "2.9"
 unicode-width = "0.2"
 unicode-segmentation = "1"
+atomic-wait = "1"              # Test-only: cross-language wake investigation (kept for reference)
+wait_on_address = "0.1"         # Test-only: cross-language wake investigation (kept for reference)
+ecmascript_futex = "0.1"       # Test-only: cross-language wake investigation (kept for reference)
+ecmascript_atomics = "0.2"     # Test-only: cross-language wake investigation (kept for reference)
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -899,14 +899,15 @@ impl From<u8> for BorderStyle {
 // =============================================================================
 
 /// Flex direction for container layout.
+/// Values match TS convention: 0=row, 1=column, 2=row-reverse, 3=column-reverse
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum FlexDirection {
     #[default]
-    Column = 0,
-    Row = 1,
-    ColumnReverse = 2,
-    RowReverse = 3,
+    Row = 0,
+    Column = 1,
+    RowReverse = 2,
+    ColumnReverse = 3,
 }
 
 impl FlexDirection {
@@ -924,11 +925,11 @@ impl FlexDirection {
 impl From<u8> for FlexDirection {
     fn from(value: u8) -> Self {
         match value {
-            0 => Self::Column,
-            1 => Self::Row,
-            2 => Self::ColumnReverse,
-            3 => Self::RowReverse,
-            _ => Self::Column,
+            0 => Self::Row,
+            1 => Self::Column,
+            2 => Self::RowReverse,
+            3 => Self::ColumnReverse,
+            _ => Self::Row,
         }
     }
 }

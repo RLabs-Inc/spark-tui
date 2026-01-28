@@ -33,9 +33,21 @@ const symbols = {
     args: [] as const,
     returns: FFIType.u32,
   },
+  spark_render: {
+    args: [] as const,
+    returns: FFIType.u32,
+  },
   spark_buffer_size: {
     args: [] as const,
     returns: FFIType.u32,
+  },
+  spark_wake: {
+    args: [] as const,
+    returns: FFIType.void,
+  },
+  spark_cleanup: {
+    args: [] as const,
+    returns: FFIType.void,
   },
 } as const
 
@@ -44,8 +56,14 @@ export interface SparkEngine {
   init(bufferPtr: ReturnType<typeof ptr>, bufferLen: number): number
   /** Compute layout from shared buffer data. Returns number of nodes laid out. */
   computeLayout(): number
+  /** Compute layout + framebuffer. Returns buffer cell count. */
+  render(): number
   /** Get required buffer size. */
   bufferSize(): number
+  /** Wake the engine (TS calls after writing props to SharedBuffer). */
+  wake(): void
+  /** Stop the engine and clean up terminal. */
+  cleanup(): void
   /** Close the library. */
   close(): void
 }
@@ -66,8 +84,17 @@ export function loadEngine(libPath?: string): SparkEngine {
     computeLayout() {
       return lib.symbols.spark_compute_layout()
     },
+    render() {
+      return lib.symbols.spark_render()
+    },
     bufferSize() {
       return lib.symbols.spark_buffer_size()
+    },
+    wake() {
+      lib.symbols.spark_wake()
+    },
+    cleanup() {
+      lib.symbols.spark_cleanup()
     },
     close() {
       lib.close()

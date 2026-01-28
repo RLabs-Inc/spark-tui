@@ -7,13 +7,15 @@ use std::io::{self, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::sync::mpsc::{self, Sender, Receiver};
+use std::sync::mpsc::Sender;
 
 
-/// Raw bytes read from stdin.
+/// Messages from stdin reader and wake watcher to the engine thread.
 pub enum StdinMessage {
     /// Raw bytes from stdin.
     Data(Vec<u8>),
+    /// TS wrote to SharedBuffer — wake flag detected by wake watcher.
+    Wake,
     /// stdin closed or error.
     Closed,
 }
@@ -29,10 +31,11 @@ pub struct StdinReader {
 }
 
 impl StdinReader {
-    /// Spawn the stdin reader thread.
-    /// Returns (StdinReader, Receiver<StdinMessage>).
-    pub fn spawn() -> io::Result<(Self, Receiver<StdinMessage>)> {
-        let (tx, rx) = mpsc::channel();
+    /// Spawn the stdin reader thread with an external channel sender.
+    ///
+    /// The engine creates the channel and passes sender clones to both
+    /// StdinReader and WakeWatcher, keeping the receiver.
+    pub fn spawn(tx: Sender<StdinMessage>) -> io::Result<Self> {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
 
@@ -42,13 +45,10 @@ impl StdinReader {
                 Self::read_loop(running_clone, tx);
             })?;
 
-        Ok((
-            Self {
-                handle: Some(handle),
-                running,
-            },
-            rx,
-        ))
+        Ok(Self {
+            handle: Some(handle),
+            running,
+        })
     }
 
     fn read_loop(running: Arc<AtomicBool>, tx: Sender<StdinMessage>) {

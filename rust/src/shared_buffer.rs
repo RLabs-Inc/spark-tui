@@ -38,7 +38,8 @@ pub const HEADER_WAKE_FLAG: usize = 5;
 pub const HEADER_GENERATION: usize = 6;
 pub const HEADER_TEXT_POOL_WRITE_PTR: usize = 7;
 pub const HEADER_TEXT_POOL_CAPACITY: usize = 8;
-// 9-15 reserved
+pub const HEADER_RENDER_COUNT: usize = 9;
+// 10-15 reserved
 
 // =============================================================================
 // SOA SECTION LAYOUT
@@ -891,6 +892,10 @@ impl SharedBuffer {
 
     pub fn increment_generation(&self) {
         self.header()[HEADER_GENERATION].fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn increment_render_count(&self) {
+        self.header()[HEADER_RENDER_COUNT].fetch_add(1, Ordering::Relaxed);
     }
 
     // =========================================================================
