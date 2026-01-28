@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Rust build output
+rust/target/
+rs/target/
+
+# OS files
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Temp
+*.swp
+*.swo
+*~

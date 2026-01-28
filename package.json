@@ -1,0 +1,19 @@
+{
+  "name": "@rlabs-inc/spark-tui",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Hybrid TUI framework - TypeScript primitives, Rust engine, SharedArrayBuffer bridge",
+  "scripts": {
+    "build:rust": "cd rust && cargo build --release",
+    "proof": "bun run examples/proof.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rlabs-inc/signals": "^1.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  }
+}

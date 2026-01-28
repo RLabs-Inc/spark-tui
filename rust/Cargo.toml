@@ -1,0 +1,21 @@
+[package]
+name = "spark-tui-engine"
+version = "0.1.0"
+edition = "2024"
+description = "Rust engine for SparkTUI - layout, pipeline, renderer via SharedArrayBuffer"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+engine = []
+
+[dependencies]
+spark-signals = "0.3"
+taffy = { version = "0.7", features = ["content_size"] }
+bitflags = "2.9"
+unicode-width = "0.2"
+unicode-segmentation = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
