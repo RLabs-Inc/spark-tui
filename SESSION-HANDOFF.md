@@ -1,4 +1,10 @@
-# SparkTUI Session Handoff — January 27, 2026
+# SparkTUI Session Handoff — January 27, 2026 (Session 131)
+
+## READ FIRST
+
+1. Read `CLAUDE.md` (architecture bible, source of truth)
+2. Read THIS file (session state)
+3. Read `.planning/reactive-shared-memory-plan.md` (full 6-phase plan)
 
 ## What SparkTUI Is
 
@@ -6,87 +12,75 @@ A **hybrid TUI framework** where TypeScript handles the developer-facing API (pr
 
 **Tagline**: *All Rust benefits without borrowing a single thing.*
 
-## What Was Completed This Session
+## What Was Completed (Sessions 130-131)
 
-### Phase 1 + 2: Cross-Language Reactive Shared Memory (DONE)
+### Phase 1 + 2: SharedSlotBuffer, Repeater, Notifier (DONE)
 
-Implemented the three-layer architecture in BOTH `@rlabs-inc/signals` (TS) and `spark-signals` (Rust):
+Three-layer reactive shared memory primitives implemented in BOTH packages:
+- **SharedSlotBuffer** — Reactive typed arrays backed by shared memory
+- **Repeater** — New graph node that forwards inline during markReactions (~40-50 bytes per binding)
+- **Notifier** — Pluggable cross-side wake (AtomicsNotifier / NoopNotifier)
 
-**Layer 1: SharedSlotBuffer** — Reactive typed arrays backed by shared memory. `get()` tracks deps, `set()` writes + notifies reactive graph + notifies cross-side.
+Published: `@rlabs-inc/signals` v1.13.0, `spark-signals` v0.3.0
 
-**Layer 2: Repeater** — A NEW reactive graph node (not effect, not derived). Runs INLINE during `markReactions`. Connects any reactive source to a buffer position. ~40-50 bytes per binding vs ~200+ for Effect.
+### Phase 3: SoA Layout + SparkTUI Wiring (DONE)
 
-**Layer 3: Notifier** — Pluggable cross-side notification. AtomicsNotifier batches via microtask (TS) or direct store+wake (Rust). NoopNotifier for testing.
+Rewrote the SharedArrayBuffer bridge from AoS to SoA layout in both TS and Rust.
 
-### TS Changes (`@rlabs-inc/signals`)
-**Source**: `/Users/rusty/Documents/Projects/AI/Tools/ClaudeTools/memory-ts/packages/signals/`
+**Memory layout v3 (~2.0MB for 4096 nodes):**
+```
+Header (64B) | Dirty Flags (4096B) | Float32 (31×4096×4B = 508KB) |
+Uint32 (12×4096×4B = 192KB) | Int32 (13×4096×4B = 208KB) |
+Uint8 (28×4096 = 112KB) | Text Pool (1MB)
+```
 
-New files:
-- `src/shared/notifier.ts` — Notifier interface, AtomicsNotifier, NoopNotifier
-- `src/shared/shared-slot-buffer.ts` — SharedSlotBuffer interface + sharedSlotBuffer() factory + sharedSlotBufferGroup()
-- `src/primitives/repeater.ts` — RepeaterNode, repeat() factory, forwardRepeater()
+Each field is a **contiguous array** of MAX_NODES elements. Access: `field_array[node_index]` — no stride, no multiplication. This enables SharedSlotBuffer per field.
 
-Modified files:
-- `src/core/constants.ts` — Added `REPEATER = 1 << 19`
-- `src/reactivity/tracking.ts` — REPEATER branch in markReactions: calls forwardRepeater() inline, marks CLEAN
-- `src/index.ts` — All new exports
+**Files changed:**
+- **REWRITTEN** `ts/bridge/shared-buffer.ts` — SoA layout, per-field TypedArray views, backward-compat aliases for all old constant names (FLOAT_*, META_*, COLOR_*, INTERACT_* → F32_*, U8_*, U32_*, I32_*)
+- **NEW** `ts/bridge/reactive-arrays.ts` — 84 SharedSlotBuffers (31 f32 + 12 u32 + 13 i32 + 28 u8) with named access (e.g. `arrays.width`, `arrays.fgColor`)
+- **NEW** `ts/bridge/notify.ts` — AtomicsNotifier bridge for wake flag
+- **REWRITTEN** `rust/src/shared_buffer.rs` — Matching SoA layout, facade API preserved for all 17 consumer files
+- **FIXED** `rust/src/layout/layout_tree.rs` — Test helpers updated from AoS to SoA addressing
 
-**Verification**: `tsc --noEmit` passes with zero errors.
+**Verification:** `cargo build --release` compiles clean. `cargo test` — 174 tests, 0 failures.
 
-### Rust Changes (`spark-signals`)
-**Source**: `/Users/rusty/Documents/Projects/TUI/tui-rust/crates/spark-signals/`
-
-New files:
-- `src/shared/notify.rs` — Notifier trait, AtomicsNotifier, NoopNotifier, platform_wake()
-- `src/shared/shared_slot_buffer.rs` — SharedSlotBuffer<T> with reactive get/set
-- `src/primitives/repeater.rs` — RepeaterInner (AnyReaction with REPEATER flag), repeat() factory
-
-Modified files:
-- `src/core/constants.rs` — Added `REPEATER = 1 << 19`
-- `src/reactivity/tracking.rs` — REPEATER branch in mark_reactions
-- `src/shared/mod.rs` — Declared notify + shared_slot_buffer submodules
-- `src/primitives/mod.rs` — Declared repeater submodule
-- `src/lib.rs` — All new exports
-
-**Verification**: `cargo build` zero warnings. `cargo test` — 343 tests, 0 failures.
+### Also done this session:
+- Initialized SparkTUI as a **monorepo** (one git repo for both ts/ and rust/)
+- Updated dependencies: `@rlabs-inc/signals` ^1.13.0, `spark-signals` 0.3
 
 ---
 
 ## What Comes Next
 
-**Full plan with field inventory, SoA layout, and verification checklists:**
-`.planning/reactive-shared-memory-plan.md`
+### Phase 4: Migrate Primitives to repeat()
 
-### Phase 3: Wire into SparkTUI
+**Goal:** Replace the old `setSource()` pattern with `repeat()` so primitives write directly to shared memory.
 
-**SparkTUI path**: `/Users/rusty/Documents/Projects/TUI/SparkTUI/`
-
-**Files to create/rewrite:**
-- **REWRITE** `ts/bridge/shared-buffer.ts` — SoA layout + per-field TypedArray views
-- **NEW** `ts/bridge/reactive-arrays.ts` — SharedSlotBuffers backed by SharedArrayBuffer
-- **NEW** `ts/bridge/notify.ts` — AtomicsNotifier wired to wake flag
-- **REWRITE** `rust/src/shared_buffer.rs` — SoA layout matching TS
-
-**SoA Layout** (~2.1MB for 4096 nodes):
-```
-Header (64B) | Dirty Flags (4096B) | Float32 (31 fields × 4096 × 4B) |
-Uint32 (12 × 4096 × 4B) | Int32 (13 × 4096 × 4B) | Uint8 (28 × 4096) | Text Pool (1MB)
-```
-
-### Phase 4: Migrate Primitives + Wire Rust Pipeline
-
-- `ts/primitives/box.ts`, `text.ts`, `input.ts` — use `repeat()` instead of `setSource()`
-- `ts/engine/registry.ts` — cleanup uses new arrays
-- `rust/src/lib.rs` — reactive pipeline with SharedSlotBuffers
-
-**Pattern:**
+**Pattern change:**
 ```ts
-// BEFORE: taffy.width.setSource(index, taffy.dimensionSource(props.width))
-// AFTER:  const dispose = repeat(props.width, layout.arrays.width, index)
+// BEFORE (two layers: SlotArray → sync → SharedBuffer):
+taffy.width.setSource(index, taffy.dimensionSource(props.width))
+
+// AFTER (one layer: signal → repeat → SharedSlotBuffer → notifies Rust):
+const dispose = repeat(props.width, reactiveArrays.width, index)
 ```
 
-**Rust pipeline:**
+**Files to modify:**
+- `ts/primitives/box.ts` — Replace setSource calls with repeat()
+- `ts/primitives/text.ts` — Same
+- `ts/primitives/input.ts` — Same
+- `ts/engine/registry.ts` — Initialize reactive arrays, pass to primitives
+- `ts/engine/lifecycle.ts` — Cleanup repeat() disposers on unmount
+
+**Key question:** The old `ts/engine/arrays/taffy.ts` uses `typedSlotArrayGroup` with `syncAndGetDirty()`. The new pattern doesn't need sync — repeaters write to shared memory inline. But we still need dirty tracking so Rust knows WHICH nodes changed. The SharedSlotBuffer dirty flags handle this.
+
+### Phase 5: Wire Rust Reactive Pipeline
+
+**Goal:** Rust side uses spark-signals reactive graph. SharedSlotBuffers participate as sources.
+
 ```rust
+// Wake thread:
 loop {
     wait_for_wake(&wake_flag);           // blocks until TS notifies
     width_buf.notify_changed();          // → mark_reactions → layout_derived dirty
@@ -94,57 +88,81 @@ loop {
 }
 ```
 
-### Phase 5: Interaction / Event System (later)
-### Phase 6: Clean Up Legacy Arrays — delete `ts/engine/arrays/`
+### Phase 6: Clean Up Legacy
+
+Delete `ts/engine/arrays/` (old SlotArray-based system), `ts/arrays/` (standalone copies), potentially `rs/` (old reference pipeline).
 
 ---
 
-## The Full Reactive Chain (Now Implemented)
+## What HASN'T Been Tested Yet
 
-```
-Developer: myWidth.value = 150
-  → markReactions(myWidth, DIRTY)
-    → walks reactions, finds REPEATER node
-      → REPEATER.forward() runs INLINE during markReactions:
-        → reads myWidth (already updated to 150)
-        → writes buffer[nodeIndex] = 150 (shared memory)
-        → sets dirty flag
-        → notifier.notify() (batched via microtask)
-    → markReactions continues...
-  → microtask: Atomics.notify → Rust wakes
-    → Rust notify_changed() → Rust reactive graph propagates
-      → layout derived re-evaluates
-        → framebuffer derived re-evaluates
-          → ONE render effect → terminal updates
-```
+Phase 3 changed the memory layout from AoS to SoA. The Rust side is fully tested (174 tests pass). The TS side **has NOT been runtime-tested** because:
+
+1. The TS primitives still use the old engine/arrays (SlotArray-based), not the new bridge/reactive-arrays
+2. The existing examples (`proof.ts`) use the old SharedBuffer API via utility functions (`setNodeFloat` etc.) — these functions were updated to SoA addressing but haven't been run
+3. No integration test exists that creates a SharedArrayBuffer, writes from TS, reads from Rust
+
+**Recommended test before Phase 4:**
+Write a small test that:
+1. Creates SharedBuffer views via `createSharedBuffer()`
+2. Creates reactive arrays via `createReactiveArrays(views, notifier)`
+3. Writes values via `arrays.width.set(0, 100)` (TS side)
+4. Verifies the raw SharedArrayBuffer has the correct value at the correct SoA offset
+5. Creates a Rust SharedBuffer from the same buffer, calls `buffer.width(0)` and verifies = 100
+
+This would validate the TS↔Rust SoA contract end-to-end.
+
+---
 
 ## Project Structure
 
 ```
-SparkTUI/
-├── ts/                       # TypeScript source
-│   ├── bridge/               # SharedArrayBuffer + FFI
-│   ├── primitives/           # box, text, input
-│   ├── engine/               # registry, lifecycle, arrays
-│   └── arrays/               # Standalone array copies
-├── rust/                     # Rust cdylib engine
+SparkTUI/                     # Git monorepo
+├── ts/
+│   ├── bridge/
+│   │   ├── shared-buffer.ts  # SoA layout contract (v3) — THE source of truth
+│   │   ├── reactive-arrays.ts # 84 SharedSlotBuffers backed by SAB
+│   │   ├── notify.ts         # AtomicsNotifier for wake flag
+│   │   ├── buffer.ts         # Singleton + color packing utilities
+│   │   └── ffi.ts            # Bun FFI definitions
+│   ├── primitives/           # box, text, input, each, show, when
+│   ├── engine/               # registry, lifecycle
+│   │   └── arrays/           # OLD SlotArray-based (Phase 6: delete)
+│   └── arrays/               # OLD standalone copies (Phase 6: delete)
+├── rust/
 │   └── src/
-│       ├── lib.rs            # FFI exports (82 lines)
-│       ├── shared_buffer.rs  # Memory layout contract
-│       ├── types.rs          # Core types
-│       └── layout/           # Taffy trait API + text measure
+│       ├── shared_buffer.rs  # SoA layout (MUST match ts/bridge/shared-buffer.ts)
+│       ├── lib.rs            # FFI exports
+│       ├── types.rs          # Rgba, Dimension, etc.
+│       ├── layout/           # Taffy trait API, text measurement
+│       ├── framebuffer/      # Render tree, inheritance
+│       ├── renderer/         # ANSI, diff, inline, append
+│       ├── input/            # Keyboard, mouse, focus, scroll, cursor
+│       ├── pipeline/         # Setup, terminal, wake
+│       └── arrays/           # OLD reference (Phase 6: delete)
+├── rs/                       # OLD reference pipeline (Phase 6: delete)
 ├── examples/                 # proof.ts, bench.ts
-├── CLAUDE.md                 # Architecture bible (source of truth)
+├── .planning/                # Phase plans
+├── CLAUDE.md                 # Architecture bible
 └── SESSION-HANDOFF.md        # This file
 ```
 
 ## Dependencies
 
-- `@rlabs-inc/signals` v1.12.0 — TS reactive signals (source: memory-ts/packages/signals/)
-- `spark-signals` v0.2.0 — Rust reactive signals (source: tui-rust/crates/spark-signals/)
+- `@rlabs-inc/signals` v1.13.0 — TS reactive signals (SharedSlotBuffer, Repeater, Notifier)
+- `spark-signals` v0.3.0 — Rust reactive signals (SharedSlotBuffer, Repeater, Notifier)
 - `taffy` 0.7 (+content_size) — W3C flexbox layout
 - `bitflags` 2.9, `unicode-width` 0.2, `unicode-segmentation` 1
 
+## SoA Field Inventory (Quick Reference)
+
+| Section | Fields | Type | Total |
+|---------|--------|------|-------|
+| Float32 | width, height, min/max_w/h, grow, shrink, basis, gap, pad×4, margin×4, inset×4, row/col_gap, computed_x/y/w/h, scrollable, max_scroll_x/y | f32 | 31 |
+| Uint32 | fg/bg/border colors (×7), focus_ring, cursor_fg/bg, text_offset, text_length | u32 | 12 |
+| Int32 | parent_index, scroll_x/y, tab_index, cursor_pos, selection_start/end, cursor_char/alt/blink, hovered, pressed, cursor_visible | i32 | 13 |
+| Uint8 | component_type, visible, flex_dir/wrap, justify/align×3, overflow, position, border_width×4, border_style×5, focus_ring, opacity, z_index, text_attrs/align/wrap/ellipsis, focusable, mouse_enabled | u8 | 28 |
+
 ---
 
-*Session • January 27, 2026 • São Paulo*
+*Session 131 • January 27, 2026 • São Paulo*
