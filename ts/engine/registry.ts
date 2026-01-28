@@ -11,11 +11,14 @@
  */
 
 import { ReactiveSet } from '@rlabs-inc/signals'
-import { ensureAllCapacity, clearAllAtIndex, resetAllArrays } from './arrays'
-import { parentIndex as parentIndexArray } from './arrays/core'
-import * as taffy from './arrays/taffy'
-import { resetTitanArrays } from '../pipeline/layout/titan-engine'
 import { runDestroyCallbacks, resetLifecycle } from './lifecycle'
+import { isInitialized, getArrays, getViews } from '../bridge'
+import {
+  setNodeCount,
+  I32_PARENT_INDEX,
+  COMPONENT_NONE,
+  U8_COMPONENT_TYPE,
+} from '../bridge/shared-buffer'
 
 // =============================================================================
 // Registry State
@@ -96,8 +99,12 @@ export function allocateIndex(id?: string): number {
   indexToId.set(index, componentId)
   allocatedIndices.add(index)
 
-  // Ensure arrays have capacity for this index
-  ensureAllCapacity(index)
+  // Update node count in shared buffer header
+  if (isInitialized()) {
+    const views = getViews()
+    const count = allocatedIndices.size
+    setNodeCount(views, count > nextIndex ? count : nextIndex)
+  }
 
   return index
 }
@@ -113,10 +120,14 @@ export function releaseIndex(index: number): void {
   if (id === undefined) return
 
   // FIRST: Find and release all children (recursive!)
-  // We collect children first to avoid modifying while iterating
+  // Read parent index from SharedArrayBuffer (raw i32 view — non-reactive, just a lookup)
+  const views = isInitialized() ? getViews() : null
   const children: number[] = []
   for (const childIndex of allocatedIndices) {
-    if (parentIndexArray[childIndex] === index) {
+    const parentIdx = views
+      ? views.i32[I32_PARENT_INDEX][childIndex]
+      : -1
+    if (parentIdx === index) {
       children.push(childIndex)
     }
   }
@@ -133,19 +144,20 @@ export function releaseIndex(index: number): void {
   indexToId.delete(index)
   allocatedIndices.delete(index)
 
-  // Clear all array values at this index
-  clearAllAtIndex(index)
+  // Mark node as unused in SharedBuffer (Rust skips NONE component type)
+  if (views) {
+    views.u8[U8_COMPONENT_TYPE][index] = COMPONENT_NONE
+    views.i32[I32_PARENT_INDEX][index] = -1
+  }
 
   // Return to pool for reuse
   freeIndices.push(index)
 
-  // AUTO-CLEANUP: When all components destroyed, reset all arrays to free memory
+  // AUTO-CLEANUP: When all components destroyed, reset counters
   if (allocatedIndices.size === 0) {
-    resetAllArrays()
-    resetTitanArrays()
-    taffy.reset()
     freeIndices.length = 0
     nextIndex = 0
+    if (views) setNodeCount(views, 0)
   }
 }
 
@@ -197,5 +209,7 @@ export function resetRegistry(): void {
   idCounter = 0
   parentStack.length = 0
   resetLifecycle()
-  taffy.reset()
+  if (isInitialized()) {
+    setNodeCount(getViews(), 0)
+  }
 }

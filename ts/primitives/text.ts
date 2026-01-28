@@ -3,30 +3,23 @@
  *
  * Display text with styling, alignment, and wrapping.
  *
- * REACTIVITY: Props are passed directly to setSource() to preserve reactive links.
- * Don't extract values before binding - that breaks the connection!
+ * REACTIVITY: All props flow through repeat() → SharedSlotBuffer → SharedArrayBuffer.
+ * Text content uses a SINGLE repeater — the readFn encodes UTF-8 bytes into the
+ * text pool and returns the offset. No effects. No TS-side measurement.
+ * Rust handles text measurement via Taffy content_size.
  *
  * Usage:
  * ```ts
- * // Static text
- * text({ content: 'Hello, World!' })
- *
- * // Reactive text - pass the signal directly!
- * const message = signal('Hello')
- * text({ content: message })
- * message.value = 'Updated!'  // UI reacts automatically!
- *
- * // Reactive with derived
- * const count = signal(0)
- * const countText = derived(() => `Count: ${count.value}`)
- * text({ content: countText })
+ * const msg = signal('Hello')
+ * text({ content: msg })
+ * msg.value = 'Updated!'  // repeat() fires inline → pool write → Rust wakes
  * ```
  */
 
-import { derived } from '@rlabs-inc/signals'
+import { repeat } from '@rlabs-inc/signals'
 import { ComponentType } from '../types'
+import type { RGBA } from '../types'
 import { allocateIndex, releaseIndex, getCurrentParentIndex } from '../engine/registry'
-import { measureTextWidth } from '../pipeline/layout/utils/text-measure'
 import {
   pushCurrentComponent,
   popCurrentComponent,
@@ -36,22 +29,73 @@ import { cleanupIndex as cleanupKeyboardListeners } from '../state/keyboard'
 import { onComponent as onMouseComponent } from '../state/mouse'
 import { getVariantStyle } from '../state/theme'
 import { getActiveScope } from './scope'
-import { enumSource } from './utils'
-
-// Import arrays
-import * as core from '../engine/arrays/core'
-import * as taffy from '../engine/arrays/taffy'
-import * as visual from '../engine/arrays/visual'
-import * as textArrays from '../engine/arrays/text'
-
-// Import types
+import { getArrays, getViews } from '../bridge'
+import {
+  packColor,
+  setNodeText,
+  U32_TEXT_LENGTH,
+  HEADER_TEXT_POOL_WRITE_PTR,
+  HEADER_TEXT_POOL_CAPACITY,
+} from '../bridge/shared-buffer'
 import type { TextProps, Cleanup } from './types'
 
 // =============================================================================
-// HELPERS - Enum conversions
+// CONVERSION HELPERS — same pattern as box.ts
 // =============================================================================
 
-/** Convert align string to number */
+function toDim(dim: number | string | undefined | null): number {
+  if (dim === undefined || dim === null || dim === 0) return NaN
+  if (typeof dim === 'string') {
+    if (dim.endsWith('%')) return parseFloat(dim) / 100
+    return parseFloat(dim) || NaN
+  }
+  return dim
+}
+
+function unwrap<T>(prop: T | (() => T) | { readonly value: T }): T {
+  if (typeof prop === 'function') return (prop as () => T)()
+  if (prop !== null && typeof prop === 'object' && 'value' in prop) return (prop as { value: T }).value
+  return prop
+}
+
+function isReactive(prop: unknown): boolean {
+  return typeof prop === 'function' || (prop !== null && typeof prop === 'object' && 'value' in (prop as any))
+}
+
+function toPackedColor(c: RGBA | number | null | undefined): number {
+  if (c === null || c === undefined) return 0
+  if (typeof c === 'number') return c
+  return packColor(c.r, c.g, c.b, c.a ?? 255)
+}
+
+function dimInput(prop: TextProps['width']): number | (() => number) {
+  if (prop === undefined) return NaN
+  if (typeof prop === 'number' || typeof prop === 'string') return toDim(prop)
+  return () => toDim(unwrap(prop))
+}
+
+function enumInput(prop: unknown, converter: (v: any) => number): number | (() => number) {
+  if (prop === undefined) return converter(undefined)
+  if (typeof prop === 'string') return converter(prop)
+  if (isReactive(prop)) return () => converter(unwrap(prop))
+  return converter(prop as string)
+}
+
+function colorInput(prop: TextProps['fg']): number | (() => number) {
+  if (prop === undefined) return 0
+  if (!isReactive(prop)) return toPackedColor(prop as RGBA | number | null)
+  return () => toPackedColor(unwrap(prop as any))
+}
+
+function numInput(prop: unknown, defaultVal = 0): number | (() => number) | { readonly value: number } {
+  if (prop === undefined) return defaultVal
+  return prop as any
+}
+
+// =============================================================================
+// ENUM CONVERSIONS
+// =============================================================================
+
 function alignToNum(align: string | undefined): number {
   switch (align) {
     case 'center': return 1
@@ -60,7 +104,6 @@ function alignToNum(align: string | undefined): number {
   }
 }
 
-/** Convert wrap string to number */
 function wrapToNum(wrap: string | undefined): number {
   switch (wrap) {
     case 'nowrap': return 0
@@ -69,174 +112,157 @@ function wrapToNum(wrap: string | undefined): number {
   }
 }
 
-/** Convert align-self string to number (0 = auto) */
-function alignSelfToNum(alignSelf: string | undefined): number {
-  switch (alignSelf) {
-    case 'stretch': return taffy.ALIGN_SELF_STRETCH
-    case 'flex-start': return taffy.ALIGN_SELF_FLEX_START
-    case 'center': return taffy.ALIGN_SELF_CENTER
-    case 'flex-end': return taffy.ALIGN_SELF_FLEX_END
-    case 'baseline': return taffy.ALIGN_SELF_BASELINE
-    default: return taffy.ALIGN_SELF_AUTO
-  }
-}
+// =============================================================================
+// TEXT POOL WRITER — encodes UTF-8, writes to pool, returns offset
+// =============================================================================
+
+const textEncoder = new TextEncoder()
 
 /**
- * Convert content prop (string | number) to string source for setSource.
- * Handles: static values, signals, and getters.
+ * Write text bytes to the pool. Returns the byte offset.
+ * Sets textLength via raw u32 write (Rust reads it alongside offset).
+ * Does NOT go through SharedSlotBuffer for length — the offset write
+ * through repeat() triggers the reactive notification.
  */
-function contentToStringSource(
-  content: TextProps['content']
-): string | (() => string) {
-  // Getter function - wrap to convert
-  if (typeof content === 'function') {
-    return () => String(content())
+function writeTextToPool(
+  views: ReturnType<typeof getViews>,
+  index: number,
+  text: string
+): number {
+  const encoded = textEncoder.encode(text)
+  let writePtr = views.header[HEADER_TEXT_POOL_WRITE_PTR]
+  const capacity = views.header[HEADER_TEXT_POOL_CAPACITY]
+
+  // Check capacity, compact if needed
+  if (writePtr + encoded.length > capacity) {
+    // Inline compaction — repack live text to front
+    const nodeCount = views.header[1] // HEADER_NODE_COUNT
+    let newPtr = 0
+    for (let i = 0; i < nodeCount; i++) {
+      const off = views.u32[10][i] // U32_TEXT_OFFSET
+      const len = views.u32[11][i] // U32_TEXT_LENGTH
+      if (len === 0) continue
+      if (off !== newPtr) views.textPool.copyWithin(newPtr, off, off + len)
+      views.u32[10][i] = newPtr
+      newPtr += len
+    }
+    views.header[HEADER_TEXT_POOL_WRITE_PTR] = newPtr
+    writePtr = newPtr
+
+    // If still not enough, truncate
+    if (writePtr + encoded.length > capacity) {
+      const available = capacity - writePtr
+      if (available <= 0) {
+        views.u32[U32_TEXT_LENGTH][index] = 0
+        return writePtr
+      }
+      views.textPool.set(encoded.subarray(0, available), writePtr)
+      views.u32[U32_TEXT_LENGTH][index] = available
+      views.header[HEADER_TEXT_POOL_WRITE_PTR] = writePtr + available
+      return writePtr
+    }
   }
-  // Signal/binding/derived with .value
-  if (content !== null && typeof content === 'object' && 'value' in content) {
-    const reactive = content as { value: string | number }
-    return () => String(reactive.value)
-  }
-  // Static value
-  return String(content)
+
+  views.textPool.set(encoded, writePtr)
+  views.u32[U32_TEXT_LENGTH][index] = encoded.length
+  views.header[HEADER_TEXT_POOL_WRITE_PTR] = writePtr + encoded.length
+  return writePtr
 }
 
 // =============================================================================
 // TEXT COMPONENT
 // =============================================================================
 
-/**
- * Create a text display component.
- *
- * Pass signals directly for reactive content - they stay connected!
- * The pipeline reads via unwrap() which tracks dependencies.
- *
- * Supports all theme variants:
- * - Core: default, primary, secondary, tertiary, accent
- * - Status: success, warning, error, info
- * - Surface: muted, surface, elevated, ghost, outline
- */
 export function text(props: TextProps): Cleanup {
+  const arrays = getArrays()
+  const views = getViews()
   const index = allocateIndex(props.id)
+  const disposals: (() => void)[] = []
 
-  // Track current component for lifecycle hooks
   pushCurrentComponent(index)
 
-  // ==========================================================================
-  // CORE - Always needed
-  // ==========================================================================
-  core.componentType[index] = ComponentType.TEXT
-  core.parentIndex.setSource(index, getCurrentParentIndex())
+  // --------------------------------------------------------------------------
+  // CORE
+  // --------------------------------------------------------------------------
+  arrays.componentType.set(index, ComponentType.TEXT)
+  disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
 
-  // Visibility
   if (props.visible !== undefined) {
-    taffy.visible.setSource(index, props.visible)
-    core.visible.setSource(index, props.visible)
+    disposals.push(repeat(numInput(props.visible, 1), arrays.visible, index))
   }
 
-  // ==========================================================================
-  // TAFFY LAYOUT ARRAYS - Direct binding to TypedArrays
-  // ==========================================================================
-
-  // Parent hierarchy (for tree structure)
-  taffy.parentIndex.setSource(index, getCurrentParentIndex())
-
-  // Flex item properties (text is always a flex item, never a container)
-  if (props.grow !== undefined) {
-    taffy.grow.setSource(index, props.grow)
-  }
-  if (props.shrink !== undefined) {
-    taffy.shrink.setSource(index, props.shrink)
-  }
-  if (props.flexBasis !== undefined) {
-    taffy.basis.setSource(index, taffy.dimensionSource(props.flexBasis))
-  }
-  if (props.alignSelf !== undefined) {
-    taffy.alignSelf.setSource(index, enumSource(props.alignSelf, alignSelfToNum))
-  }
-
-  // Dimensions - auto-calculate from content if not provided
-  // Convert content source to a getter we can use for measurement
-  const contentSource = contentToStringSource(props.content)
-  const getContent = typeof contentSource === 'function' ? contentSource : () => contentSource
-
-  if (props.width !== undefined) {
-    taffy.width.setSource(index, taffy.dimensionSource(props.width))
+  // --------------------------------------------------------------------------
+  // TEXT CONTENT — single repeater, no effects
+  // --------------------------------------------------------------------------
+  // The readFn encodes UTF-8 → writes bytes to pool → sets length raw → returns offset.
+  // repeat() writes offset to textOffset SharedSlotBuffer → reactive notification → Rust wakes.
+  // Rust reads offset + length together. Text measurement handled by Rust (Taffy content_size).
+  if (isReactive(props.content)) {
+    disposals.push(repeat(
+      () => writeTextToPool(views, index, String(unwrap(props.content))),
+      arrays.textOffset,
+      index
+    ))
   } else {
-    // Auto-width: measure content width (reactive - updates when content changes)
-    taffy.width.setSource(index, () => measureTextWidth(getContent()))
+    // Static text — write once, no repeater needed
+    setNodeText(views, index, String(props.content))
   }
 
-  if (props.height !== undefined) {
-    taffy.height.setSource(index, taffy.dimensionSource(props.height))
-  } else {
-    // Auto-height: count lines in content (newlines)
-    taffy.height.setSource(index, () => {
-      const content = getContent()
-      return content.split('\n').length
-    })
-  }
+  // --------------------------------------------------------------------------
+  // LAYOUT — dimensions, flex item (Rust measures text for auto-sizing)
+  // --------------------------------------------------------------------------
+  if (props.width !== undefined)     disposals.push(repeat(dimInput(props.width), arrays.width, index))
+  if (props.height !== undefined)    disposals.push(repeat(dimInput(props.height), arrays.height, index))
+  if (props.minWidth !== undefined)  disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
+  if (props.maxWidth !== undefined)  disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
+  if (props.minHeight !== undefined) disposals.push(repeat(dimInput(props.minHeight), arrays.minHeight, index))
+  if (props.maxHeight !== undefined) disposals.push(repeat(dimInput(props.maxHeight), arrays.maxHeight, index))
 
-  if (props.minWidth !== undefined) {
-    taffy.minWidth.setSource(index, taffy.dimensionSource(props.minWidth))
-  }
-  if (props.maxWidth !== undefined) {
-    taffy.maxWidth.setSource(index, taffy.dimensionSource(props.maxWidth))
-  }
-  if (props.minHeight !== undefined) {
-    taffy.minHeight.setSource(index, taffy.dimensionSource(props.minHeight))
-  }
-  if (props.maxHeight !== undefined) {
-    taffy.maxHeight.setSource(index, taffy.dimensionSource(props.maxHeight))
-  }
+  // Flex item
+  if (props.grow !== undefined)      disposals.push(repeat(numInput(props.grow), arrays.grow, index))
+  if (props.shrink !== undefined)    disposals.push(repeat(numInput(props.shrink), arrays.shrink, index))
+  if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.basis, index))
 
-  // Spacing - Padding
+  // Padding
   if (props.padding !== undefined) {
-    taffy.paddingTop.setSource(index, props.paddingTop ?? props.padding)
-    taffy.paddingRight.setSource(index, props.paddingRight ?? props.padding)
-    taffy.paddingBottom.setSource(index, props.paddingBottom ?? props.padding)
-    taffy.paddingLeft.setSource(index, props.paddingLeft ?? props.padding)
+    disposals.push(repeat(numInput(props.paddingTop ?? props.padding), arrays.paddingTop, index))
+    disposals.push(repeat(numInput(props.paddingRight ?? props.padding), arrays.paddingRight, index))
+    disposals.push(repeat(numInput(props.paddingBottom ?? props.padding), arrays.paddingBottom, index))
+    disposals.push(repeat(numInput(props.paddingLeft ?? props.padding), arrays.paddingLeft, index))
   } else {
-    if (props.paddingTop !== undefined) taffy.paddingTop.setSource(index, props.paddingTop)
-    if (props.paddingRight !== undefined) taffy.paddingRight.setSource(index, props.paddingRight)
-    if (props.paddingBottom !== undefined) taffy.paddingBottom.setSource(index, props.paddingBottom)
-    if (props.paddingLeft !== undefined) taffy.paddingLeft.setSource(index, props.paddingLeft)
+    if (props.paddingTop !== undefined)    disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
+    if (props.paddingRight !== undefined)  disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
+    if (props.paddingBottom !== undefined) disposals.push(repeat(numInput(props.paddingBottom), arrays.paddingBottom, index))
+    if (props.paddingLeft !== undefined)   disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
   }
-
-  // ==========================================================================
-  // TEXT CONTENT - Always needed (this is a text component!)
-  // ==========================================================================
-  textArrays.textContent.setSource(index, contentToStringSource(props.content))
 
   // Text styling
-  if (props.attrs !== undefined) textArrays.textAttrs.setSource(index, props.attrs)
-  if (props.align !== undefined) textArrays.textAlign.setSource(index, enumSource(props.align, alignToNum))
-  if (props.wrap !== undefined) textArrays.textWrap.setSource(index, enumSource(props.wrap, wrapToNum))
+  if (props.attrs !== undefined) disposals.push(repeat(numInput(props.attrs), arrays.textAttrs, index))
+  if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, alignToNum), arrays.textAlign, index))
+  if (props.wrap !== undefined)  disposals.push(repeat(enumInput(props.wrap, wrapToNum), arrays.textWrap, index))
 
-  // ==========================================================================
-  // VISUAL - Colors with variant support
-  // ==========================================================================
+  // --------------------------------------------------------------------------
+  // VISUAL — colors with variant support
+  // --------------------------------------------------------------------------
   if (props.variant && props.variant !== 'default') {
     const variant = props.variant
-    if (props.fg !== undefined) {
-      visual.fgColor.setSource(index, props.fg)
-    } else {
-      visual.fgColor.setSource(index, () => getVariantStyle(variant).fg)
-    }
-    if (props.bg !== undefined) {
-      visual.bgColor.setSource(index, props.bg)
-    } else {
-      visual.bgColor.setSource(index, () => getVariantStyle(variant).bg)
-    }
+    disposals.push(repeat(
+      props.fg !== undefined ? colorInput(props.fg) : () => toPackedColor(getVariantStyle(variant).fg),
+      arrays.fgColor, index
+    ))
+    disposals.push(repeat(
+      props.bg !== undefined ? colorInput(props.bg) : () => toPackedColor(getVariantStyle(variant).bg),
+      arrays.bgColor, index
+    ))
   } else {
-    if (props.fg !== undefined) visual.fgColor.setSource(index, props.fg)
-    if (props.bg !== undefined) visual.bgColor.setSource(index, props.bg)
+    if (props.fg !== undefined) disposals.push(repeat(colorInput(props.fg), arrays.fgColor, index))
+    if (props.bg !== undefined) disposals.push(repeat(colorInput(props.bg), arrays.bgColor, index))
   }
-  if (props.opacity !== undefined) visual.opacity.setSource(index, props.opacity)
+  if (props.opacity !== undefined) disposals.push(repeat(numInput(props.opacity), arrays.opacity, index))
 
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   // MOUSE HANDLERS
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   let unsubMouse: (() => void) | undefined
 
   if (props.onMouseDown || props.onMouseUp || props.onClick || props.onMouseEnter || props.onMouseLeave || props.onScroll) {
@@ -250,22 +276,23 @@ export function text(props: TextProps): Cleanup {
     })
   }
 
-  // Component setup complete - run lifecycle callbacks
+  // Component setup complete
   popCurrentComponent()
   runMountCallbacks(index)
 
-  // Cleanup function
+  // --------------------------------------------------------------------------
+  // CLEANUP
+  // --------------------------------------------------------------------------
   const cleanup = () => {
+    for (const dispose of disposals) dispose()
+    disposals.length = 0
     unsubMouse?.()
     cleanupKeyboardListeners(index)
     releaseIndex(index)
   }
 
-  // Auto-register with active scope if one exists
   const scope = getActiveScope()
-  if (scope) {
-    scope.cleanups.push(cleanup)
-  }
+  if (scope) scope.cleanups.push(cleanup)
 
   return cleanup
 }
