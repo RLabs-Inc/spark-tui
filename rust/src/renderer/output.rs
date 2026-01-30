@@ -225,9 +225,8 @@ impl StatefulCellRenderer {
     ///
     /// Used by InlineRenderer where we write sequentially with newlines.
     pub fn render_cell_inline(&mut self, output: &mut OutputBuffer, cell: &Cell) {
-        // Skip continuation cells - output space for grid alignment
+        // Skip continuation cells - wide char already consumed this column
         if cell.char == 0 {
-            output.write_char(' ');
             return;
         }
 

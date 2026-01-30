@@ -19,9 +19,10 @@
 
 import { signal, derived } from '@rlabs-inc/signals'
 import { box, text } from '../ts/primitives'
+import { t, themes, setTheme, getThemeNames } from '../ts/state/theme'
 import { mount } from '../ts/engine'
 import { loadEngine } from '../ts/bridge/ffi'
-import { isEnter, isSpace, isChar, getChar } from '../ts/engine/events'
+import { isEnter, isSpace, isChar, getChar, KeyEvent } from '../ts/engine/events'
 import { ptr } from 'bun:ffi'
 import { join } from 'path'
 
@@ -47,13 +48,16 @@ if (buildResult.exitCode !== 0) {
 // =============================================================================
 
 const count = signal(0)
+const themeNames = getThemeNames()
+const themeIndex = signal(0)
+const currentThemeName = derived(() => themeNames[themeIndex.value])
 
 // Derived display string with padding for visual stability
-const countDisplay = derived(() => {
-  const n = count.value
-  const sign = n >= 0 ? ' ' : ''
-  return sign + n.toString().padStart(4, ' ')
-})
+// const countDisplay = derived(() => {
+//   const n = count.value
+//   const sign = n >= -9 ? '' : ' '
+//   return sign + n.toString().padStart(4, '')
+// })
 
 // =============================================================================
 // MOUNT APP
@@ -61,42 +65,43 @@ const countDisplay = derived(() => {
 
 console.log('[counter] Mounting app...')
 
+// Use 'inline' mode to test if positioning bug is diff-related
+// Change to 'fullscreen' for normal behavior
 const { buffer, unmount } = mount(() => {
   // Root: Full terminal, centered
   box({
-    width: '100%',
-    height: '100%',
+    // width: '100%',
+    // height: '100%',
+    // overflow: 'scroll',
     flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    bg: { r: 30, g: 30, b: 46, a: 255 }, // Catppuccin base
+    // justifyContent: 'space-around',
+    // alignItems: 'center',
     children: () => {
       // Card container
       box({
-        // width: 40,
+        width: '100%',
+        // height: 50,
         flexDirection: 'column',
         alignItems: 'center',
         padding: 2,
-        gap: 1,
+        paddingBottom: 0,
+        gap: 2,
         border: 1,
-        borderColor: { r: 69, g: 71, b: 90, a: 255 }, // overlay0
-        bg: { r: 49, g: 50, b: 68, a: 255 }, // surface0
+        borderColor: t.secondary,
         children: () => {
           // Title
           text({
             content: '✨ SparkTUI Counter ✨',
-            fg: { r: 180, g: 190, b: 254, a: 255 }, // lavender
+            fg: t.primary,
           })
-
-          // Spacer
-          box({ height: 1 })
 
           // Counter row: [ - ]  42  [ + ]
           box({
+            width: '100%',
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: 2,
+            justifyContent: 'space-between',
+            // gap: 2,
             children: () => {
               // Minus button
               box({
@@ -104,10 +109,10 @@ const { buffer, unmount } = mount(() => {
                 height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
-                border: 1,
-                borderColor: { r: 243, g: 139, b: 168, a: 255 }, // red
-                bg: { r: 243, g: 139, b: 168, a: 255 },
-                fg: { r: 30, g: 30, b: 46, a: 255 },
+                // border: 1,
+                // borderColor: t.error,
+                bg: t.error,
+                fg: t.text,
                 focusable: true,
                 onClick: () => {
                   count.value = count.value - 1
@@ -119,20 +124,18 @@ const { buffer, unmount } = mount(() => {
                   }
                 },
                 children: () => {
-                  text({ content: '  -  ', fg: { r: 30, g: 30, b: 46, a: 255 } })
+                  text({ content: '  -  ', fg: t.text })
                 },
               })
 
               // Count display
               box({
-                width: 8,
-                height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
                 children: () => {
                   text({
-                    content: countDisplay,
-                    fg: { r: 205, g: 214, b: 244, a: 255 }, // text
+                    content: count,
+                    fg: t.text,
                   })
                 },
               })
@@ -143,10 +146,10 @@ const { buffer, unmount } = mount(() => {
                 height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
-                border: 1,
-                borderColor: { r: 166, g: 227, b: 161, a: 255 }, // green
-                bg: { r: 166, g: 227, b: 161, a: 255 },
-                fg: { r: 30, g: 30, b: 46, a: 255 },
+                // border: 1,
+                // borderColor: t.success,
+                bg: t.success,
+                fg: t.text,
                 focusable: true,
                 onClick: () => {
                   count.value = count.value + 1
@@ -158,23 +161,31 @@ const { buffer, unmount } = mount(() => {
                   }
                 },
                 children: () => {
-                  text({ content: '  +  ', fg: { r: 30, g: 30, b: 46, a: 255 } })
+                  text({ content: '  +  ', fg: t.text })
                 },
               })
             },
           })
-
-          // Spacer
-          box({ height: 1 })
-
-          // Footer
-          text({
-            content: '+/- count  Tab focus  q quit',
-            fg: { r: 166, g: 173, b: 200, a: 255 }, // subtext0
+          box({
+            // Footer
+            flexDirection: 'column',
+            justifyContent: 'center',
+            // visible: false,
+            children: () => {
+              text({
+                content: '+/- count  q quit',
+                fg: t.textMuted
+              })
+              text({
+                content: () => `t theme: ${currentThemeName.value}`,
+                fg: t.textMuted
+              })
+            }
           })
-        },
+        }
       })
     },
+
     // Global keyboard handler
     onKey: (key) => {
       const ch = getChar(key)
@@ -190,9 +201,16 @@ const { buffer, unmount } = mount(() => {
         unmount()
         process.exit(0)
       }
-    },
+      if (ch === 't' || ch === 'T') {
+        themeIndex.value = (themeIndex.value + 1) % themeNames.length
+        setTheme(themeNames[themeIndex.value] as keyof typeof themes)
+        return true
+      }
+    }
+
   })
-})
+
+}, { mode: 'inline' }) // Test inline mode - change to 'fullscreen' for normal
 
 // =============================================================================
 // START RUST ENGINE

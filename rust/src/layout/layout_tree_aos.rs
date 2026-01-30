@@ -179,6 +179,10 @@ impl<'a> LayoutTreeAoS<'a> {
     }
 
     /// Write computed layout to output section of AoS buffer.
+    ///
+    /// Also detects scroll overflow: if content_size > layout.size and overflow
+    /// mode allows scrolling, the node becomes scrollable with calculated
+    /// max_scroll values.
     fn write_output(&self, node_count: usize) {
         for idx in 0..node_count {
             let comp_type = self.buf.component_type(idx);
@@ -191,6 +195,33 @@ impl<'a> LayoutTreeAoS<'a> {
             self.buf.set_computed_y(idx, layout.location.y);
             self.buf.set_computed_width(idx, layout.size.width);
             self.buf.set_computed_height(idx, layout.size.height);
+
+            // Auto-scroll detection based on computed sizes
+            // Rule: if children computed size > node computed size → node becomes scrollable
+            // This works for any container (box, future components) - text has no children so excluded
+            //
+            // overflow values: 0=visible (default), 1=hidden (opt-out), 2=scroll, 3=auto
+            let has_children = !self.ctx.children[idx].is_empty();
+            let overflow = self.buf.overflow(idx);
+
+            // Calculate overflow from computed sizes
+            let content_w = layout.content_size.width;
+            let content_h = layout.content_size.height;
+            let max_scroll_x = (content_w - layout.size.width).max(0.0);
+            let max_scroll_y = (content_h - layout.size.height).max(0.0);
+            let content_overflows = max_scroll_x > 0.0 || max_scroll_y > 0.0;
+
+            // Determine scrollability:
+            // - overflow: hidden (1) → opt-out, never scrollable
+            // - overflow: scroll/auto (2,3) → always enable scrollable flag
+            // - default/visible (0) → auto-scroll when has_children AND content overflows
+            let is_scrollable = match overflow {
+                1 => false, // hidden: explicit opt-out
+                2 | 3 => true, // scroll/auto: always scrollable (even if no overflow yet)
+                _ => has_children && content_overflows, // auto-scroll on overflow
+            };
+
+            self.buf.set_output_scroll(idx, is_scrollable, max_scroll_x, max_scroll_y);
         }
     }
 }
@@ -549,6 +580,12 @@ pub fn compute_layout_aos(buf: &AoSBuffer) -> u32 {
 
         let tw = buf.terminal_width() as f32;
         let th = buf.terminal_height() as f32;
+
+        // Available space = terminal dimensions (maximum constraint).
+        // The root element's styles determine actual size:
+        // - height: auto → content height
+        // - height: 100% → terminal height
+        // - height: 20 → explicit 20 rows
         let available = Size {
             width: AvailableSpace::Definite(tw),
             height: AvailableSpace::Definite(th),

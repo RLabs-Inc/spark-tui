@@ -44,7 +44,7 @@ use spark_signals::{signal, derived, effect, Signal};
 use crate::shared_buffer_aos::{AoSBuffer, DIRTY_LAYOUT, DIRTY_TEXT, DIRTY_HIERARCHY};
 use crate::layout;
 use crate::framebuffer::{self, HitRegion};
-use crate::renderer::{FrameBuffer, DiffRenderer};
+use crate::renderer::{FrameBuffer, DiffRenderer, InlineRenderer};
 use crate::input::parser::{InputParser, ParsedEvent};
 use crate::input::focus::FocusManager;
 use crate::input::keyboard;
@@ -128,9 +128,16 @@ impl Drop for Engine {
 
 /// Main engine function. Runs on the engine thread.
 fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<()> {
-    // 1. Setup terminal
+    // 1. Setup terminal based on render mode (0=fullscreen, 1=inline, 2=append)
+    let render_mode = buf.render_mode();
     let mut terminal = TerminalSetup::new();
-    terminal.enter_fullscreen()?;
+    let is_fullscreen = render_mode == 0;
+
+    if is_fullscreen {
+        terminal.enter_fullscreen()?;
+    } else {
+        terminal.enter_inline()?;
+    }
 
     // 2. Create unified channel — both stdin reader and wake watcher send here
     let (tx, rx) = mpsc::channel();
@@ -194,9 +201,10 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
         // Read layout derived (creates reactive dependency)
         let _layout_gen = layout_d.get();
 
-        // Read terminal size from AoSBuffer header
-        let tw = buf.terminal_width() as u16;
-        let th = buf.terminal_height() as u16;
+        // Framebuffer dimensions come from root element's computed layout.
+        // Layout already accounts for render mode (fullscreen vs inline).
+        let tw = buf.output_width(0).max(1.0) as u16;
+        let th = buf.output_height(0).max(1.0) as u16;
 
         // Build framebuffer from AoSBuffer
         let (buffer, hit_regions) = framebuffer::compute_framebuffer(buf, tw, th);
@@ -211,7 +219,8 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
     // ONE render effect: fires when framebuffer derived changes.
     let running_for_effect = running.clone();
     let mouse_for_effect = mouse_mgr.clone();
-    let mut renderer = DiffRenderer::new();
+    let mut diff_renderer = DiffRenderer::new();
+    let mut inline_renderer = InlineRenderer::new();
     let _stop_effect = effect(move || {
         if !running_for_effect.load(Ordering::SeqCst) {
             return;
@@ -228,8 +237,13 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
             mouse.hit_grid.fill_rect(hr.x, hr.y, hr.width, hr.height, hr.component_index);
         }
 
-        // Diff render to terminal (side effect)
-        let _ = renderer.render(&result.buffer);
+        // Render based on mode (0=fullscreen/diff, 1=inline, 2=append)
+        let mode = buf.render_mode();
+        match mode {
+            1 => { let _ = inline_renderer.render(&result.buffer); }
+            // TODO: 2 => append_renderer
+            _ => { let _ = diff_renderer.render(&result.buffer); }
+        }
 
         // Increment render counter so TS can track FPS
         buf.increment_render_count();
@@ -329,7 +343,11 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
 
     // Cleanup
     drop(stdin_reader);
-    terminal.exit_fullscreen()?;
+    if is_fullscreen {
+        terminal.exit_fullscreen()?;
+    } else {
+        terminal.exit_inline()?;
+    }
 
     Ok(())
 }

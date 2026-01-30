@@ -50,6 +50,9 @@ import {
   setNodeText,
   HEADER_SIZE,
   STRIDE,
+  H_TEXT_POOL_WRITE_PTR,
+  U_TEXT_OFFSET,
+  U_TEXT_LENGTH,
   U_CURSOR_FLAGS,
   U_CURSOR_STYLE,
   U_CURSOR_FPS,
@@ -115,6 +118,15 @@ function numInput(prop: unknown, defaultVal = 0): number | (() => number) | { re
   return prop as any // repeat() handles number | signal | getter natively
 }
 
+// Boolean → number: converts boolean props (like visible) to 0/1
+function boolInput(prop: unknown, defaultVal = 1): number | (() => number) {
+  if (prop === undefined) return defaultVal
+  if (typeof prop === 'boolean') return prop ? 1 : 0
+  if (typeof prop === 'function') return () => (prop as () => boolean)() ? 1 : 0
+  if (isReactive(prop)) return () => unwrap(prop as any) ? 1 : 0
+  return prop ? 1 : 0
+}
+
 // =============================================================================
 // DIRECT BUFFER WRITES (for cursor fields not in reactive arrays)
 // =============================================================================
@@ -142,20 +154,18 @@ function writeTextToPoolAoS(
   index: number,
   text: string
 ): number {
-  const H_TEXT_POOL_WRITE_PTR = 28
-  const TEXT_POOL_SIZE = 1024 * 1024
-  const U_TEXT_OFFSET = 184
-  const U_TEXT_LENGTH = 188
-
   const encoded = textEncoder.encode(text)
   let writePtr = buf.header[H_TEXT_POOL_WRITE_PTR / 4]
 
   // Check capacity
-  if (writePtr + encoded.length > TEXT_POOL_SIZE) {
-    // Simple reset for now - could implement compaction later
-    console.warn('Text pool overflow, resetting')
-    writePtr = 0
-    buf.header[H_TEXT_POOL_WRITE_PTR / 4] = 0
+  if (writePtr + encoded.length > buf.textPoolSize) {
+    const sizeMB = (buf.textPoolSize / 1024 / 1024).toFixed(0)
+    throw new Error(
+      `Text pool overflow: pool is ${buf.textPoolSize} bytes (${sizeMB}MB), writePtr is at ${writePtr}, ` +
+      `trying to write ${encoded.length} bytes. This usually means text content is being ` +
+      `appended without reusing slots. Consider: 1) Reusing text slots for dynamic content, ` +
+      `2) Implementing text compaction, or 3) Increasing textPoolSize in createAoSBuffer({ textPoolSize: ... }).`
+    )
   }
 
   // Write to pool
@@ -209,6 +219,26 @@ function getSpecialKeyName(keycode: number): string | null {
 // =============================================================================
 // CURSOR STYLE CONVERSION
 // =============================================================================
+
+function alignSelfToNum(a: string | undefined): number {
+  switch (a) {
+    case 'auto': return 0
+    case 'flex-start': return 1
+    case 'flex-end': return 2
+    case 'center': return 3
+    case 'stretch': return 4
+    case 'baseline': return 5
+    default: return 0 // auto
+  }
+}
+
+function alignToNum(align: string | undefined): number {
+  switch (align) {
+    case 'center': return 1
+    case 'right': return 2
+    default: return 0 // left
+  }
+}
 
 function cursorStyleToNum(style: string | undefined): number {
   switch (style) {
@@ -264,7 +294,7 @@ export function input(props: InputProps): Cleanup {
   disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
 
   // Visibility (default: visible)
-  disposals.push(repeat(numInput(props.visible ?? 1, 1), arrays.visible, index))
+  disposals.push(repeat(boolInput(props.visible, 1), arrays.visible, index))
 
   // ==========================================================================
   // LAYOUT — dimensions
@@ -276,6 +306,15 @@ export function input(props: InputProps): Cleanup {
   if (props.maxWidth !== undefined)  disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
   if (props.minHeight !== undefined) disposals.push(repeat(dimInput(props.minHeight), arrays.minHeight, index))
   if (props.maxHeight !== undefined) disposals.push(repeat(dimInput(props.maxHeight), arrays.maxHeight, index))
+
+  // Flex item
+  if (props.grow !== undefined)      disposals.push(repeat(numInput(props.grow), arrays.grow, index))
+  if (props.shrink !== undefined)    disposals.push(repeat(numInput(props.shrink), arrays.shrink, index))
+  if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.basis, index))
+  if (props.alignSelf !== undefined) disposals.push(repeat(enumInput(props.alignSelf, alignSelfToNum), arrays.alignSelf, index))
+
+  // Text alignment
+  if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, alignToNum), arrays.textAlign, index))
 
   // Padding
   if (props.padding !== undefined) {

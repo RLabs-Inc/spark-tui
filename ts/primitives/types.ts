@@ -222,11 +222,13 @@ export interface CursorConfig {
   bg?: Reactive<RGBA>
 }
 
-export interface InputProps extends StyleProps, BorderProps, DimensionProps, SpacingProps, InteractionProps, MouseProps {
+export interface InputProps extends StyleProps, BorderProps, DimensionProps, SpacingProps, LayoutProps, InteractionProps, MouseProps {
   /** Component ID (optional, auto-generated if not provided) */
   id?: string
   /** Current value (two-way bound) */
   value: WritableSignal<string> | Binding<string>
+  /** Text alignment: 'left' | 'center' | 'right' */
+  align?: Reactive<'left' | 'center' | 'right'>
   /** Placeholder text */
   placeholder?: string
   /** Placeholder color */

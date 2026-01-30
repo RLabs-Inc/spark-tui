@@ -52,8 +52,9 @@ impl FocusManager {
             return;
         }
 
-        // Must be focusable and visible
-        if !buf.focusable(index) || !buf.visible(index) {
+        // Must be focusable (explicit OR implicit via scrollable) and visible
+        let is_focusable = buf.focusable(index) || buf.output_scrollable(index);
+        if !is_focusable || !buf.visible(index) {
             return;
         }
 

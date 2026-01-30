@@ -36,34 +36,38 @@ impl InlineRenderer {
 
     /// Render a frame inline.
     ///
-    /// Clears previous content and writes new content.
+    /// Uses sequential output with newlines, letting the terminal scroll
+    /// naturally when content exceeds viewport height.
     pub fn render(&mut self, buffer: &FrameBuffer) -> io::Result<()> {
         // Begin synchronized output
         ansi::begin_sync(&mut self.output)?;
 
-        // Erase previous content by moving up and clearing
-        if self.previous_height > 0 {
-            ansi::cursor_up(&mut self.output, self.previous_height)?;
-            ansi::cursor_column_zero(&mut self.output)?;
-            ansi::erase_down(&mut self.output)?;
-        }
+        let height = buffer.height();
+        let width = buffer.width();
+
+        // Clear viewport + scrollback, cursor home
+        self.output.write_str("\x1b[2J");  // Clear viewport
+        self.output.write_str("\x1b[3J");  // Clear scrollback
+        self.output.write_str("\x1b[H");   // Cursor home (0,0)
 
         // Reset renderer state
         self.cell_renderer.reset();
 
-        // Render all cells line by line
-        let width = buffer.width();
-        let height = buffer.height();
-
+        // Render rows sequentially - let terminal scroll naturally
         for y in 0..height {
+            // Position cursor at start of row (handles sparse content)
+            ansi::cursor_to(&mut self.output, 0, y)?;
+
             for x in 0..width {
                 if let Some(cell) = buffer.get(x, y) {
                     self.cell_renderer.render_cell_inline(&mut self.output, cell);
                 }
             }
-            // Newline after each row (except last)
+
+            // Newline after each row EXCEPT the last
+            // This lets content scroll into scrollback naturally
             if y < height - 1 {
-                self.output.write_char('\n');
+                self.output.write_str("\r\n");
             }
         }
 

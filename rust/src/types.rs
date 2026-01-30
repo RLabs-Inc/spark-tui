@@ -80,15 +80,25 @@ impl Rgba {
     }
 
     /// Check if this is the terminal default color.
+    /// Note: After pack/unpack through SharedBuffer, -1 becomes 255 (due to & 0xFF).
+    /// We check for both the semantic value (-1) and the packed value (255).
     #[inline]
     pub const fn is_terminal_default(&self) -> bool {
-        self.r == -1
+        // Semantic value (created directly in Rust)
+        self.r == -1 ||
+        // Packed value (from SharedBuffer: -1 & 0xFF = 255 → as i16 = 255)
+        (self.r == 255 && self.g == 255 && self.b == 255)
     }
 
     /// Check if this is an ANSI palette color.
+    /// Note: After pack/unpack through SharedBuffer, -2 becomes 254 (due to & 0xFF).
+    /// We check for both the semantic value (-2) and the packed value (254).
     #[inline]
     pub const fn is_ansi(&self) -> bool {
-        self.r == -2
+        // Semantic value (created directly in Rust)
+        self.r == -2 ||
+        // Packed value (from SharedBuffer: -2 & 0xFF = 254 → as i16 = 254)
+        self.r == 254
     }
 
     /// Get ANSI palette index (only valid if is_ansi() returns true).

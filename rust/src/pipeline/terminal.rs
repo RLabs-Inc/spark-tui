@@ -74,6 +74,62 @@ impl TerminalSetup {
         Ok(())
     }
 
+    /// Enter inline mode (no alternate screen, no mouse).
+    /// For inline/append render modes where terminal scroll should work.
+    pub fn enter_inline(&mut self) -> io::Result<()> {
+        let mut out = OutputBuffer::new();
+
+        // Enable raw mode (needed for keyboard input)
+        self.enable_raw_mode()?;
+
+        // Hide cursor during renders
+        ansi::cursor_hide(&mut out)?;
+
+        // NO alternate screen - stay in normal buffer
+        // NO mouse tracking - let terminal handle scroll
+
+        // Enable Kitty keyboard protocol for better key detection
+        out.write_str("\x1b[>1u");
+        self.kitty_keyboard = true;
+
+        // Enable bracketed paste
+        out.write_str("\x1b[?2004h");
+        self.bracketed_paste = true;
+
+        out.flush_stdout()?;
+        // Note: is_fullscreen stays false for inline mode
+        Ok(())
+    }
+
+    /// Exit inline mode and restore terminal.
+    pub fn exit_inline(&mut self) -> io::Result<()> {
+        let mut out = OutputBuffer::new();
+
+        // Disable bracketed paste
+        if self.bracketed_paste {
+            out.write_str("\x1b[?2004l");
+            self.bracketed_paste = false;
+        }
+
+        // Disable Kitty keyboard
+        if self.kitty_keyboard {
+            out.write_str("\x1b[<u");
+            self.kitty_keyboard = false;
+        }
+
+        // Reset terminal state
+        ansi::reset(&mut out)?;
+
+        // Show cursor
+        ansi::cursor_show(&mut out)?;
+
+        out.flush_stdout()?;
+
+        // Disable raw mode
+        self.disable_raw_mode()?;
+        Ok(())
+    }
+
     /// Exit fullscreen mode and restore terminal.
     pub fn exit_fullscreen(&mut self) -> io::Result<()> {
         let mut out = OutputBuffer::new();
@@ -131,6 +187,14 @@ impl TerminalSetup {
         {
             use std::os::unix::io::AsRawFd;
             let fd = io::stdin().as_raw_fd();
+
+            // Check if stdin is a TTY — skip raw mode if not (e.g., piped input, testing)
+            if unsafe { libc::isatty(fd) } == 0 {
+                // Not a TTY — can't enable raw mode, but continue anyway
+                // (engine won't receive keyboard input but will render)
+                return Ok(());
+            }
+
             // Use libc termios to enable raw mode
             unsafe {
                 let mut termios: libc::termios = std::mem::zeroed();

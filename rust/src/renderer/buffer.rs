@@ -703,6 +703,8 @@ fn is_wide_char(cp: u32) -> bool {
         || (0xFFE0..=0xFFE6).contains(&cp)   // Fullwidth symbols
         || (0x20000..=0x2FFFF).contains(&cp) // CJK Extension B+
         || (0x30000..=0x3FFFF).contains(&cp) // CJK Extension G+
+        // Symbols (includes ✨ sparkles, ⚡ zap, etc.)
+        || (0x2600..=0x27BF).contains(&cp)   // Misc Symbols, Dingbats
         // Emoji (simplified - many are actually width 2)
         || (0x1F300..=0x1F9FF).contains(&cp) // Misc Symbols and Pictographs, Emoticons, etc.
         || (0x1FA00..=0x1FAFF).contains(&cp) // Chess, Extended-A

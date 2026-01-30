@@ -16,7 +16,22 @@ use super::ansi::strip_ansi;
 /// - `2` for wide characters (CJK ideographs, fullwidth forms)
 #[inline]
 pub fn char_width(c: char) -> usize {
-    c.width().unwrap_or(0)
+    // Force known emoji ranges to width 2 (terminal renderers usually treat them as wide)
+    match c as u32 {
+        // Sparkles ✨, Zap ⚡, etc
+        0x2600..=0x27BF => 2,
+        // Misc Symbols and Pictographs (typical emojis)
+        0x1F300..=0x1F5FF => 2,
+        // Emoticons (😀)
+        0x1F600..=0x1F64F => 2,
+        // Transport and Map Symbols (🚀)
+        0x1F680..=0x1F6FF => 2,
+        // Supplemental Symbols and Pictographs
+        0x1F900..=0x1F9FF => 2,
+        // Symbols and Pictographs Extended-A
+        0x1FA70..=0x1FAFF => 2,
+        _ => c.width().unwrap_or(0),
+    }
 }
 
 /// Display width of a grapheme cluster in terminal cells.
@@ -41,9 +56,9 @@ pub fn grapheme_width(grapheme: &str) -> usize {
         None => return 0,
     };
 
-    // Single codepoint: use unicode-width directly.
+    // Single codepoint: use char_width for proper emoji handling.
     if grapheme.len() == first.len_utf8() {
-        return first.width().unwrap_or(0);
+        return char_width(first);
     }
 
     // Multi-codepoint grapheme cluster.

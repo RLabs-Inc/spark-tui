@@ -15,7 +15,7 @@ use crate::types::Rgba;
 
 pub const STRIDE: usize = 256;
 pub const HEADER_SIZE: usize = 256;
-pub const TEXT_POOL_SIZE: usize = 1024 * 1024; // 1MB
+pub const TEXT_POOL_SIZE: usize = 10 * 1024 * 1024; // 10MB default (configurable via TS)
 pub const MAX_NODES: usize = 100_000; // 100K nodes
 pub const EVENT_RING_TOTAL: usize = 12 + 256 * 32; // header + 256 events * 32 bytes
 pub const TOTAL_BUFFER_SIZE: usize = HEADER_SIZE + MAX_NODES * STRIDE + TEXT_POOL_SIZE + EVENT_RING_TOTAL;
@@ -365,6 +365,13 @@ impl AoSBuffer {
         ConfigFlags::from_bits_truncate(self.read_header_u32(H_CONFIG_FLAGS))
     }
 
+    /// Read render mode from header.
+    /// 0 = fullscreen (DiffRenderer), 1 = inline, 2 = append
+    #[inline]
+    pub fn render_mode(&self) -> u32 {
+        self.read_header_u32(H_RENDER_MODE)
+    }
+
     /// Increment render count (for FPS tracking)
     #[inline]
     pub fn increment_render_count(&self) {
@@ -480,15 +487,23 @@ impl AoSBuffer {
         unsafe { *self.ptr.add(H_EXIT_REQUESTED) != 0 }
     }
 
-    /// Wake the TS side via atomic store.
-    /// Uses futex-style notification - just sets the flag and notifies.
+    /// Wake the TS side via atomic store + futex wake.
+    ///
+    /// PURE REACTIVE: No polling. TS uses Atomics.waitAsync with infinite timeout.
+    /// Rust calls futex wake to instantly unblock TS.
+    ///
+    /// Flow:
+    ///   1. TS: Atomics.waitAsync(wake_ts, 0, 0) → SUSPENDS (zero CPU)
+    ///   2. Rust: notify_ts() → store(1) + wake_one() → INSTANT WAKE
+    ///   3. TS: reads events, dispatches, loops back to waitAsync
     pub fn notify_ts(&self) {
         use std::sync::atomic::{AtomicU32, Ordering};
         unsafe {
             let wake_ptr = self.ptr.add(H_WAKE_TS) as *const AtomicU32;
+            // Set the wake flag
             (*wake_ptr).store(1, Ordering::SeqCst);
-            // Note: actual futex wake would need libc::syscall on Linux
-            // For now, TS polls or uses Atomics.waitAsync
+            // Actually wake the waiting thread via futex syscall
+            atomic_wait::wake_one(wake_ptr);
         }
     }
 

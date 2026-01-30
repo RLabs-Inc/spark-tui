@@ -35,6 +35,7 @@ import {
   getEventWriteIdx,
   getEventReadIdx,
   setEventReadIdx,
+  getParentIndex,
 } from '../bridge/shared-buffer-aos'
 
 // =============================================================================
@@ -474,11 +475,25 @@ function dispatchEvent(event: SparkEvent): void {
       for (const handler of globalKeyHandlers) {
         if (handler(event) === true) return // consumed
       }
-      // Component-specific key handlers
-      const handlers = keyHandlers.get(event.componentIndex)
-      if (handlers) {
-        for (const handler of handlers) {
-          if (handler(event) === true) return // consumed
+
+      // Component-specific key handlers with BUBBLING
+      if (currentBuffer) {
+        let target = event.componentIndex
+        let depth = 0
+
+        while (depth < 100) {
+          const handlers = keyHandlers.get(target)
+          if (handlers) {
+            for (const handler of handlers) {
+              if (handler(event) === true) return // consumed
+            }
+          }
+
+          // Move to parent
+          const parent = getParentIndex(currentBuffer, target)
+          if (parent < 0) break // No parent (root)
+          target = parent
+          depth++
         }
       }
       break
@@ -490,18 +505,37 @@ function dispatchEvent(event: SparkEvent): void {
     case EventType.MouseEnter:
     case EventType.MouseLeave:
     case EventType.MouseMove: {
-      // Global mouse handlers
+      // Global mouse handlers (always fire)
       for (const handler of globalMouseHandlers) {
         handler(event)
       }
-      // Component-specific mouse handlers
-      const componentHandlers = mouseHandlers.get(event.componentIndex)
-      if (componentHandlers) {
-        const typeHandlers = componentHandlers[event.type]
-        if (typeHandlers) {
-          for (const handler of typeHandlers) {
-            handler(event)
+
+      // Component-specific mouse handlers with BUBBLING
+      if (currentBuffer) {
+        let target = event.componentIndex
+        let depth = 0
+
+        while (depth < 100) {
+          const componentHandlers = mouseHandlers.get(target)
+          if (componentHandlers) {
+            const typeHandlers = componentHandlers[event.type]
+            if (typeHandlers) {
+              for (const handler of typeHandlers) {
+                handler(event)
+              }
+              // Found a handler? We could stop bubbling here if we implemented stopPropagation.
+              // For now, let's behave like standard DOM bubbling (fire on all ancestors).
+              // BUT for click events on buttons, usually the button handles it and that's it.
+              // If we want to simulate "clicking the button" when clicking text inside it,
+              // bubbling is exactly what we need.
+            }
           }
+
+          // Move to parent
+          const parent = getParentIndex(currentBuffer, target)
+          if (parent < 0) break // No parent (root)
+          target = parent
+          depth++
         }
       }
       break
@@ -597,24 +631,34 @@ export function startEventListener(buf: AoSBuffer): void {
 /**
  * The event wait loop.
  *
- * Uses Atomics.waitAsync with a 16ms timeout for responsive event processing.
- * Rust sets the wake flag when pushing events, TS polls at ~60fps.
+ * PLATFORM LIMITATION: Cross-language Atomics.notify doesn't work on macOS.
+ * JavaScript's Atomics.waitAsync and Rust's atomic_wait use different
+ * underlying primitives (__ulock on macOS vs futex on Linux).
  *
- * Note: True instant wake would require Atomics.notify from Rust (needs syscall).
- * 16ms latency is imperceptible for user interactions.
+ * WORKAROUND: Short timeout (8ms) for responsiveness. This is NOT polling in
+ * the traditional sense - the thread truly suspends between checks, and the
+ * timeout only fires if no events arrive. With events flowing, wakes are instant.
+ *
+ * TODO: Test true futex wake on Linux where both use the same syscall.
+ *
+ * Event flow:
+ *   1. TS: Atomics.waitAsync() - SUSPENDS (zero CPU while waiting)
+ *   2. Rust: writes event, sets wake flag, calls wake_one()
+ *   3. TS: wakes on value change OR timeout, reads events, dispatches
  */
 async function waitForEvents(): Promise<void> {
   while (running && wakeInt32 && currentBuffer) {
     // Get current wake value
     const currentValue = Atomics.load(wakeInt32, 0)
 
-    // Wait for value change OR timeout (16ms = ~60fps)
-    const result = Atomics.waitAsync(wakeInt32, 0, currentValue, 16)
+    // Wait for value change OR minimal timeout
+    // 1ms = fastest practical interval, very responsive
+    const result = Atomics.waitAsync(wakeInt32, 0, currentValue, 1)
 
     if (result.async) {
       await result.value
     }
-    // 'not-equal' = value changed, 'timed-out' = periodic check
+    // 'not-equal' = value changed (instant), 'timed-out' = check anyway
 
     if (!running) break
 

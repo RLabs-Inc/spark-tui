@@ -11,8 +11,12 @@
 
 export const STRIDE = 256 // bytes per node
 export const HEADER_SIZE = 256 // bytes for header
-export const TEXT_POOL_SIZE = 1024 * 1024 // 1MB text pool
 export const MAX_NODES = 100_000 // 100K nodes - plenty for any TUI
+
+// Text pool - configurable, default 10MB
+// ~100 bytes per node at max capacity, plenty for most apps
+export const DEFAULT_TEXT_POOL_SIZE = 10 * 1024 * 1024 // 10MB default
+export const TEXT_POOL_SIZE = DEFAULT_TEXT_POOL_SIZE // Legacy alias
 
 // Dimension value for "auto" (maps to Taffy's Dimension::Auto)
 export const AUTO = NaN
@@ -23,11 +27,17 @@ export const EVENT_SLOT_SIZE = 20 // type(1) + pad(1) + component(2) + data(16)
 export const MAX_EVENTS = 256
 export const EVENT_RING_SIZE = EVENT_RING_HEADER_SIZE + MAX_EVENTS * EVENT_SLOT_SIZE // 5132 bytes
 
-// Event ring buffer offset (after text pool)
-export const EVENT_RING_OFFSET = HEADER_SIZE + MAX_NODES * STRIDE + TEXT_POOL_SIZE
+// Helper to calculate buffer metrics for a given text pool size
+export function getBufferMetrics(textPoolSize: number = DEFAULT_TEXT_POOL_SIZE) {
+  const eventRingOffset = HEADER_SIZE + MAX_NODES * STRIDE + textPoolSize
+  const totalSize = eventRingOffset + EVENT_RING_SIZE
+  return { textPoolSize, eventRingOffset, totalSize }
+}
 
-// Total buffer size (~26MB for 100K nodes + event ring)
-export const BUFFER_SIZE = HEADER_SIZE + MAX_NODES * STRIDE + TEXT_POOL_SIZE + EVENT_RING_SIZE
+// Default buffer metrics (for legacy exports)
+const defaultMetrics = getBufferMetrics()
+export const EVENT_RING_OFFSET = defaultMetrics.eventRingOffset
+export const BUFFER_SIZE = defaultMetrics.totalSize // ~35MB with 10MB text pool
 
 // =============================================================================
 // HEADER OFFSETS (within header section, 256 bytes total)
@@ -66,8 +76,10 @@ export const H_CONFIG_FLAGS = 72
 export const H_RENDER_MODE = 76 // 0=full, 1=inline, 2=append
 export const H_CURSOR_CONFIG = 80 // packed: vis|shape|blink
 export const H_SCROLL_SPEED = 84 // lines per wheel tick
+export const H_RENDER_COUNT = 88 // u32, Rust writes for FPS tracking
+export const H_EXIT_REQUESTED = 92 // u8, Rust sets on Exit event
 
-// Reserved (88-255)
+// Reserved (96-255)
 
 // Legacy alias for backward compatibility
 export const H_WAKE_FLAG = H_WAKE_RUST
@@ -171,7 +183,11 @@ export const C_SELECTION_COLOR = 136
 export const U_OPACITY = 140
 export const I_Z_INDEX = 141
 export const U_BORDER_STYLE = 142
-// 143-147 reserved
+export const U_BORDER_STYLE_TOP = 143
+export const U_BORDER_STYLE_RIGHT = 144
+export const U_BORDER_STYLE_BOTTOM = 145
+export const U_BORDER_STYLE_LEFT = 146
+export const U_FOCUS_INDICATOR_CHAR = 147 // u8, default '*' (0x2A)
 
 // Interaction (148-171) - Focus, cursor, scroll
 export const I_SCROLL_X = 148
@@ -188,7 +204,8 @@ export const U_CURSOR_FLAGS = 174
 export const U_CURSOR_STYLE = 175 // 0=block, 1=bar, 2=underline
 export const U_CURSOR_FPS = 176
 export const U_MAX_LENGTH = 177
-// 178-179 reserved
+export const U_FOCUS_INDICATOR_ENABLED = 178 // u8, 1=enabled, 0xFF=disabled
+// 179 reserved
 
 // Hierarchy (180-183)
 export const I_PARENT_INDEX = 180
@@ -214,7 +231,14 @@ export const F_SCROLL_HEIGHT = 220
 export const F_MAX_SCROLL_X = 224
 export const F_MAX_SCROLL_Y = 228
 export const U_SCROLLABLE = 232
-// 233-255 reserved
+export const U_CURSOR_ALT_CHAR = 233 // u32 - alternate cursor char for blink (UTF-32)
+
+// Per-side border colors (236-251)
+export const C_BORDER_TOP_COLOR = 236
+export const C_BORDER_RIGHT_COLOR = 240
+export const C_BORDER_BOTTOM_COLOR = 244
+export const C_BORDER_LEFT_COLOR = 248
+// 252-255 reserved
 
 // Legacy aliases for backward compatibility
 export const C_CURSOR_COLOR = C_CURSOR_FG
@@ -258,24 +282,43 @@ export interface AoSBuffer {
   header: Uint32Array
   textPool: Uint8Array
   eventRing: Uint8Array
+  /** The text pool size for this buffer (for error messages) */
+  textPoolSize: number
 }
 
-export function createAoSBuffer(): AoSBuffer {
-  const buffer = new SharedArrayBuffer(BUFFER_SIZE)
+export interface CreateBufferOptions {
+  /**
+   * Size of the text pool in bytes.
+   * Default: 10MB (10 * 1024 * 1024)
+   *
+   * The text pool stores all text content (labels, input values, etc.)
+   * For reference: 10MB = ~100 bytes per node at 100K nodes capacity.
+   *
+   * Increase if your app has lots of text content.
+   * Decrease for memory-constrained environments.
+   */
+  textPoolSize?: number
+}
+
+export function createAoSBuffer(options: CreateBufferOptions = {}): AoSBuffer {
+  const textPoolSize = options.textPoolSize ?? DEFAULT_TEXT_POOL_SIZE
+  const { eventRingOffset, totalSize } = getBufferMetrics(textPoolSize)
+
+  const buffer = new SharedArrayBuffer(totalSize)
   const view = new DataView(buffer)
   const header = new Uint32Array(buffer, 0, HEADER_SIZE / 4)
   const textPool = new Uint8Array(
     buffer,
     HEADER_SIZE + MAX_NODES * STRIDE,
-    TEXT_POOL_SIZE
+    textPoolSize
   )
-  const eventRing = new Uint8Array(buffer, EVENT_RING_OFFSET, EVENT_RING_SIZE)
+  const eventRing = new Uint8Array(buffer, eventRingOffset, EVENT_RING_SIZE)
 
   // Initialize header - Core section
   header[H_VERSION / 4] = 1
   header[H_NODE_COUNT / 4] = 0
   header[H_MAX_NODES / 4] = MAX_NODES
-  header[H_TEXT_POOL_SIZE / 4] = TEXT_POOL_SIZE
+  header[H_TEXT_POOL_SIZE / 4] = textPoolSize
   header[H_TEXT_POOL_WRITE_PTR / 4] = 0
 
   // Initialize event indices to 0
@@ -317,7 +360,7 @@ export function createAoSBuffer(): AoSBuffer {
     view.setUint8(base + U_OPACITY, 255)
   }
 
-  return { buffer, view, header, textPool, eventRing }
+  return { buffer, view, header, textPool, eventRing, textPoolSize }
 }
 
 // =============================================================================
@@ -408,6 +451,14 @@ export function getNodeCount(buf: AoSBuffer): number {
   return buf.header[H_NODE_COUNT / 4]
 }
 
+export function getParentIndex(buf: AoSBuffer, nodeIndex: number): number {
+  return getI32(buf, nodeIndex, I_PARENT_INDEX)
+}
+
+export function setParentIndex(buf: AoSBuffer, nodeIndex: number, parentIndex: number): void {
+  setI32(buf, nodeIndex, I_PARENT_INDEX, parentIndex)
+}
+
 // =============================================================================
 // TEXT POOL
 // =============================================================================
@@ -418,10 +469,14 @@ export function setNodeText(buf: AoSBuffer, nodeIndex: number, text: string): vo
   const encoded = textEncoder.encode(text)
   const writePtr = buf.header[H_TEXT_POOL_WRITE_PTR / 4]
 
-  if (writePtr + encoded.length > TEXT_POOL_SIZE) {
-    console.warn('Text pool overflow, resetting')
-    buf.header[H_TEXT_POOL_WRITE_PTR / 4] = 0
-    return setNodeText(buf, nodeIndex, text)
+  if (writePtr + encoded.length > buf.textPoolSize) {
+    const sizeMB = (buf.textPoolSize / 1024 / 1024).toFixed(0)
+    throw new Error(
+      `Text pool overflow: pool is ${buf.textPoolSize} bytes (${sizeMB}MB), writePtr is at ${writePtr}, ` +
+      `trying to write ${encoded.length} bytes. This usually means text content is being ` +
+      `appended without reusing slots. Consider: 1) Reusing text slots for dynamic content, ` +
+      `2) Implementing text compaction, or 3) Increasing textPoolSize in createAoSBuffer({ textPoolSize: ... }).`
+    )
   }
 
   buf.textPool.set(encoded, writePtr)

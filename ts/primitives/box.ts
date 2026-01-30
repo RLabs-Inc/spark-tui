@@ -108,6 +108,15 @@ function numInput(prop: unknown, defaultVal = 0): number | (() => number) | { re
   return prop as any // repeat() handles number | signal | getter natively
 }
 
+// Boolean → number: converts boolean props (like visible, focusable) to 0/1
+function boolInput(prop: unknown, defaultVal = 1): number | (() => number) {
+  if (prop === undefined) return defaultVal
+  if (typeof prop === 'boolean') return prop ? 1 : 0
+  if (typeof prop === 'function') return () => (prop as () => boolean)() ? 1 : 0
+  if (isReactive(prop)) return () => unwrap(prop as any) ? 1 : 0
+  return prop ? 1 : 0
+}
+
 // =============================================================================
 // ENUM CONVERSIONS
 // =============================================================================
@@ -132,8 +141,9 @@ function flexWrapToNum(wrap: string | undefined): number {
 
 function justifyToNum(j: string | undefined): number {
   switch (j) {
-    case 'center': return 1
-    case 'flex-end': return 2
+    case 'flex-start': return 0
+    case 'flex-end': return 1
+    case 'center': return 2
     case 'space-between': return 3
     case 'space-around': return 4
     case 'space-evenly': return 5
@@ -143,20 +153,34 @@ function justifyToNum(j: string | undefined): number {
 
 function alignToNum(a: string | undefined): number {
   switch (a) {
-    case 'flex-start': return 1
+    case 'flex-start': return 0
+    case 'flex-end': return 1
     case 'center': return 2
-    case 'flex-end': return 3
+    case 'stretch': return 3
     case 'baseline': return 4
-    default: return 0 // stretch
+    default: return 3 // stretch (default)
+  }
+}
+
+function alignContentToNum(a: string | undefined): number {
+  switch (a) {
+    case 'flex-start': return 0
+    case 'flex-end': return 1
+    case 'center': return 2
+    case 'stretch': return 3
+    case 'space-between': return 4
+    case 'space-around': return 5
+    default: return 0 // flex-start
   }
 }
 
 function alignSelfToNum(a: string | undefined): number {
   switch (a) {
-    case 'stretch': return 1
-    case 'flex-start': return 2
+    case 'auto': return 0
+    case 'flex-start': return 1
+    case 'flex-end': return 2
     case 'center': return 3
-    case 'flex-end': return 4
+    case 'stretch': return 4
     case 'baseline': return 5
     default: return 0 // auto
   }
@@ -180,29 +204,30 @@ export function box(props: BoxProps = {}): Cleanup {
   disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
 
   // Visibility (default: visible)
-  disposals.push(repeat(numInput(props.visible ?? 1, 1), arrays.visible, index))
+  disposals.push(repeat(boolInput(props.visible, 1), arrays.visible, index))
 
   // --------------------------------------------------------------------------
   // LAYOUT — dimensions, flex, spacing
   // --------------------------------------------------------------------------
 
   // Dimensions
-  if (props.width !== undefined)     disposals.push(repeat(dimInput(props.width), arrays.width, index))
-  if (props.height !== undefined)    disposals.push(repeat(dimInput(props.height), arrays.height, index))
-  if (props.minWidth !== undefined)  disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
-  if (props.maxWidth !== undefined)  disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
+  if (props.width !== undefined) disposals.push(repeat(dimInput(props.width), arrays.width, index))
+  if (props.height !== undefined) disposals.push(repeat(dimInput(props.height), arrays.height, index))
+  if (props.minWidth !== undefined) disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
+  if (props.maxWidth !== undefined) disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
   if (props.minHeight !== undefined) disposals.push(repeat(dimInput(props.minHeight), arrays.minHeight, index))
   if (props.maxHeight !== undefined) disposals.push(repeat(dimInput(props.maxHeight), arrays.maxHeight, index))
 
   // Flex container
-  if (props.flexDirection !== undefined)  disposals.push(repeat(enumInput(props.flexDirection, flexDirectionToNum), arrays.flexDirection, index))
-  if (props.flexWrap !== undefined)       disposals.push(repeat(enumInput(props.flexWrap, flexWrapToNum), arrays.flexWrap, index))
+  if (props.flexDirection !== undefined) disposals.push(repeat(enumInput(props.flexDirection, flexDirectionToNum), arrays.flexDirection, index))
+  if (props.flexWrap !== undefined) disposals.push(repeat(enumInput(props.flexWrap, flexWrapToNum), arrays.flexWrap, index))
   if (props.justifyContent !== undefined) disposals.push(repeat(enumInput(props.justifyContent, justifyToNum), arrays.justifyContent, index))
-  if (props.alignItems !== undefined)     disposals.push(repeat(enumInput(props.alignItems, alignToNum), arrays.alignItems, index))
+  if (props.alignItems !== undefined) disposals.push(repeat(enumInput(props.alignItems, alignToNum), arrays.alignItems, index))
+  // if (props.alignContent !== undefined)   disposals.push(repeat(enumInput(props.alignContent, alignContentToNum), arrays.alignContent, index))
 
   // Flex item
-  if (props.grow !== undefined)     disposals.push(repeat(numInput(props.grow), arrays.grow, index))
-  if (props.shrink !== undefined)   disposals.push(repeat(numInput(props.shrink), arrays.shrink, index))
+  if (props.grow !== undefined) disposals.push(repeat(numInput(props.grow), arrays.grow, index))
+  if (props.shrink !== undefined) disposals.push(repeat(numInput(props.shrink), arrays.shrink, index))
   if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.basis, index))
   if (props.alignSelf !== undefined) disposals.push(repeat(enumInput(props.alignSelf, alignSelfToNum), arrays.alignSelf, index))
 
@@ -213,10 +238,10 @@ export function box(props: BoxProps = {}): Cleanup {
     disposals.push(repeat(numInput(props.paddingBottom ?? props.padding), arrays.paddingBottom, index))
     disposals.push(repeat(numInput(props.paddingLeft ?? props.padding), arrays.paddingLeft, index))
   } else {
-    if (props.paddingTop !== undefined)    disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
-    if (props.paddingRight !== undefined)  disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
+    if (props.paddingTop !== undefined) disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
+    if (props.paddingRight !== undefined) disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
     if (props.paddingBottom !== undefined) disposals.push(repeat(numInput(props.paddingBottom), arrays.paddingBottom, index))
-    if (props.paddingLeft !== undefined)   disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
+    if (props.paddingLeft !== undefined) disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
   }
 
   // Margin
@@ -226,10 +251,10 @@ export function box(props: BoxProps = {}): Cleanup {
     disposals.push(repeat(numInput(props.marginBottom ?? props.margin), arrays.marginBottom, index))
     disposals.push(repeat(numInput(props.marginLeft ?? props.margin), arrays.marginLeft, index))
   } else {
-    if (props.marginTop !== undefined)    disposals.push(repeat(numInput(props.marginTop), arrays.marginTop, index))
-    if (props.marginRight !== undefined)  disposals.push(repeat(numInput(props.marginRight), arrays.marginRight, index))
+    if (props.marginTop !== undefined) disposals.push(repeat(numInput(props.marginTop), arrays.marginTop, index))
+    if (props.marginRight !== undefined) disposals.push(repeat(numInput(props.marginRight), arrays.marginRight, index))
     if (props.marginBottom !== undefined) disposals.push(repeat(numInput(props.marginBottom), arrays.marginBottom, index))
-    if (props.marginLeft !== undefined)   disposals.push(repeat(numInput(props.marginLeft), arrays.marginLeft, index))
+    if (props.marginLeft !== undefined) disposals.push(repeat(numInput(props.marginLeft), arrays.marginLeft, index))
   }
 
   // Gap
@@ -275,8 +300,11 @@ export function box(props: BoxProps = {}): Cleanup {
   let unsubKeyboard: (() => void) | undefined
   let unsubFocusCallbacks: (() => void) | undefined
 
+  // Key handlers: register for ALL components (not just focusable) to support
+  // event bubbling — root boxes can handle global shortcuts like +/-/q
+  if (props.onKey) unsubKeyboard = onFocused(index, props.onKey)
+
   if (shouldBeFocusable) {
-    if (props.onKey) unsubKeyboard = onFocused(index, props.onKey)
     if (props.onFocus || props.onBlur) {
       unsubFocusCallbacks = registerFocusCallbacks(index, {
         onFocus: props.onFocus,
@@ -310,25 +338,34 @@ export function box(props: BoxProps = {}): Cleanup {
   // --------------------------------------------------------------------------
   if (props.variant && props.variant !== 'default') {
     const variant = props.variant
-    // Variant-based colors with user overrides
-    disposals.push(repeat(
-      props.fg !== undefined ? colorInput(props.fg) : () => toPackedColor(getVariantStyle(variant).fg),
-      arrays.fgColor, index
-    ))
-    disposals.push(repeat(
-      props.bg !== undefined ? colorInput(props.bg) : () => toPackedColor(getVariantStyle(variant).bg),
-      arrays.bgColor, index
-    ))
-    disposals.push(repeat(
-      props.borderColor !== undefined ? colorInput(props.borderColor) : () => toPackedColor(getVariantStyle(variant).border),
-      arrays.borderColor, index
-    ))
+    if (props.fg !== undefined) {
+      disposals.push(repeat(colorInput(props.fg), arrays.fgColor, index))
+    } else {
+      disposals.push(repeat(() => toPackedColor(getVariantStyle(variant).fg), arrays.fgColor, index))
+    }
+    if (props.bg !== undefined) {
+      disposals.push(repeat(colorInput(props.bg), arrays.bgColor, index))
+    } else {
+      disposals.push(repeat(() => toPackedColor(getVariantStyle(variant).bg), arrays.bgColor, index))
+    }
+    if (props.borderColor !== undefined) {
+      disposals.push(repeat(colorInput(props.borderColor), arrays.borderColor, index))
+    } else {
+      disposals.push(repeat(() => toPackedColor(getVariantStyle(variant).border), arrays.borderColor, index))
+    }
   } else {
-    if (props.fg !== undefined)          disposals.push(repeat(colorInput(props.fg), arrays.fgColor, index))
-    if (props.bg !== undefined)          disposals.push(repeat(colorInput(props.bg), arrays.bgColor, index))
+    if (props.fg !== undefined) disposals.push(repeat(colorInput(props.fg), arrays.fgColor, index))
+    if (props.bg !== undefined) disposals.push(repeat(colorInput(props.bg), arrays.bgColor, index))
     if (props.borderColor !== undefined) disposals.push(repeat(colorInput(props.borderColor), arrays.borderColor, index))
   }
   if (props.opacity !== undefined) disposals.push(repeat(numInput(props.opacity), arrays.opacity, index))
+
+  // Border style for rendering
+  if (props.border !== undefined) disposals.push(repeat(numInput(props.border), arrays.borderStyle, index))
+  if (props.borderTop !== undefined) disposals.push(repeat(numInput(props.borderTop), arrays.borderStyleTop, index))
+  if (props.borderRight !== undefined) disposals.push(repeat(numInput(props.borderRight), arrays.borderStyleRight, index))
+  if (props.borderBottom !== undefined) disposals.push(repeat(numInput(props.borderBottom), arrays.borderStyleBottom, index))
+  if (props.borderLeft !== undefined) disposals.push(repeat(numInput(props.borderLeft), arrays.borderStyleLeft, index))
 
   // --------------------------------------------------------------------------
   // CHILDREN

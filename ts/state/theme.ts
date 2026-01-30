@@ -117,15 +117,15 @@ export const theme = state({
   /** Overlay (modals) - terminal default */
   overlay: null as ThemeColor,
 
-  // =========================================================================
-  // BORDER COLORS
-  // =========================================================================
+  // // =========================================================================
+  // // BORDER COLORS
+  // // =========================================================================
 
-  /** Default border - ANSI white (7) */
-  border: 7 as ThemeColor,
+  // /** Default border - ANSI white (7) */
+  // border: 7 as ThemeColor,
 
-  /** Focused border - primary color */
-  borderFocus: 12 as ThemeColor,
+  // /** Focused border - primary color */
+  // borderFocus: 12 as ThemeColor,
 
   // =========================================================================
   // METADATA
@@ -164,8 +164,8 @@ export const themes = {
     backgroundMuted: null,
     surface: null,
     overlay: null,
-    border: 7,
-    borderFocus: 12,
+    // border: 7,
+    // borderFocus: 12,
   },
 
   /**
@@ -192,8 +192,8 @@ export const themes = {
     backgroundMuted: 0x343746,
     surface: 0x44475a,
     overlay: 0x21222c,
-    border: 0x6272a4,
-    borderFocus: 0xbd93f9,
+    // border: 0x6272a4,
+    // borderFocus: 0xbd93f9,
   },
 
   /**
@@ -219,8 +219,8 @@ export const themes = {
     backgroundMuted: 0x3b4252,
     surface: 0x434c5e,
     overlay: 0x2e3440,
-    border: 0x4c566a,
-    borderFocus: 0x88c0d0,
+    // border: 0x4c566a,
+    // borderFocus: 0x88c0d0,
   },
 
   /**
@@ -246,8 +246,8 @@ export const themes = {
     backgroundMuted: 0x3e3d32,
     surface: 0x49483e,
     overlay: 0x1e1f1c,
-    border: 0x75715e,
-    borderFocus: 0xf92672,
+    // border: 0x75715e,
+    // borderFocus: 0xf92672,
   },
 
   /**
@@ -273,8 +273,8 @@ export const themes = {
     backgroundMuted: 0x073642, // base02
     surface: 0x073642,
     overlay: 0x002b36,
-    border: 0x586e75,
-    borderFocus: 0x268bd2,
+    // border: 0x586e75,
+    // borderFocus: 0x268bd2,
   },
 
   /**
@@ -300,8 +300,8 @@ export const themes = {
     backgroundMuted: 0x313244, // surface0
     surface: 0x45475a, // surface1
     overlay: 0x181825, // mantle
-    border: 0x6c7086, // overlay0
-    borderFocus: 0x89b4fa, // blue
+    // border: 0x6c7086, // overlay0
+    // borderFocus: 0x89b4fa, // blue
   },
 
   /**
@@ -327,8 +327,8 @@ export const themes = {
     backgroundMuted: 0x3c3836, // bg1
     surface: 0x504945, // bg2
     overlay: 0x1d2021, // bg0_h
-    border: 0x665c54, // bg3
-    borderFocus: 0xfe8019, // orange
+    // border: 0x665c54, // bg3
+    // borderFocus: 0xfe8019, // orange
   },
 
   /**
@@ -354,8 +354,8 @@ export const themes = {
     backgroundMuted: 0x24283b, // bg_highlight
     surface: 0x414868, // dark3
     overlay: 0x16161e, // bg_dark
-    border: 0x414868, // dark3
-    borderFocus: 0x7aa2f7, // blue
+    // border: 0x414868, // dark3
+    // borderFocus: 0x7aa2f7, // blue
   },
 
   /**
@@ -381,8 +381,8 @@ export const themes = {
     backgroundMuted: 0x21252b, // bg_dark
     surface: 0x3e4451, // guide
     overlay: 0x1e2127, // bg_darker
-    border: 0x3e4451, // guide
-    borderFocus: 0x61afef, // blue
+    // border: 0x3e4451, // guide
+    // borderFocus: 0x61afef, // blue
   },
 
   /**
@@ -408,8 +408,8 @@ export const themes = {
     backgroundMuted: 0x1f1d2e, // surface
     surface: 0x26233a, // overlay
     overlay: 0x16141f, // nc
-    border: 0x524f67, // highlight_med
-    borderFocus: 0xebbcba, // rose
+    // border: 0x524f67, // highlight_med
+    // borderFocus: 0xebbcba, // rose
   },
 
   /**
@@ -435,8 +435,8 @@ export const themes = {
     backgroundMuted: 0x2a2a37, // sumiInk2
     surface: 0x363646, // sumiInk3
     overlay: 0x16161d, // sumiInk0
-    border: 0x54546d, // sumiInk4
-    borderFocus: 0x7e9cd8, // crystalBlue
+    // border: 0x54546d, // sumiInk4
+    // borderFocus: 0x7e9cd8, // crystalBlue
   },
 
   /**
@@ -462,8 +462,8 @@ export const themes = {
     backgroundMuted: 0x343f44, // bg1
     surface: 0x3d484d, // bg3
     overlay: 0x272e33, // bg0
-    border: 0x5c6a72, // bg5
-    borderFocus: 0xa7c080, // green
+    // border: 0x5c6a72, // bg5
+    // borderFocus: 0xa7c080, // green
   },
 
   /**
@@ -489,8 +489,8 @@ export const themes = {
     backgroundMuted: 0x0b2942, // bg_light
     surface: 0x1d3b53, // selection
     overlay: 0x010e1a, // bg_dark
-    border: 0x5f7e97, // lineHighlight
-    borderFocus: 0x82aaff, // blue
+    // border: 0x5f7e97, // lineHighlight
+    // borderFocus: 0x82aaff, // blue
   },
 }
 
@@ -586,8 +586,8 @@ export const resolvedTheme = derived(() => ({
   backgroundMuted: resolveColor(theme.backgroundMuted),
   surface: resolveColor(theme.surface),
   overlay: resolveColor(theme.overlay),
-  border: resolveColor(theme.border),
-  borderFocus: resolveColor(theme.borderFocus),
+  // border: resolveColor(theme.border),
+  // borderFocus: resolveColor(theme.borderFocus),
 }))
 
 // =============================================================================
@@ -638,8 +638,8 @@ export const t = {
   overlay: derived(() => resolveColor(theme.overlay)),
 
   // Borders
-  border: derived(() => resolveColor(theme.border)),
-  borderFocus: derived(() => resolveColor(theme.borderFocus)),
+  // border: derived(() => resolveColor(theme.border)),
+  // borderFocus: derived(() => resolveColor(theme.borderFocus)),
 }
 
 // =============================================================================
@@ -705,21 +705,21 @@ export function getVariantStyle(variant: Variant): VariantStyle {
         fg: getContrastFg(resolved.textBright, resolved.primary),
         bg: resolved.primary,
         border: resolved.primary,
-        borderFocus: resolved.accent,
+        borderFocus: resolved.primary,
       }
     case 'secondary':
       return {
         fg: getContrastFg(resolved.textBright, resolved.secondary),
         bg: resolved.secondary,
         border: resolved.secondary,
-        borderFocus: resolved.accent,
+        borderFocus: resolved.primary,
       }
     case 'tertiary':
       return {
         fg: getContrastFg(resolved.textBright, resolved.tertiary),
         bg: resolved.tertiary,
         border: resolved.tertiary,
-        borderFocus: resolved.accent,
+        borderFocus: resolved.primary,
       }
     case 'accent':
       return {
@@ -733,14 +733,14 @@ export function getVariantStyle(variant: Variant): VariantStyle {
         fg: getContrastFg(resolved.textBright, resolved.success),
         bg: resolved.success,
         border: resolved.success,
-        borderFocus: resolved.accent,
+        borderFocus: resolved.primary,
       }
     case 'warning':
       return {
         fg: getContrastFg({ r: 0, g: 0, b: 0, a: 255 }, resolved.warning),
         bg: resolved.warning,
         border: resolved.warning,
-        borderFocus: resolved.accent,
+        borderFocus: resolved.primary,
       }
     case 'error':
       return {
@@ -754,50 +754,50 @@ export function getVariantStyle(variant: Variant): VariantStyle {
         fg: getContrastFg(resolved.textBright, resolved.info),
         bg: resolved.info,
         border: resolved.info,
-        borderFocus: resolved.accent,
+        borderFocus: resolved.primary,
       }
     case 'muted':
       return {
         fg: resolved.textMuted,
         bg: resolved.surface,
-        border: resolved.border,
-        borderFocus: resolved.borderFocus,
+        border: resolved.textMuted,
+        borderFocus: resolved.textMuted,
       }
     case 'surface':
       return {
         fg: resolved.text,
         bg: resolved.surface,
-        border: resolved.border,
-        borderFocus: resolved.borderFocus,
+        border: resolved.primary,
+        borderFocus: resolved.primary,
       }
     case 'elevated':
       return {
         fg: getContrastFg(resolved.textBright, resolved.surface),
         bg: resolved.surface,
         border: resolved.primary,
-        borderFocus: resolved.borderFocus,
+        borderFocus: resolved.primary,
       }
     case 'ghost':
       return {
         fg: resolved.text,
         bg: TERMINAL_DEFAULT,
         border: TERMINAL_DEFAULT,
-        borderFocus: resolved.borderFocus,
+        borderFocus: resolved.primary,
       }
     case 'outline':
       return {
         fg: resolved.primary,
         bg: TERMINAL_DEFAULT,
         border: resolved.primary,
-        borderFocus: resolved.borderFocus,
+        borderFocus: resolved.primary,
       }
     case 'default':
     default:
       return {
         fg: resolved.text,
         bg: resolved.background,
-        border: resolved.border,
-        borderFocus: resolved.borderFocus,
+        border: resolved.primary,
+        borderFocus: resolved.primary,
       }
   }
 }

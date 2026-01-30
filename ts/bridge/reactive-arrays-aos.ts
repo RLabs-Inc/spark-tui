@@ -24,6 +24,8 @@ import {
   // Visual
   C_FG_COLOR, C_BG_COLOR, C_BORDER_COLOR, C_FOCUS_RING_COLOR,
   C_CURSOR_FG, C_CURSOR_BG, C_SELECTION_COLOR, U_OPACITY, I_Z_INDEX,
+  U_BORDER_STYLE, U_BORDER_STYLE_TOP, U_BORDER_STYLE_RIGHT,
+  U_BORDER_STYLE_BOTTOM, U_BORDER_STYLE_LEFT,
   // Interaction
   I_SCROLL_X, I_SCROLL_Y, I_TAB_INDEX, I_CURSOR_POSITION,
   I_SELECTION_START, I_SELECTION_END, U_INTERACTION_FLAGS,
@@ -125,6 +127,11 @@ export interface ReactiveArraysAoS {
   borderRightWidth: SharedSlotBuffer
   borderBottomWidth: SharedSlotBuffer
   borderLeftWidth: SharedSlotBuffer
+  borderStyle: SharedSlotBuffer
+  borderStyleTop: SharedSlotBuffer
+  borderStyleRight: SharedSlotBuffer
+  borderStyleBottom: SharedSlotBuffer
+  borderStyleLeft: SharedSlotBuffer
   opacity: SharedSlotBuffer
   zIndex: SharedSlotBuffer
   textAlign: SharedSlotBuffer
@@ -231,6 +238,11 @@ export function createReactiveArraysAoS(
     borderRightWidth: u8(U_BORDER_RIGHT),
     borderBottomWidth: u8(U_BORDER_BOTTOM),
     borderLeftWidth: u8(U_BORDER_LEFT),
+    borderStyle: u8(U_BORDER_STYLE),
+    borderStyleTop: u8(U_BORDER_STYLE_TOP),
+    borderStyleRight: u8(U_BORDER_STYLE_RIGHT),
+    borderStyleBottom: u8(U_BORDER_STYLE_BOTTOM),
+    borderStyleLeft: u8(U_BORDER_STYLE_LEFT),
     opacity: u8(U_OPACITY),
     zIndex: i8(I_Z_INDEX),
     textAlign: u8(U_TEXT_ALIGN),

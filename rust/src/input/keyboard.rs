@@ -35,10 +35,9 @@ pub fn dispatch_key(
 
     // 2. Non-press events → send to TS for handling
     if key.state != KeyState::Press {
-        if let Some(focused) = focus.focused() {
-            let keycode = key_code_to_u32(&key.code);
-            buf.push_event(&Event::key(focused as u16, keycode, key.modifiers.bits()));
-        }
+        let target = focus.focused().unwrap_or(0);
+        let keycode = key_code_to_u32(&key.code);
+        buf.push_event(&Event::key(target as u16, keycode, key.modifiers.bits()));
         return false;
     }
 
@@ -63,10 +62,10 @@ pub fn dispatch_key(
     }
 
     // 5. Write key event to ring buffer (TS dispatches onKey)
-    if let Some(focused) = focus.focused() {
-        let keycode = key_code_to_u32(&key.code);
-        buf.push_event(&Event::key(focused as u16, keycode, key.modifiers.bits()));
-    }
+    // Default to root (0) if nothing is focused
+    let target = focus.focused().unwrap_or(0);
+    let keycode = key_code_to_u32(&key.code);
+    buf.push_event(&Event::key(target as u16, keycode, key.modifiers.bits()));
 
     // 6. Framework defaults (arrow scroll, page scroll, home/end)
     if let Some(focused) = focus.focused() {
