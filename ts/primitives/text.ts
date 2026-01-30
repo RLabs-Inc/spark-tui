@@ -1,9 +1,10 @@
 /**
- * TUI Framework - Text Primitive
+ * TUI Framework - Text Primitive (AoS)
  *
  * Display text with styling, alignment, and wrapping.
+ * Uses AoS SharedBuffer for cache-friendly Rust reads.
  *
- * REACTIVITY: All props flow through repeat() → SharedSlotBuffer → SharedArrayBuffer.
+ * REACTIVITY: All props flow through repeat() → AoSSlotBuffer → SharedArrayBuffer.
  * Text content uses a SINGLE repeater — the readFn encodes UTF-8 bytes into the
  * text pool and returns the offset. No effects. No TS-side measurement.
  * Rust handles text measurement via Taffy content_size.
@@ -29,24 +30,34 @@ import { cleanupIndex as cleanupKeyboardListeners } from '../state/keyboard'
 import { onComponent as onMouseComponent } from '../state/mouse'
 import { getVariantStyle } from '../state/theme'
 import { getActiveScope } from './scope'
-import { getArrays, getViews } from '../bridge'
+import { getAoSArrays, getAoSBuffer } from '../bridge'
 import {
   packColor,
   setNodeText,
-  U32_TEXT_LENGTH,
-  HEADER_TEXT_POOL_WRITE_PTR,
-  HEADER_TEXT_POOL_CAPACITY,
-} from '../bridge/shared-buffer'
+  H_TEXT_POOL_WRITE_PTR,
+  TEXT_POOL_SIZE,
+  HEADER_SIZE,
+  MAX_NODES,
+  STRIDE,
+  U_TEXT_OFFSET,
+  U_TEXT_LENGTH,
+  U_DIRTY_FLAGS,
+  DIRTY_TEXT,
+  type AoSBuffer,
+} from '../bridge/shared-buffer-aos'
 import type { TextProps, Cleanup } from './types'
 
 // =============================================================================
 // CONVERSION HELPERS — same pattern as box.ts
 // =============================================================================
 
+/** Dimension → Taffy float: NaN = auto, negative = percentage, positive = pixels
+ *  Rust convention: -100.0 = 100%, -50.0 = 50%, 40.0 = 40px
+ */
 function toDim(dim: number | string | undefined | null): number {
   if (dim === undefined || dim === null || dim === 0) return NaN
   if (typeof dim === 'string') {
-    if (dim.endsWith('%')) return parseFloat(dim) / 100
+    if (dim.endsWith('%')) return -parseFloat(dim) // '100%' → -100.0
     return parseFloat(dim) || NaN
   }
   return dim
@@ -119,53 +130,40 @@ function wrapToNum(wrap: string | undefined): number {
 const textEncoder = new TextEncoder()
 
 /**
- * Write text bytes to the pool. Returns the byte offset.
- * Sets textLength via raw u32 write (Rust reads it alongside offset).
- * Does NOT go through SharedSlotBuffer for length — the offset write
- * through repeat() triggers the reactive notification.
+ * Write text bytes to the AoS text pool. Returns the byte offset.
+ * Sets textLength via direct write. Returns offset for repeater.
  */
-function writeTextToPool(
-  views: ReturnType<typeof getViews>,
+function writeTextToPoolAoS(
+  buf: AoSBuffer,
   index: number,
   text: string
 ): number {
   const encoded = textEncoder.encode(text)
-  let writePtr = views.header[HEADER_TEXT_POOL_WRITE_PTR]
-  const capacity = views.header[HEADER_TEXT_POOL_CAPACITY]
+  let writePtr = buf.header[H_TEXT_POOL_WRITE_PTR / 4]
 
-  // Check capacity, compact if needed
-  if (writePtr + encoded.length > capacity) {
-    // Inline compaction — repack live text to front
-    const nodeCount = views.header[1] // HEADER_NODE_COUNT
-    let newPtr = 0
-    for (let i = 0; i < nodeCount; i++) {
-      const off = views.u32[10][i] // U32_TEXT_OFFSET
-      const len = views.u32[11][i] // U32_TEXT_LENGTH
-      if (len === 0) continue
-      if (off !== newPtr) views.textPool.copyWithin(newPtr, off, off + len)
-      views.u32[10][i] = newPtr
-      newPtr += len
-    }
-    views.header[HEADER_TEXT_POOL_WRITE_PTR] = newPtr
-    writePtr = newPtr
-
-    // If still not enough, truncate
-    if (writePtr + encoded.length > capacity) {
-      const available = capacity - writePtr
-      if (available <= 0) {
-        views.u32[U32_TEXT_LENGTH][index] = 0
-        return writePtr
-      }
-      views.textPool.set(encoded.subarray(0, available), writePtr)
-      views.u32[U32_TEXT_LENGTH][index] = available
-      views.header[HEADER_TEXT_POOL_WRITE_PTR] = writePtr + available
-      return writePtr
-    }
+  // Check capacity
+  if (writePtr + encoded.length > TEXT_POOL_SIZE) {
+    // Simple reset for now - could implement compaction later
+    console.warn('Text pool overflow, resetting')
+    writePtr = 0
+    buf.header[H_TEXT_POOL_WRITE_PTR / 4] = 0
   }
 
-  views.textPool.set(encoded, writePtr)
-  views.u32[U32_TEXT_LENGTH][index] = encoded.length
-  views.header[HEADER_TEXT_POOL_WRITE_PTR] = writePtr + encoded.length
+  // Write to pool
+  buf.textPool.set(encoded, writePtr)
+
+  // Set offset and length in AoS node
+  const base = HEADER_SIZE + index * STRIDE
+  buf.view.setUint32(base + U_TEXT_OFFSET, writePtr, true)
+  buf.view.setUint32(base + U_TEXT_LENGTH, encoded.length, true)
+
+  // Mark dirty so layout recalculates text measurement
+  const current = buf.view.getUint8(base + U_DIRTY_FLAGS)
+  buf.view.setUint8(base + U_DIRTY_FLAGS, current | DIRTY_TEXT)
+
+  // Advance write pointer
+  buf.header[H_TEXT_POOL_WRITE_PTR / 4] = writePtr + encoded.length
+
   return writePtr
 }
 
@@ -174,8 +172,8 @@ function writeTextToPool(
 // =============================================================================
 
 export function text(props: TextProps): Cleanup {
-  const arrays = getArrays()
-  const views = getViews()
+  const arrays = getAoSArrays()
+  const buffer = getAoSBuffer()
   const index = allocateIndex(props.id)
   const disposals: (() => void)[] = []
 
@@ -187,25 +185,21 @@ export function text(props: TextProps): Cleanup {
   arrays.componentType.set(index, ComponentType.TEXT)
   disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
 
-  if (props.visible !== undefined) {
-    disposals.push(repeat(numInput(props.visible, 1), arrays.visible, index))
-  }
+  // Visibility (default: visible)
+  disposals.push(repeat(numInput(props.visible ?? 1, 1), arrays.visible, index))
 
   // --------------------------------------------------------------------------
   // TEXT CONTENT — single repeater, no effects
   // --------------------------------------------------------------------------
-  // The readFn encodes UTF-8 → writes bytes to pool → sets length raw → returns offset.
-  // repeat() writes offset to textOffset SharedSlotBuffer → reactive notification → Rust wakes.
-  // Rust reads offset + length together. Text measurement handled by Rust (Taffy content_size).
   if (isReactive(props.content)) {
     disposals.push(repeat(
-      () => writeTextToPool(views, index, String(unwrap(props.content))),
+      () => writeTextToPoolAoS(buffer, index, String(unwrap(props.content))),
       arrays.textOffset,
       index
     ))
   } else {
     // Static text — write once, no repeater needed
-    setNodeText(views, index, String(props.content))
+    setNodeText(buffer, index, String(props.content))
   }
 
   // --------------------------------------------------------------------------
@@ -237,7 +231,6 @@ export function text(props: TextProps): Cleanup {
   }
 
   // Text styling
-  if (props.attrs !== undefined) disposals.push(repeat(numInput(props.attrs), arrays.textAttrs, index))
   if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, alignToNum), arrays.textAlign, index))
   if (props.wrap !== undefined)  disposals.push(repeat(enumInput(props.wrap, wrapToNum), arrays.textWrap, index))
 

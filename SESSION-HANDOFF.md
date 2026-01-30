@@ -1,9 +1,83 @@
-# SparkTUI Session Handoff — January 28, 2026 (Session 132)
+# SparkTUI Session Handoff — January 28, 2026 (Session 138)
+
+## 🚨 CRITICAL: Events Not Wired
+
+**The counter.ts renders but onClick/onKey handlers never fire.**
+
+Why Tab navigation works but buttons don't respond:
+- Tab → handled entirely in Rust → writes `focused_index` to SharedBuffer → TS sees it ✅
+- onClick/onKey → Rust generates Event → pushes to **in-memory Vec** → TS never sees it ❌
+
+**The fix is simple but touches many files:**
+
+1. Rust has `buf.push_event(&event)` method (shared_buffer_aos.rs:450) - **EXISTS, NOT USED**
+2. TS has `readEvents(buf)` function (ts/engine/events.ts:245) - **EXISTS, ALREADY CALLED**
+3. Missing link: Rust input handlers push to in-memory `EventRingBuffer`, not SharedBuffer
+
+**Files to change (replace `events.push(event)` → `buf.push_event(&event)`):**
+- `rust/src/input/keyboard.rs` - 3 places
+- `rust/src/input/mouse.rs` - 8 places
+- `rust/src/input/focus.rs` - 3 places
+- `rust/src/input/text_edit.rs` - 5 places
+
+Will need to thread `&AoSBuffer` through the function signatures.
+
+---
+
+## Session 138: SoA Cleanup + Event Discovery
+
+### What We Did
+
+1. **Codebase audit** with 6 parallel agents - found SoA/AoS mismatch, dead code, type errors
+2. **Deleted SoA code** - removed legacy files that were superseded by AoS
+3. **Fixed type errors** - AoSSlotBuffer now implements SharedSlotBuffer interface
+4. **Library now clean** - 0 type errors in ts/primitives, ts/engine, ts/bridge, ts/state
+5. **Discovered event gap** - events stuck in Rust memory, never reach TS handlers
+
+### Files Deleted (SoA cleanup)
+```
+rust/src/arrays/          (entire directory - old SoA)
+rust/src/layout/titan.rs  (legacy layout engine)
+rust/src/layout/taffy_bridge.rs (legacy)
+ts/bridge/shared-buffer.ts (old SoA)
+ts/bridge/reactive-arrays.ts (old SoA)
+ts/bridge/buffer.ts (old SoA)
+ts/engine/arrays/ (entire directory - old SoA)
+examples/proof.ts, reactive-proof.ts, hello-world.ts (old SoA examples)
+examples/bench.ts, bench-complete.ts, bench-headless.ts, bench-stress.ts
+```
+
+### Files Fixed
+- `ts/bridge/index.ts` - removed SoA imports, AoS only now
+- `ts/bridge/notify.ts` - removed SoA notifier
+- `ts/bridge/aos-slot-buffer.ts` - implements full SharedSlotBuffer interface
+- `ts/bridge/reactive-arrays-aos.ts` - uses SharedSlotBuffer type
+- `ts/engine/inheritance.ts` - migrated from SoA arrays to AoS
+- `ts/primitives/types.ts` - fixed KeyHandler, ScrollEvent types
+
+### Remaining Technical Debt
+
+| Issue | File | Severity |
+|-------|------|----------|
+| Text pool overflow silently corrupts | text.ts:144, input.ts:155 | CRITICAL |
+| focusNext/Prev/First/Last are stubs | focus.ts:237-273 | HIGH |
+| maxLength not enforced | text_edit.rs:86 | MEDIUM |
+
+### Next Session: Wire Events
+
+Priority order:
+1. **Wire Rust events to SharedBuffer** (the blocker)
+2. Test counter.ts onClick/onKey work
+3. Fix text pool overflow (throw error instead of silent corruption)
+4. Implement focusNext/Prev/First/Last properly
+
+---
 
 ## READ FIRST
 
 1. Read `CLAUDE.md` (architecture bible, source of truth)
-2. Read THIS file (session state + what to do next)
+2. Read `MIGRATION-AOS-PIPELINE.md` (detailed migration plan with checkboxes) **← START HERE**
+3. Read `DESIGN-EVENT-BRIDGE.md` (event bridge design)
 
 ## What SparkTUI Is
 
@@ -13,191 +87,219 @@ A **hybrid TUI framework** where TypeScript handles the developer-facing API (pr
 
 ---
 
-## What Just Happened (Session 132)
+## 🎯 SESSION 135: Event Bridge Design Complete
 
-### Full Recon: 5-Agent Comparison of TS vs Rust
+### What We Did
 
-Deployed 5 parallel reconnaissance agents comparing the TS reference TUI (`../tui`) against the Rust SparkTUI. Covered every system: layout, rendering, input, primitives, bridge, pipeline.
+Comprehensive design session for the **Rust → TS event bridge**. Created `DESIGN-EVENT-BRIDGE.md` covering:
 
-**Key finding: The Rust engine is 90%+ complete.** All major systems are production-grade.
+1. **Feature inventory** — Every feature from original TS implementation cataloged
+2. **SharedBuffer layout** — AoS memory map with event ring buffer (~26.7MB total)
+3. **Event ring buffer** — 256 slots × 20 bytes, Rust writes, TS reads
+4. **Config flags** — All framework behaviors configurable (Ctrl+C, Tab nav, scroll, etc.)
+5. **Public API** — No indices exposed! Users work with refs and IDs
+6. **Event flow** — Full trace from user input to handler callback (<50μs latency)
 
-### Bugs Fixed (Wave 1)
+### Key Design Decisions
 
-**1. FlexDirection Enum SWAPPED (FIXED)**
-- TS convention: row=0, column=1, row-reverse=2, column-reverse=3
-- Rust HAD: Column=0, Row=1, ColumnReverse=2, RowReverse=3
-- Files fixed: `rust/src/types.rs`, `rust/src/layout/layout_tree.rs` (enum + `to_flex_direction()` + 3 test cases)
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Index exposure | Hidden | Users use refs/IDs, never see indices |
+| Event notification | Atomics.waitAsync | Instant, non-blocking, no polling |
+| Config location | SharedBuffer header | Rust reads config before processing |
+| Event ring buffer | In SharedBuffer | Zero-copy, same memory |
+| Fixed FPS | **None** | Fully reactive, event-driven |
+| Cursor blink | `pulse()` as prop | Animation value flows through repeat() |
+| Animation naming | `cycle()`, `pulse()` | No React-style `use*` prefix |
+| Rust timing | **None** | No BlinkManager - Rust just reads values |
 
-**2. Color Packing Signed/Unsigned (FIXED)**
-- JS bitwise `<<` returns signed 32-bit, `Uint32Array` stores unsigned
-- `packColor(255,0,0,255)` returned -65536 (signed), but Uint32Array reads 4294901760 (unsigned)
-- Fix: Added `>>> 0` to force unsigned in `ts/bridge/shared-buffer.ts:packColor()`
+### User-Facing API (No Indices!)
 
-**Result: 31/31 proof tests pass. 174/174 Rust tests pass.**
+```typescript
+// Components register handlers via props
+box({
+  id: 'my-box',
+  onClick: (e) => console.log('clicked'),
+  onFocus: () => console.log('focused'),
+})
+
+// Programmatic control via refs or IDs
+const inputRef = createRef<InputHandle>()
+input({ ref: inputRef, value: text })
+inputRef.current?.focus()
+
+// Or by ID
+focus('my-box')
+```
 
 ---
 
-## Current State: What's COMPLETE
+## 🎉 AoS MIGRATION STATUS (Session 137)
 
-### Rust Engine (ALL COMPLETE)
-- **Layout**: Taffy low-level trait API, 174 tests, zero-copy (`rust/src/layout/layout_tree.rs`)
-- **SharedBuffer**: SoA layout, all 84 fields, identical on both sides (`rust/src/shared_buffer.rs`)
-- **Input Parser**: CSI, SS3, SGR mouse, Kitty keyboard, UTF-8 (`rust/src/input/parser.rs`)
-- **Focus Manager**: Tab/Shift+Tab cycling, traps, history, focus-by-click (`rust/src/input/focus.rs`)
-- **Scroll Manager**: Absolute, relative, chaining, scroll-into-view (`rust/src/input/scroll.rs`)
-- **Mouse HitGrid**: O(1) lookup, hover tracking, click detection (`rust/src/input/mouse.rs`)
-- **Text Editing**: Insert, delete, cursor, home/end for inputs (`rust/src/input/text_edit.rs`)
-- **Cursor Blink**: Shared clocks per FPS, signal source pattern (`rust/src/input/cursor.rs`)
-- **Terminal Setup**: Raw mode, alt screen, mouse, Kitty, paste, sync output (`rust/src/pipeline/terminal.rs`)
-- **Framebuffer**: 2D cell grid, render tree, inheritance, z-index, opacity (`rust/src/framebuffer/`)
-- **Diff Renderer**: Cell diff, synchronized ANSI output (`rust/src/renderer/diff.rs`)
-- **Reactive Pipeline**: generation signal → layout_derived → fb_derived → render_effect (`rust/src/pipeline/setup.rs`)
-- **Event Ring Buffer**: 256 events, 14 types, FIFO — IN-MEMORY ONLY (`rust/src/input/events.rs`)
-- **Keyboard Dispatch**: Ctrl+C exit, Tab focus, arrow scroll, page scroll (`rust/src/input/keyboard.rs`)
-- **stdin Reader**: Dedicated thread, blocking reads (`rust/src/input/reader.rs`)
+### THE PROBLEM
+TS writes to AoS buffer (256-byte stride). Rust pipeline reads from SoA buffer (scattered arrays).
+**THEY'RE NOT THE SAME MEMORY!**
 
-### TypeScript (ALL COMPLETE)
-- **Primitives**: box, text, input — all use `repeat()` to wire props to SharedBuffer
-- **Control flow**: each(), show(), when() — pure TS component lifecycle
-- **Theme**: 13 presets, WCAG AA contrast, variant styles (`ts/state/theme.ts`)
-- **Animation**: useAnimation with shared clocks (`ts/primitives/animation.ts`)
-- **Registry**: Node alloc/dealloc, parent context (`ts/engine/registry.ts`)
-- **Lifecycle**: onMount, onDestroy hooks (`ts/engine/lifecycle.ts`)
-- **Scope**: Auto-cleanup collection (`ts/primitives/scope.ts`)
-- **Bridge**: SoA SharedBuffer, 84 reactive arrays, wake notifier (`ts/bridge/`)
+### TypeScript (AoS) - COMPLETE ✅
+| Component | Status |
+|-----------|--------|
+| `shared-buffer-aos.ts` | ✅ Complete |
+| `reactive-arrays-aos.ts` | ✅ Complete |
+| `aos-slot-buffer.ts` | ✅ Complete |
+| `box.ts` | ✅ Migrated |
+| `text.ts` | ✅ Migrated |
+| `input.ts` | ✅ Migrated |
 
----
+### Rust AoS Buffer - COMPLETE ✅
+| Component | Status |
+|-----------|--------|
+| `shared_buffer_aos.rs` | ✅ 1600 lines, 195 tests |
+| `layout_tree_aos.rs` | ✅ Taffy traits |
 
-## WHAT'S NEXT: Wave 2 — Event Bridge (THE critical path)
+### Rust Pipeline - NEEDS MIGRATION ❌
+| Component | Status |
+|-----------|--------|
+| `framebuffer/render_tree.rs` | ❌ Uses SoA SharedBuffer |
+| `framebuffer/inheritance.rs` | ❌ Uses SoA SharedBuffer |
+| `pipeline/setup.rs` | ❌ Uses SoA SharedBuffer |
+| `pipeline/wake.rs` | ❌ Uses SoA SharedBuffer |
+| `input/*.rs` (6 files) | ❌ Uses SoA SharedBuffer |
 
-This is the #1 gap. Everything in Rust WORKS — keyboard, mouse, focus, scroll, text editing — but TS cannot receive events from Rust. Once this bridge exists, all callbacks light up.
+**See `MIGRATION-AOS-PIPELINE.md` for detailed migration plan with checkboxes.**
 
-### The Problem
+### Performance (AoS validated)
 
-Rust writes events to an **in-memory** ring buffer (`rust/src/input/events.rs:127-184`). TS has no way to read them. The ring buffer is `Vec<Event>` inside the Rust process — not in SharedArrayBuffer.
-
-### The Solution: Event Ring Buffer in SharedBuffer
-
-Add a new section to SharedArrayBuffer for events. Rust writes, TS reads. Lock-free SPSC (single producer, single consumer).
-
-**Event structure** (already defined in `events.rs:31-46`):
-```
-EventType: u8 (14 types: Key=1, MouseDown=2, MouseUp=3, Click=4, etc.)
-ComponentIndex: u16
-Data: [u8; 16] (packed payload — keycode+modifiers, mouse x/y+button, scroll dx/dy, etc.)
-Total: 19 bytes → pad to 20 bytes
-```
-
-**Ring buffer** (already defined in `events.rs:127-184`):
-```
-MAX_EVENTS = 256
-Header: 12 bytes (write_idx: u32, read_idx: u32, count: u32)
-Events: 256 × 20 = 5,120 bytes
-Total: 5,132 bytes
-```
-
-**Steps:**
-1. Add event ring buffer section to SharedBuffer memory layout (both TS + Rust)
-2. Rust: write events to SharedBuffer instead of in-memory Vec
-3. TS: read events from SharedBuffer, dispatch to component handlers
-4. Create `ts/state/keyboard.ts`, `ts/state/mouse.ts`, `ts/state/focus.ts` — these modules bridge events to callbacks
-
-### Missing TS State Modules
-
-Primitives already import from these paths but they DON'T EXIST:
-- `ts/state/keyboard.ts` — key event dispatch to focused component
-- `ts/state/mouse.ts` — mouse event dispatch to hit component
-- `ts/state/focus.ts` — focus state tracking, blur/focus callbacks
-
-### After Wave 2: Wave 3 (App Lifecycle)
-
-- `mount()` / `createApp()` API that orchestrates startup
-- Terminal size → reactive graph → resize handling
-- Graceful shutdown (cleanup effects, restore terminal)
-
-### After Wave 3: Wave 4 (Integration Testing)
-
-- E2E test: TS writes → Rust layout → Rust render → verify output
-- Event round-trip: TS click → Rust dispatch → TS callback fires
+| Nodes | Time | vs Pure Rust |
+|-------|------|--------------|
+| 111 | 0.54μs | 7.4x FASTER |
+| 5501 | 1.5ms | 4.1x FASTER |
+| 20K | 0.3ms | 3,337 FPS |
 
 ---
 
-## Enum Convention Reference (TS is source of truth)
+## Next Steps: AoS Pipeline Migration
 
-**FlexDirection**: 0=row, 1=column, 2=row-reverse, 3=column-reverse
-**FlexWrap**: 0=nowrap, 1=wrap, 2=wrap-reverse
-**JustifyContent**: 0=flex-start, 1=center, 2=flex-end, 3=space-between, 4=space-around, 5=space-evenly
-**AlignItems**: 0=stretch, 1=flex-start, 2=center, 3=flex-end, 4=baseline
-**AlignSelf**: 0=auto, 1=stretch, 2=flex-start, 3=center, 4=flex-end, 5=baseline
-**AlignContent**: 0=stretch, 1=flex-start, 2=center, 3=flex-end, 4=space-between, 5=space-around
-**Overflow**: 0=visible, 1=hidden, 2=scroll, 3=auto
-**Position**: 0=relative, 1=absolute
-**ComponentType**: 0=none, 1=box, 2=text, 3=input, 4=select, 5=progress, 6=canvas
-**BorderStyle**: 0=none, 1=single, 2=double, 3=rounded, 4=bold, 5=dashed, 6=dotted, 7=ascii, 8=block, 9=double-horz, 10=double-vert
-**TextAlign**: 0=left, 1=center, 2=right
-**TextWrap**: 0=nowrap, 1=wrap, 2=truncate
-**Color packing**: ARGB format, `>>> 0` for unsigned. 0x00000000 = inherit. 0x01XX0000 = ANSI index.
+**See `MIGRATION-AOS-PIPELINE.md` for full detailed plan with checkboxes.**
 
-## SoA Field Inventory (Quick Reference)
+### Phase 1: Add Missing Methods to AoSBuffer
+- `clear_all_dirty()`, `increment_render_count()`
+- Per-side border styles, focus indicator config
+- Interaction flag setters
 
-| Section | Fields | Type | Count |
-|---------|--------|------|-------|
-| Float32 | width, height, min/max_w/h, grow, shrink, basis, gap, pad×4, margin×4, inset×4, row/col_gap, computed_x/y/w/h, scrollable, max_scroll_x/y | f32 | 31 |
-| Uint32 | fg/bg/border colors (×7), focus_ring, cursor_fg/bg, text_offset, text_length | u32 | 12 |
-| Int32 | parent_index, scroll_x/y, tab_index, cursor_pos, selection_start/end, cursor_char/alt/blink, hovered, pressed, cursor_visible | i32 | 13 |
-| Uint8 | component_type, visible, flex_dir/wrap, justify/align×3, overflow, position, border_width×4, border_style×5, focus_ring, opacity, z_index, text_attrs/align/wrap/ellipsis, focusable, mouse_enabled | u8 | 28 |
+### Phase 2: Migrate Framebuffer
+- Change `SharedBuffer` → `AoSBuffer` in render_tree.rs, inheritance.rs
 
-## FFI Exports (Rust → TS)
+### Phase 3: Migrate Pipeline
+- Change `SharedBuffer` → `AoSBuffer` in setup.rs, wake.rs
+- Change `compute_layout_direct` → `compute_layout_aos`
 
-| Function | Args | Returns | Purpose |
-|----------|------|---------|---------|
-| spark_init | ptr, len | u32 (0=ok) | Init engine with SharedArrayBuffer |
-| spark_compute_layout | - | u32 (nodes) | Run Taffy flexbox |
-| spark_render | - | u32 (cells) | Layout + framebuffer + diff render |
-| spark_buffer_size | - | u32 (bytes) | Total buffer size needed |
-| spark_wake | - | - | Wake engine after TS writes |
-| spark_cleanup | - | - | Stop engine, cleanup |
+### Phase 4: Migrate Input Modules
+- 6 files: keyboard.rs, mouse.rs, focus.rs, scroll.rs, text_edit.rs, cursor.rs
 
-## Project Structure
+### Phase 5: Update lib.rs and FFI
+- Add spark_wake, spark_cleanup exports
 
-```
-SparkTUI/                     # Git monorepo
-├── ts/
-│   ├── bridge/
-│   │   ├── shared-buffer.ts  # SoA layout contract — THE source of truth
-│   │   ├── reactive-arrays.ts # 84 SharedSlotBuffers backed by SAB
-│   │   ├── notify.ts         # AtomicsNotifier for wake flag
-│   │   ├── buffer.ts         # Singleton + color packing utilities
-│   │   └── ffi.ts            # Bun FFI definitions (6 functions)
-│   ├── primitives/           # box, text, input, each, show, when, animation, scope
-│   ├── state/                # theme.ts, drawnCursor.ts (keyboard/mouse/focus MISSING)
-│   ├── engine/               # registry, lifecycle
-│   │   └── arrays/           # OLD SlotArray-based (delete after migration)
-│   └── arrays/               # OLD standalone copies (delete after migration)
-├── rust/
-│   └── src/
-│       ├── shared_buffer.rs  # SoA layout (MUST match ts/bridge/shared-buffer.ts)
-│       ├── lib.rs            # FFI exports
-│       ├── types.rs          # Rgba, Dimension, FlexDirection, etc.
-│       ├── layout/           # Taffy trait API + text measurement
-│       ├── framebuffer/      # Render tree, inheritance, hit regions
-│       ├── renderer/         # ANSI, diff, inline, append, output buffer
-│       ├── input/            # parser, keyboard, mouse, focus, scroll, cursor, text_edit, events, reader
-│       ├── pipeline/         # setup (reactive graph), terminal, wake
-│       └── arrays/           # OLD reference (delete after migration)
-├── rs/                       # OLD reference pipeline (delete after migration)
-├── examples/                 # reactive-proof.ts (31/31), proof.ts, bench.ts
-├── CLAUDE.md                 # Architecture bible
-└── SESSION-HANDOFF.md        # THIS FILE
-```
+### Phase 6: Delete SoA Code
+- Remove shared_buffer.rs, layout_tree.rs, taffy_bridge.rs, titan.rs
+- Remove TS SoA files
 
-## Dependencies
+### Phase 7: Hello World Test
+- Atomics.waitAsync loop
+- Ring buffer reader
+- Event dispatch system
 
-- `@rlabs-inc/signals` v1.13.0 — TS reactive signals (SharedSlotBuffer, Repeater, Notifier)
-- `spark-signals` v0.3.0 — Rust reactive signals (SharedSlotBuffer, Repeater, Notifier)
-- `taffy` 0.7 (+content_size) — W3C flexbox layout
-- `bitflags` 2.9, `unicode-width` 0.2, `unicode-segmentation` 1
+### Phase 4: TS State Modules
+- keyboard.ts, mouse.ts, focus.ts
+- cursor.ts, handlers.ts (internal)
+
+### Phase 5: Primitive Integration
+- Wire handlers and refs to box/text/input
+
+### Phase 6: Testing
+- Full integration tests
 
 ---
 
-*Session 132 • January 28, 2026 • Sao Paulo*
+## File Structure
+
+### TypeScript (AoS)
+
+```
+ts/bridge/
+├── shared-buffer-aos.ts    # AoS constants + buffer creation
+├── aos-slot-buffer.ts      # Fast direct-write slot buffers
+├── reactive-arrays-aos.ts  # All fields as AoSSlotBuffers
+├── notify.ts               # Wake notifier
+└── index.ts                # initBridgeAoS(), getAoSArrays()
+
+ts/primitives/
+├── box.ts                  # MIGRATED to AoS
+├── text.ts                 # MIGRATED to AoS
+└── input.ts                # TODO: migrate to AoS
+
+ts/state/                   # TODO: implement
+├── keyboard.ts             # Event signals + global handlers
+├── mouse.ts                # Position signals + handlers
+├── focus.ts                # useFocusedId, focus(ref/id)
+├── cursor.ts               # Terminal cursor control
+└── handlers.ts             # Internal registries
+```
+
+### Rust (AoS)
+
+```
+rust/src/
+├── lib.rs                  # FFI exports
+├── shared_buffer_aos.rs    # AoS buffer (matches TS layout)
+├── layout/
+│   └── layout_tree_aos.rs  # Taffy integration
+└── input/
+    ├── events.rs           # Ring buffer (move to SharedBuffer!)
+    ├── keyboard.rs         # Key dispatch
+    ├── mouse.rs            # HitGrid + mouse dispatch
+    └── focus.rs            # Focus manager
+```
+
+---
+
+## Commands
+
+```bash
+# Build Rust
+cd rust && cargo build --release
+
+# Run AoS benchmark
+bun run examples/bench-aos-vs-pure.ts
+
+# Test primitives
+bun run examples/test-box-aos.ts
+```
+
+---
+
+## Key Constants (AoS Layout)
+
+- `NODE_STRIDE = 256` bytes per node
+- `HEADER_SIZE = 256` bytes
+- `MAX_NODES = 100,000`
+- `TEXT_POOL_SIZE = 1MB`
+- `EVENT_RING_SIZE = 5,132` bytes (256 events × 20 bytes + 12 byte header)
+- **Total buffer: ~26.7MB**
+
+---
+
+## Open Questions
+
+1. **Cursor blink** — Ensure BlinkManager doesn't create fixed FPS
+2. **Event overflow** — What if ring fills? (probably drop oldest)
+3. **ID table** — TS-only Map or in SharedBuffer?
+
+---
+
+## Remember
+
+- **AoS is the architecture** — all new code uses AoS
+- **No fixed FPS** — fully reactive, event-driven
+- **No indices exposed** — users work with refs and IDs
+- **<50μs event latency** — instant feel
+- **Read DESIGN-EVENT-BRIDGE.md** — comprehensive design doc

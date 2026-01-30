@@ -6,13 +6,13 @@
 //! generation signal (incremented on TS wake or stdin input)
 //!   │
 //!   ├─→ layout_derived (spark-signals derived)
-//!   │     reads generation → reads SharedBuffer dirty flags
+//!   │     reads generation → reads AoSBuffer dirty flags
 //!   │     IF layout-dirty: run Taffy → write positions to output section
 //!   │     IF visual-only-dirty: SKIP layout (smart skip)
 //!   │
 //!   ├─→ framebuffer_derived (spark-signals derived)
 //!   │     depends on: layout_derived
-//!   │     Read output + visual + text + interaction from SharedBuffer
+//!   │     Read output + visual + text + interaction from AoSBuffer
 //!   │     Build 2D Cell grid + collect hit regions
 //!   │
 //!   └─→ render_effect (spark-signals effect)
@@ -26,7 +26,7 @@
 //! Three threads feed a unified mpsc channel:
 //!
 //! - **stdin reader**: blocks on stdin.read(), sends Data messages
-//! - **wake watcher**: adaptive spin on SharedBuffer wake flag, sends Wake messages
+//! - **wake watcher**: adaptive spin on AoSBuffer wake flag, sends Wake messages
 //! - **engine thread**: blocks on channel.recv(), processes both immediately
 //!
 //! No polling. No fixed timeout. Pure event-driven reactive propagation.
@@ -41,7 +41,7 @@ use std::sync::mpsc;
 
 use spark_signals::{signal, derived, effect, Signal};
 
-use crate::shared_buffer::{SharedBuffer, DIRTY_LAYOUT, DIRTY_TEXT, DIRTY_HIERARCHY};
+use crate::shared_buffer_aos::{AoSBuffer, DIRTY_LAYOUT, DIRTY_TEXT, DIRTY_HIERARCHY};
 use crate::layout;
 use crate::framebuffer::{self, HitRegion};
 use crate::renderer::{FrameBuffer, DiffRenderer};
@@ -52,7 +52,6 @@ use crate::input::mouse::MouseManager;
 use crate::input::scroll::ScrollManager;
 use crate::input::text_edit::TextEditor;
 use crate::input::cursor::BlinkManager;
-use crate::input::events::{EventRingBuffer, EventType};
 use crate::input::reader::{StdinReader, StdinMessage};
 use super::terminal::TerminalSetup;
 use super::wake::WakeWatcher;
@@ -91,7 +90,7 @@ impl Engine {
     /// 4. Blocks on channel events — increments generation on input or wake
     ///
     /// Returns an Engine handle for shutdown.
-    pub fn start(buf: &'static SharedBuffer) -> io::Result<Self> {
+    pub fn start(buf: &'static AoSBuffer) -> io::Result<Self> {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
 
@@ -128,7 +127,7 @@ impl Drop for Engine {
 // =============================================================================
 
 /// Main engine function. Runs on the engine thread.
-fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Result<()> {
+fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<()> {
     // 1. Setup terminal
     let mut terminal = TerminalSetup::new();
     terminal.enter_fullscreen()?;
@@ -139,17 +138,16 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     // 3. Start stdin reader (sends Data/Closed messages)
     let stdin_reader = StdinReader::spawn(tx.clone())?;
 
-    // 4. Start wake watcher (sends Wake messages when TS writes to SharedBuffer)
+    // 4. Start wake watcher (sends Wake messages when TS writes to AoSBuffer)
     let _wake_watcher = WakeWatcher::spawn(buf, tx, running.clone());
 
     // 5. Initialize input system state
     let mut parser = InputParser::new();
     let mut focus = FocusManager::new();
-    let mut events = EventRingBuffer::new();
     let mut editor = TextEditor::new();
     let mut scroll = ScrollManager::new();
     let mut blink = BlinkManager::new();
-    let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(buf.terminal_width(), buf.terminal_height())));
+    let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(buf.terminal_width() as u16, buf.terminal_height() as u16)));
 
     // =========================================================================
     // 6. Create the reactive graph
@@ -165,9 +163,13 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
         // Read generation (creates reactive dependency)
         let _gen = gen_for_layout.get();
 
-        // Smart skip: check dirty flags
+        // Check dirty flags for smart skip
         let node_count = buf.node_count();
-        let mut needs_layout = false;
+
+        // Always run layout on first two renders (effect creation + initial set)
+        // After that, only run if dirty flags are set
+        let mut needs_layout = _gen <= 1;
+
         for i in 0..node_count {
             let flags = buf.dirty_flags(i);
             if flags & (DIRTY_LAYOUT | DIRTY_TEXT | DIRTY_HIERARCHY) != 0 {
@@ -176,9 +178,9 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
             buf.clear_all_dirty(i);
         }
 
-        // Layout computation (only if layout-affecting props changed)
-        if needs_layout {
-            layout::compute_layout_direct(buf);
+        // Layout computation
+        if needs_layout && node_count > 0 {
+            layout::compute_layout_aos(buf);
         }
 
         // Return generation as the "result" — downstream deriveds
@@ -192,11 +194,11 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
         // Read layout derived (creates reactive dependency)
         let _layout_gen = layout_d.get();
 
-        // Read terminal size from SharedBuffer header
-        let tw = buf.terminal_width();
-        let th = buf.terminal_height();
+        // Read terminal size from AoSBuffer header
+        let tw = buf.terminal_width() as u16;
+        let th = buf.terminal_height() as u16;
 
-        // Build framebuffer from SharedBuffer
+        // Build framebuffer from AoSBuffer
         let (buffer, hit_regions) = framebuffer::compute_framebuffer(buf, tw, th);
 
         FrameBufferResult {
@@ -234,7 +236,15 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     });
 
     // =========================================================================
-    // 7. Event-driven blocking: wait for input or wake, increment generation
+    // 7. Initial render — trigger the reactive graph once
+    // =========================================================================
+    //
+    // The effect won't run until generation changes. Trigger initial render
+    // now that all the data is in the buffer.
+    generation.set(1);
+
+    // =========================================================================
+    // 8. Event-driven blocking: wait for input or wake, increment generation
     // =========================================================================
     //
     // The engine thread blocks on channel.recv(). It wakes IMMEDIATELY when
@@ -257,13 +267,13 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
                     match event {
                         ParsedEvent::Key(key) => {
                             keyboard::dispatch_key(
-                                buf, &mut events, &mut focus,
+                                buf, &mut focus,
                                 &mut editor, &mut scroll, &key,
                             );
                         }
                         ParsedEvent::Mouse(mouse) => {
                             mouse_mgr.borrow_mut().dispatch(
-                                buf, &mut events, &mut focus,
+                                buf, &mut focus,
                                 &mut scroll, &mouse,
                             );
                         }
@@ -274,11 +284,16 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
                     }
                 }
 
+                // Check for exit event (Ctrl+C)
+                if buf.exit_requested() {
+                    running.store(false, Ordering::SeqCst);
+                }
+
                 // Input changed state → increment generation → reactive propagation
                 generation.set(generation.get() + 1);
             }
             Ok(StdinMessage::Wake) => {
-                // TS wrote props to SharedBuffer → increment generation → reactive propagation
+                // TS wrote props to AoSBuffer → increment generation → reactive propagation
                 generation.set(generation.get() + 1);
             }
             Ok(StdinMessage::Closed) => break,
@@ -297,24 +312,18 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
             for event in pending {
                 if let ParsedEvent::Key(key) = event {
                     keyboard::dispatch_key(
-                        buf, &mut events, &mut focus,
+                        buf, &mut focus,
                         &mut editor, &mut scroll, &key,
                     );
                 }
             }
-            generation.set(generation.get() + 1);
-        }
 
-        // Check for exit event
-        if events.has_pending() {
-            for ev in events.drain() {
-                if ev.event_type == EventType::Exit {
-                    running.store(false, Ordering::SeqCst);
-                    break;
-                }
-                // TODO: Write events to SharedBuffer ring buffer section
-                // for TS to read and dispatch callbacks
+            // Check for exit event after flush
+            if buf.exit_requested() {
+                running.store(false, Ordering::SeqCst);
             }
+
+            generation.set(generation.get() + 1);
         }
     }
 

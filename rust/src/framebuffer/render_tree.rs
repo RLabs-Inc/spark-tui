@@ -1,7 +1,7 @@
-//! Component tree rendering from SharedBuffer to FrameBuffer.
+//! Component tree rendering from AoSBuffer to FrameBuffer.
 //!
 //! Reads layout output, visual properties, text content, and interaction state
-//! from the SharedBuffer. Renders each component to the 2D cell grid.
+//! from the AoSBuffer. Renders each component to the 2D cell grid.
 //!
 //! # Traversal Order
 //!
@@ -10,7 +10,7 @@
 //! 3. DFS traversal: background → border → content → children → focus indicator
 
 use crate::renderer::{FrameBuffer, BorderSides, BorderColors};
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer_aos::AoSBuffer;
 use crate::types::{Attr, BorderStyle, ClipRect, Rgba};
 use crate::layout::{string_width, truncate_text, wrap_text_word};
 use super::inheritance::{get_inherited_fg, get_inherited_bg, get_effective_opacity, apply_opacity};
@@ -38,12 +38,10 @@ const COMP_SELECT: u8 = 4;
 const COMP_PROGRESS: u8 = 5;
 
 // Text alignment constants (matching META_TEXT_ALIGN values)
-const ALIGN_LEFT: u8 = 0;
 const ALIGN_CENTER: u8 = 1;
 const ALIGN_RIGHT: u8 = 2;
 
 // Text wrap constants (matching META_TEXT_WRAP values)
-const WRAP_NOWRAP: u8 = 0;
 const WRAP_WRAP: u8 = 1;
 const WRAP_TRUNCATE: u8 = 2;
 
@@ -51,12 +49,12 @@ const WRAP_TRUNCATE: u8 = 2;
 // Entry Point
 // =============================================================================
 
-/// Compute the framebuffer from SharedBuffer data.
+/// Compute the framebuffer from AoSBuffer data.
 ///
 /// Reads layout output + visual + text + interaction sections.
 /// Returns the filled FrameBuffer and collected hit regions.
 pub fn compute_framebuffer(
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     width: u16,
     height: u16,
 ) -> (FrameBuffer, Vec<HitRegion>) {
@@ -121,7 +119,7 @@ pub fn compute_framebuffer(
 #[allow(clippy::too_many_arguments)]
 fn render_component(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     child_map: &[Vec<usize>],
     hit_regions: &mut Vec<HitRegion>,
@@ -191,10 +189,10 @@ fn render_component(
     render_borders(buffer, buf, index, x, y, w, h, &effective_clip);
 
     // Calculate content area (inside borders + padding)
-    let border_t = if buf.border_top_width(index) > 0 { 1u16 } else { 0 };
-    let border_r = if buf.border_right_width(index) > 0 { 1u16 } else { 0 };
-    let border_b = if buf.border_bottom_width(index) > 0 { 1u16 } else { 0 };
-    let border_l = if buf.border_left_width(index) > 0 { 1u16 } else { 0 };
+    let border_t = if buf.border_top(index) > 0 { 1u16 } else { 0 };
+    let border_r = if buf.border_right(index) > 0 { 1u16 } else { 0 };
+    let border_b = if buf.border_bottom(index) > 0 { 1u16 } else { 0 };
+    let border_l = if buf.border_left(index) > 0 { 1u16 } else { 0 };
 
     let pad_top = buf.padding_top(index) as u16;
     let pad_right = buf.padding_right(index) as u16;
@@ -265,7 +263,7 @@ fn render_component(
 #[allow(clippy::too_many_arguments)]
 fn render_children(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     child_map: &[Vec<usize>],
     hit_regions: &mut Vec<HitRegion>,
@@ -286,12 +284,12 @@ fn render_children(
 
     // Accumulate scroll offsets
     let scroll_x = if buf.output_scrollable(index) {
-        buf.scroll_offset_x(index)
+        buf.scroll_x(index)
     } else {
         0
     };
     let scroll_y = if buf.output_scrollable(index) {
-        buf.scroll_offset_y(index)
+        buf.scroll_y(index)
     } else {
         0
     };
@@ -321,7 +319,7 @@ fn render_children(
 
 fn render_borders(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -343,10 +341,10 @@ fn render_borders(
     let left = if style_left != 0 { BorderStyle::from(style_left) } else { BorderStyle::from(base_style) };
 
     // Check if any borders exist (by width)
-    let has_top = buf.border_top_width(index) > 0 && top != BorderStyle::None;
-    let has_right = buf.border_right_width(index) > 0 && right != BorderStyle::None;
-    let has_bottom = buf.border_bottom_width(index) > 0 && bottom != BorderStyle::None;
-    let has_left = buf.border_left_width(index) > 0 && left != BorderStyle::None;
+    let has_top = buf.border_top(index) > 0 && top != BorderStyle::None;
+    let has_right = buf.border_right(index) > 0 && right != BorderStyle::None;
+    let has_bottom = buf.border_bottom(index) > 0 && bottom != BorderStyle::None;
+    let has_left = buf.border_left(index) > 0 && left != BorderStyle::None;
 
     if !has_top && !has_right && !has_bottom && !has_left {
         return;
@@ -390,7 +388,7 @@ fn render_borders(
 
 fn render_text(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -457,7 +455,7 @@ fn render_text(
 #[allow(clippy::too_many_arguments)]
 fn render_input(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -471,7 +469,7 @@ fn render_input(
     let attrs = Attr::from_bits_truncate(buf.text_attrs(index));
 
     // Horizontal scroll offset
-    let scroll_x = buf.scroll_offset_x(index) as usize;
+    let scroll_x = buf.scroll_x(index) as usize;
 
     // Visible text after scroll
     let chars: Vec<char> = content.chars().collect();
@@ -499,7 +497,7 @@ fn render_input(
 #[allow(clippy::too_many_arguments)]
 fn render_input_selection(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     content_x: u16,
     content_y: u16,
@@ -543,7 +541,7 @@ fn render_input_selection(
 #[allow(clippy::too_many_arguments)]
 fn render_input_cursor(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     content_x: u16,
     content_y: u16,
@@ -578,7 +576,7 @@ fn render_input_cursor(
         // Blink off phase: show alt char if set, otherwise show normal text
         let alt_char = buf.cursor_alt_char(index);
         if alt_char > 0 {
-            if let Some(ch) = char::from_u32(alt_char as u32) {
+            if let Some(ch) = char::from_u32(alt_char) {
                 buffer.set_cell(render_x, content_y, ch as u32, fg, bg, Attr::NONE, Some(clip));
             }
         }
@@ -606,10 +604,10 @@ fn render_input_cursor(
 // Focus Indicator
 // =============================================================================
 
-/// Render focus indicator: single '*' at top-right corner (box) or end of text (text).
+/// Render focus indicator: single character (default '*') at top-right corner (box) or end of text (text).
 fn render_focus_indicator(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -618,27 +616,26 @@ fn render_focus_indicator(
     clip: &ClipRect,
     fg: Rgba,
 ) {
-    if !buf.focusable(index) || !buf.show_focus_ring(index) {
+    if !buf.focusable(index) || !buf.focus_indicator_enabled(index) {
         return;
     }
 
-    // Check if this node is currently focused
-    // The focus system writes a focused_index; for now, check interaction arrays
-    // The focus indicator only shows if the component has the focused state
-    // We'll use hovered as proxy initially, but real focus uses a global focused_index
-    // TODO: Read global focused_index from SharedBuffer header/interaction
+    // Only show indicator on the CURRENTLY focused element
+    let focused = buf.focused_index();
+    if focused < 0 || focused as usize != index {
+        return;
+    }
+
+    let indicator_char = buf.focus_indicator_char(index);
+
+    // Position: exactly at top-right corner, NO gap from edges
+    // x + w - 1 = rightmost column, y = topmost row
+    let indicator_x = if w > 0 { x + w - 1 } else { x };
+    let indicator_y = y; // top row, no offset
 
     match comp_type {
-        COMP_BOX => {
-            // '*' at top-right corner
-            let indicator_x = x.saturating_add(w).saturating_sub(1);
-            buffer.draw_char(indicator_x, y, '*', fg, None, Attr::BOLD, Some(clip));
-        }
-        COMP_TEXT => {
-            // '*' at end of text (we'd need text width, approximate with content area)
-            // For simplicity, draw at top-right like box
-            let indicator_x = x.saturating_add(w).saturating_sub(1);
-            buffer.draw_char(indicator_x, y, '*', fg, None, Attr::BOLD, Some(clip));
+        COMP_BOX | COMP_TEXT => {
+            buffer.draw_char(indicator_x, indicator_y, indicator_char, fg, None, Attr::BOLD, Some(clip));
         }
         _ => {}
     }
@@ -650,7 +647,7 @@ fn render_focus_indicator(
 
 fn render_progress(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -671,7 +668,7 @@ fn render_progress(
 
 fn render_select(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -705,7 +702,7 @@ const SCROLLBAR_THUMB: char = '█';
 
 fn render_scrollbar(
     buffer: &mut FrameBuffer,
-    buf: &SharedBuffer,
+    buf: &AoSBuffer,
     index: usize,
     x: u16,
     y: u16,
@@ -718,7 +715,7 @@ fn render_scrollbar(
         return;
     }
 
-    let scroll_y = buf.scroll_offset_y(index) as f32;
+    let scroll_y = buf.scroll_y(index) as f32;
     let scrollbar_color = fg.dim(0.5);
 
     // Calculate thumb size and position

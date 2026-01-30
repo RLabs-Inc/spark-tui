@@ -8,8 +8,11 @@
 import type { RGBA, CellAttrs, Dimension } from '../types'
 import type { WritableSignal, Binding, ReadonlyBinding } from '@rlabs-inc/signals'
 import type { Variant } from '../state/theme'
-import type { KeyHandler } from '../state/keyboard'
-import type { MouseEvent, MouseHandler } from '../state/mouse'
+import type { KeyEvent } from '../state/keyboard'
+import type { MouseEvent, MouseHandlers, ScrollEvent } from '../state/mouse'
+
+/** Keyboard event handler */
+export type KeyHandler = (event: KeyEvent) => boolean | void
 
 // =============================================================================
 // REACTIVE PROP TYPES
@@ -136,7 +139,7 @@ export interface MouseProps {
   /** Called when mouse leaves this component */
   onMouseLeave?: (event: MouseEvent) => void
   /** Called on scroll over this component. Return true to consume event. */
-  onScroll?: (event: MouseEvent) => void | boolean
+  onScroll?: (event: ScrollEvent) => void
 }
 
 // =============================================================================

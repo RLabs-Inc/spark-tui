@@ -1,7 +1,8 @@
 /**
- * TUI Framework - Input Primitive
+ * TUI Framework - Input Primitive (AoS)
  *
  * Single-line text input with full reactivity.
+ * Uses AoS SharedBuffer for cache-friendly Rust reads.
  *
  * Features:
  * - Two-way value binding via slot arrays
@@ -11,6 +12,9 @@
  * - Placeholder text
  * - Theme variants
  * - Cursor configuration (style, blink, color)
+ *
+ * REACTIVITY: Props are passed directly to repeat() which preserves reactive links.
+ * repeat() handles signals, getters, deriveds, and static values natively.
  *
  * Usage:
  * ```ts
@@ -23,8 +27,9 @@
  * ```
  */
 
-import { signal } from '@rlabs-inc/signals'
+import { signal, repeat } from '@rlabs-inc/signals'
 import { ComponentType } from '../types'
+import type { RGBA } from '../types'
 import { allocateIndex, releaseIndex, getCurrentParentIndex } from '../engine/registry'
 import {
   pushCurrentComponent,
@@ -32,22 +37,186 @@ import {
   runMountCallbacks,
 } from '../engine/lifecycle'
 import { cleanupIndex as cleanupKeyboardListeners, onFocused } from '../state/keyboard'
+import type { KeyEvent } from '../state/keyboard'
+import { hasCtrl, hasAlt, hasMeta } from '../engine/events'
 import { onComponent as onMouseComponent } from '../state/mouse'
 import { getVariantStyle, t } from '../state/theme'
 import { focus as focusComponent, registerFocusCallbacks } from '../state/focus'
-import { createCursor } from '../state/drawnCursor'
 import { getActiveScope } from './scope'
-
-// Import arrays
-import * as core from '../engine/arrays/core'
-import * as taffy from '../engine/arrays/taffy'
-import * as visual from '../engine/arrays/visual'
-import * as textArrays from '../engine/arrays/text'
-import * as interaction from '../engine/arrays/interaction'
-
-// Import types
+import { pulse } from './animation'
+import { getAoSArrays, getAoSBuffer } from '../bridge'
+import {
+  packColor,
+  setNodeText,
+  HEADER_SIZE,
+  STRIDE,
+  U_CURSOR_FLAGS,
+  U_CURSOR_STYLE,
+  U_CURSOR_FPS,
+  U_CURSOR_CHAR,
+  U_MAX_LENGTH,
+  C_CURSOR_FG,
+  C_CURSOR_BG,
+  FLAG_FOCUSABLE,
+  type AoSBuffer,
+} from '../bridge/shared-buffer-aos'
 import type { InputProps, Cleanup, BlinkConfig } from './types'
-import type { KeyboardEvent } from '../state/keyboard'
+
+// =============================================================================
+// CONVERSION HELPERS — same pattern as box.ts
+// =============================================================================
+
+/** Dimension → Taffy float: NaN = auto, 0-1 = percentage, >1 = absolute */
+function toDim(dim: number | string | undefined | null): number {
+  if (dim === undefined || dim === null || dim === 0) return NaN
+  if (typeof dim === 'string') {
+    if (dim.endsWith('%')) return parseFloat(dim) / 100
+    return parseFloat(dim) || NaN
+  }
+  return dim
+}
+
+/** Unwrap any prop shape to its current value */
+function unwrap<T>(prop: T | (() => T) | { readonly value: T }): T {
+  if (typeof prop === 'function') return (prop as () => T)()
+  if (prop !== null && typeof prop === 'object' && 'value' in prop) return (prop as { value: T }).value
+  return prop
+}
+
+/** Is this prop reactive (not a static value)? */
+function isReactive(prop: unknown): boolean {
+  return typeof prop === 'function' || (prop !== null && typeof prop === 'object' && 'value' in (prop as any))
+}
+
+/** Pack RGBA or number to u32 */
+function toPackedColor(c: RGBA | number | null | undefined): number {
+  if (c === null || c === undefined) return 0
+  if (typeof c === 'number') return c
+  return packColor(c.r, c.g, c.b, c.a ?? 255)
+}
+
+// Dimension: wrap prop for repeat() — returns number (static) or () => number (reactive)
+function dimInput(prop: InputProps['width']): number | (() => number) {
+  if (prop === undefined) return NaN
+  if (typeof prop === 'number' || typeof prop === 'string') return toDim(prop)
+  return () => toDim(unwrap(prop))
+}
+
+// Color: wrap prop for repeat()
+function colorInput(prop: InputProps['fg']): number | (() => number) {
+  if (prop === undefined) return 0
+  if (!isReactive(prop)) return toPackedColor(prop as RGBA | number | null)
+  return () => toPackedColor(unwrap(prop as any))
+}
+
+// Numeric: wrap prop for repeat() — pass-through, repeat() handles natively
+function numInput(prop: unknown, defaultVal = 0): number | (() => number) | { readonly value: number } {
+  if (prop === undefined) return defaultVal
+  return prop as any // repeat() handles number | signal | getter natively
+}
+
+// =============================================================================
+// DIRECT BUFFER WRITES (for cursor fields not in reactive arrays)
+// =============================================================================
+
+function setU8Direct(buf: AoSBuffer, nodeIndex: number, field: number, value: number): void {
+  buf.view.setUint8(HEADER_SIZE + nodeIndex * STRIDE + field, value)
+}
+
+function setU32Direct(buf: AoSBuffer, nodeIndex: number, field: number, value: number): void {
+  buf.view.setUint32(HEADER_SIZE + nodeIndex * STRIDE + field, value, true)
+}
+
+// =============================================================================
+// TEXT POOL WRITER — encodes UTF-8, writes to pool, returns offset
+// =============================================================================
+
+const textEncoder = new TextEncoder()
+
+/**
+ * Write text bytes to the AoS text pool. Returns the byte offset.
+ * Sets textLength via direct write. Returns offset for repeater.
+ */
+function writeTextToPoolAoS(
+  buf: AoSBuffer,
+  index: number,
+  text: string
+): number {
+  const H_TEXT_POOL_WRITE_PTR = 28
+  const TEXT_POOL_SIZE = 1024 * 1024
+  const U_TEXT_OFFSET = 184
+  const U_TEXT_LENGTH = 188
+
+  const encoded = textEncoder.encode(text)
+  let writePtr = buf.header[H_TEXT_POOL_WRITE_PTR / 4]
+
+  // Check capacity
+  if (writePtr + encoded.length > TEXT_POOL_SIZE) {
+    // Simple reset for now - could implement compaction later
+    console.warn('Text pool overflow, resetting')
+    writePtr = 0
+    buf.header[H_TEXT_POOL_WRITE_PTR / 4] = 0
+  }
+
+  // Write to pool
+  buf.textPool.set(encoded, writePtr)
+
+  // Set offset and length in AoS node
+  const base = HEADER_SIZE + index * STRIDE
+  buf.view.setUint32(base + U_TEXT_OFFSET, writePtr, true)
+  buf.view.setUint32(base + U_TEXT_LENGTH, encoded.length, true)
+
+  // Advance write pointer
+  buf.header[H_TEXT_POOL_WRITE_PTR / 4] = writePtr + encoded.length
+
+  return writePtr
+}
+
+// =============================================================================
+// KEYCODE HELPERS
+// =============================================================================
+
+/** Convert keycode to character string if printable */
+function keycodeToChar(keycode: number): string | null {
+  // Single byte printable characters
+  if (keycode >= 32 && keycode <= 126) {
+    return String.fromCharCode(keycode)
+  }
+  return null
+}
+
+/** Get special key name from keycode */
+function getSpecialKeyName(keycode: number): string | null {
+  switch (keycode) {
+    case 13: return 'Enter'
+    case 27: return 'Escape'
+    case 8: return 'Backspace'
+    case 127: return 'Delete'
+    // Arrow keys (terminal escape sequences as packed u32)
+    case 0x1b5b44: return 'ArrowLeft'
+    case 0x1b5b43: return 'ArrowRight'
+    case 0x1b5b41: return 'ArrowUp'
+    case 0x1b5b42: return 'ArrowDown'
+    case 0x1b5b48: return 'Home'
+    case 0x1b5b46: return 'End'
+    // Alternative Home/End codes
+    case 0x1b4f48: return 'Home'
+    case 0x1b4f46: return 'End'
+    default: return null
+  }
+}
+
+// =============================================================================
+// CURSOR STYLE CONVERSION
+// =============================================================================
+
+function cursorStyleToNum(style: string | undefined): number {
+  switch (style) {
+    case 'bar': return 1
+    case 'underline': return 2
+    default: return 0 // block
+  }
+}
 
 // =============================================================================
 // INPUT COMPONENT
@@ -65,7 +234,10 @@ import type { KeyboardEvent } from '../state/keyboard'
  * - Surface: muted, surface, elevated, ghost, outline
  */
 export function input(props: InputProps): Cleanup {
+  const arrays = getAoSArrays()
+  const buffer = getAoSBuffer()
   const index = allocateIndex(props.id)
+  const disposals: (() => void)[] = []
 
   // Track current component for lifecycle hooks
   pushCurrentComponent(index)
@@ -85,73 +257,79 @@ export function input(props: InputProps): Cleanup {
   const maskChar = props.maskChar ?? '•'
 
   // ==========================================================================
-  // CORE
+  // CORE — static writes
   // ==========================================================================
 
-  core.componentType[index] = ComponentType.INPUT
-  core.parentIndex.setSource(index, getCurrentParentIndex())
+  arrays.componentType.set(index, ComponentType.INPUT)
+  disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
 
-  // Visibility
-  if (props.visible !== undefined) {
-    taffy.visible.setSource(index, props.visible)
-    core.visible.setSource(index, props.visible)
-  }
+  // Visibility (default: visible)
+  disposals.push(repeat(numInput(props.visible ?? 1, 1), arrays.visible, index))
 
   // ==========================================================================
-  // TAFFY LAYOUT ARRAYS - Direct binding to TypedArrays
+  // LAYOUT — dimensions
   // ==========================================================================
 
-  // Parent hierarchy (for tree structure)
-  taffy.parentIndex.setSource(index, getCurrentParentIndex())
+  if (props.width !== undefined)     disposals.push(repeat(dimInput(props.width), arrays.width, index))
+  if (props.height !== undefined)    disposals.push(repeat(dimInput(props.height), arrays.height, index))
+  if (props.minWidth !== undefined)  disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
+  if (props.maxWidth !== undefined)  disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
+  if (props.minHeight !== undefined) disposals.push(repeat(dimInput(props.minHeight), arrays.minHeight, index))
+  if (props.maxHeight !== undefined) disposals.push(repeat(dimInput(props.maxHeight), arrays.maxHeight, index))
 
-  // Dimensions
-  if (props.width !== undefined) {
-    taffy.width.setSource(index, taffy.dimensionSource(props.width))
-  }
-  if (props.height !== undefined) {
-    taffy.height.setSource(index, taffy.dimensionSource(props.height))
-  }
-  if (props.minWidth !== undefined) {
-    taffy.minWidth.setSource(index, taffy.dimensionSource(props.minWidth))
-  }
-  if (props.maxWidth !== undefined) {
-    taffy.maxWidth.setSource(index, taffy.dimensionSource(props.maxWidth))
-  }
-  if (props.minHeight !== undefined) {
-    taffy.minHeight.setSource(index, taffy.dimensionSource(props.minHeight))
-  }
-  if (props.maxHeight !== undefined) {
-    taffy.maxHeight.setSource(index, taffy.dimensionSource(props.maxHeight))
-  }
-
-  // Spacing - Padding
+  // Padding
   if (props.padding !== undefined) {
-    taffy.paddingTop.setSource(index, props.paddingTop ?? props.padding)
-    taffy.paddingRight.setSource(index, props.paddingRight ?? props.padding)
-    taffy.paddingBottom.setSource(index, props.paddingBottom ?? props.padding)
-    taffy.paddingLeft.setSource(index, props.paddingLeft ?? props.padding)
+    disposals.push(repeat(numInput(props.paddingTop ?? props.padding), arrays.paddingTop, index))
+    disposals.push(repeat(numInput(props.paddingRight ?? props.padding), arrays.paddingRight, index))
+    disposals.push(repeat(numInput(props.paddingBottom ?? props.padding), arrays.paddingBottom, index))
+    disposals.push(repeat(numInput(props.paddingLeft ?? props.padding), arrays.paddingLeft, index))
   } else {
-    if (props.paddingTop !== undefined) taffy.paddingTop.setSource(index, props.paddingTop)
-    if (props.paddingRight !== undefined) taffy.paddingRight.setSource(index, props.paddingRight)
-    if (props.paddingBottom !== undefined) taffy.paddingBottom.setSource(index, props.paddingBottom)
-    if (props.paddingLeft !== undefined) taffy.paddingLeft.setSource(index, props.paddingLeft)
+    if (props.paddingTop !== undefined)    disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
+    if (props.paddingRight !== undefined)  disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
+    if (props.paddingBottom !== undefined) disposals.push(repeat(numInput(props.paddingBottom), arrays.paddingBottom, index))
+    if (props.paddingLeft !== undefined)   disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
   }
 
-  // Spacing - Margin
+  // Margin
   if (props.margin !== undefined) {
-    taffy.marginTop.setSource(index, props.marginTop ?? props.margin)
-    taffy.marginRight.setSource(index, props.marginRight ?? props.margin)
-    taffy.marginBottom.setSource(index, props.marginBottom ?? props.margin)
-    taffy.marginLeft.setSource(index, props.marginLeft ?? props.margin)
+    disposals.push(repeat(numInput(props.marginTop ?? props.margin), arrays.marginTop, index))
+    disposals.push(repeat(numInput(props.marginRight ?? props.margin), arrays.marginRight, index))
+    disposals.push(repeat(numInput(props.marginBottom ?? props.margin), arrays.marginBottom, index))
+    disposals.push(repeat(numInput(props.marginLeft ?? props.margin), arrays.marginLeft, index))
   } else {
-    if (props.marginTop !== undefined) taffy.marginTop.setSource(index, props.marginTop)
-    if (props.marginRight !== undefined) taffy.marginRight.setSource(index, props.marginRight)
-    if (props.marginBottom !== undefined) taffy.marginBottom.setSource(index, props.marginBottom)
-    if (props.marginLeft !== undefined) taffy.marginLeft.setSource(index, props.marginLeft)
+    if (props.marginTop !== undefined)    disposals.push(repeat(numInput(props.marginTop), arrays.marginTop, index))
+    if (props.marginRight !== undefined)  disposals.push(repeat(numInput(props.marginRight), arrays.marginRight, index))
+    if (props.marginBottom !== undefined) disposals.push(repeat(numInput(props.marginBottom), arrays.marginBottom, index))
+    if (props.marginLeft !== undefined)   disposals.push(repeat(numInput(props.marginLeft), arrays.marginLeft, index))
+  }
+
+  // Border widths (layout spacing: 0 or 1)
+  if (props.border !== undefined) {
+    const bw = isReactive(props.border) ? (() => unwrap(props.border!) > 0 ? 1 : 0) : (unwrap(props.border) > 0 ? 1 : 0)
+    disposals.push(repeat(bw, arrays.borderTopWidth, index))
+    disposals.push(repeat(bw, arrays.borderRightWidth, index))
+    disposals.push(repeat(bw, arrays.borderBottomWidth, index))
+    disposals.push(repeat(bw, arrays.borderLeftWidth, index))
+  }
+  if (props.borderTop !== undefined) {
+    const bw = isReactive(props.borderTop) ? (() => unwrap(props.borderTop!) > 0 ? 1 : 0) : (unwrap(props.borderTop) > 0 ? 1 : 0)
+    disposals.push(repeat(bw, arrays.borderTopWidth, index))
+  }
+  if (props.borderRight !== undefined) {
+    const bw = isReactive(props.borderRight) ? (() => unwrap(props.borderRight!) > 0 ? 1 : 0) : (unwrap(props.borderRight) > 0 ? 1 : 0)
+    disposals.push(repeat(bw, arrays.borderRightWidth, index))
+  }
+  if (props.borderBottom !== undefined) {
+    const bw = isReactive(props.borderBottom) ? (() => unwrap(props.borderBottom!) > 0 ? 1 : 0) : (unwrap(props.borderBottom) > 0 ? 1 : 0)
+    disposals.push(repeat(bw, arrays.borderBottomWidth, index))
+  }
+  if (props.borderLeft !== undefined) {
+    const bw = isReactive(props.borderLeft) ? (() => unwrap(props.borderLeft!) > 0 ? 1 : 0) : (unwrap(props.borderLeft) > 0 ? 1 : 0)
+    disposals.push(repeat(bw, arrays.borderLeftWidth, index))
   }
 
   // ==========================================================================
-  // TEXT CONTENT - Display via slot array
+  // TEXT CONTENT - Display via text pool
   // ==========================================================================
 
   const getDisplayText = () => {
@@ -162,19 +340,22 @@ export function input(props: InputProps): Cleanup {
     return props.password ? maskChar.repeat(val.length) : val
   }
 
-  textArrays.textContent.setSource(index, getDisplayText)
-
-  if (props.attrs !== undefined) textArrays.textAttrs.setSource(index, props.attrs)
+  // Text content is reactive since getValue() reads from a signal
+  disposals.push(repeat(
+    () => writeTextToPoolAoS(buffer, index, getDisplayText()),
+    arrays.textOffset,
+    index
+  ))
 
   // ==========================================================================
-  // CURSOR - Create cursor with full customization
+  // CURSOR CONFIGURATION
   // ==========================================================================
 
   const cursorConfig = props.cursor ?? {}
 
+  // Parse blink configuration
   let blinkEnabled = true
   let blinkFps = 2
-  let altChar: string | undefined
 
   if (cursorConfig.blink === false) {
     blinkEnabled = false
@@ -182,129 +363,177 @@ export function input(props: InputProps): Cleanup {
     const blinkConfig = cursorConfig.blink as BlinkConfig
     blinkEnabled = blinkConfig.enabled !== false
     blinkFps = blinkConfig.fps ?? 2
-    altChar = blinkConfig.altChar
   }
 
-  const cursor = createCursor(index, {
-    style: cursorConfig.style,
-    char: cursorConfig.char,
-    blink: blinkEnabled,
-    fps: blinkFps,
-    altChar,
-  })
+  // Cursor visibility (blink effect via pulse signal)
+  if (blinkEnabled) {
+    const blinkSignal = pulse({ fps: blinkFps })
+    disposals.push(repeat(() => blinkSignal.value ? 1 : 0, arrays.cursorPosition, index))
+    // Also track blink state directly for cursor flags
+    disposals.push(() => {
+      // Cleanup happens when scope is destroyed - pulse handles its own cleanup
+    })
+    // Set cursor flags to indicate cursor should blink
+    setU8Direct(buffer, index, U_CURSOR_FLAGS, 1) // visible
+    setU8Direct(buffer, index, U_CURSOR_FPS, blinkFps)
+  } else {
+    // Static cursor - always visible
+    setU8Direct(buffer, index, U_CURSOR_FLAGS, 1)
+    setU8Direct(buffer, index, U_CURSOR_FPS, 0) // 0 = no blink
+  }
+
+  // Cursor style
+  setU8Direct(buffer, index, U_CURSOR_STYLE, cursorStyleToNum(cursorConfig.style))
+
+  // Custom cursor character
+  if (cursorConfig.char) {
+    const charCode = cursorConfig.char.codePointAt(0) ?? 0
+    setU32Direct(buffer, index, U_CURSOR_CHAR, charCode)
+  }
+
+  // Cursor colors
+  if (cursorConfig.fg !== undefined) {
+    if (isReactive(cursorConfig.fg)) {
+      disposals.push(repeat(() => toPackedColor(unwrap(cursorConfig.fg!)), arrays.cursorFg, index))
+    } else {
+      setU32Direct(buffer, index, C_CURSOR_FG, toPackedColor(cursorConfig.fg as RGBA))
+    }
+  }
+  if (cursorConfig.bg !== undefined) {
+    if (isReactive(cursorConfig.bg)) {
+      // We'd need a cursorBgColor array - for now use direct write
+      setU32Direct(buffer, index, C_CURSOR_BG, toPackedColor(unwrap(cursorConfig.bg)))
+    } else {
+      setU32Direct(buffer, index, C_CURSOR_BG, toPackedColor(cursorConfig.bg as RGBA))
+    }
+  }
 
   // Sync cursor position (clamped to value length)
-  interaction.cursorPosition.setSource(index, () => Math.min(cursorPos.value, getValue().length))
+  disposals.push(repeat(
+    () => Math.min(cursorPos.value, getValue().length),
+    arrays.cursorPosition,
+    index
+  ))
+
+  // Max length
+  if (props.maxLength !== undefined) {
+    setU8Direct(buffer, index, U_MAX_LENGTH, props.maxLength)
+  }
 
   // ==========================================================================
-  // BORDER
-  // ==========================================================================
-
-  if (props.border !== undefined) visual.borderStyle.setSource(index, props.border)
-  if (props.borderTop !== undefined) visual.borderTop.setSource(index, props.borderTop)
-  if (props.borderRight !== undefined) visual.borderRight.setSource(index, props.borderRight)
-  if (props.borderBottom !== undefined) visual.borderBottom.setSource(index, props.borderBottom)
-  if (props.borderLeft !== undefined) visual.borderLeft.setSource(index, props.borderLeft)
-  if (props.borderColor !== undefined) visual.borderColor.setSource(index, props.borderColor)
-
-  // ==========================================================================
-  // VISUAL - Colors with variant support
+  // VISUAL — colors with variant support
   // ==========================================================================
 
   if (props.variant && props.variant !== 'default') {
     const variant = props.variant
-    if (props.fg !== undefined) {
-      visual.fgColor.setSource(index, props.fg)
+    // Variant-based colors with user overrides
+    disposals.push(repeat(
+      props.fg !== undefined ? colorInput(props.fg) : () => toPackedColor(getVariantStyle(variant).fg),
+      arrays.fgColor, index
+    ))
+    disposals.push(repeat(
+      props.bg !== undefined ? colorInput(props.bg) : () => toPackedColor(getVariantStyle(variant).bg),
+      arrays.bgColor, index
+    ))
+    if (props.borderColor !== undefined) {
+      disposals.push(repeat(colorInput(props.borderColor), arrays.borderColor, index))
     } else {
-      visual.fgColor.setSource(index, () => getVariantStyle(variant).fg)
-    }
-    if (props.bg !== undefined) {
-      visual.bgColor.setSource(index, props.bg)
-    } else {
-      visual.bgColor.setSource(index, () => getVariantStyle(variant).bg)
-    }
-    if (props.borderColor === undefined) {
-      visual.borderColor.setSource(index, () => getVariantStyle(variant).border)
+      disposals.push(repeat(() => toPackedColor(getVariantStyle(variant).border), arrays.borderColor, index))
     }
   } else {
-    visual.fgColor.setSource(index, props.fg !== undefined ? props.fg : t.textBright)
-    if (props.bg !== undefined) visual.bgColor.setSource(index, props.bg)
+    // Default styling - use colorInput for theme colors to handle derived signals properly
+    disposals.push(repeat(
+      colorInput(props.fg ?? t.textBright as any),
+      arrays.fgColor, index
+    ))
+    if (props.bg !== undefined) disposals.push(repeat(colorInput(props.bg), arrays.bgColor, index))
+    if (props.borderColor !== undefined) disposals.push(repeat(colorInput(props.borderColor), arrays.borderColor, index))
   }
-  if (props.opacity !== undefined) visual.opacity.setSource(index, props.opacity)
+  if (props.opacity !== undefined) disposals.push(repeat(numInput(props.opacity), arrays.opacity, index))
 
   // ==========================================================================
-  // FOCUS - Inputs are always focusable
+  // INTERACTION — inputs are always focusable
   // ==========================================================================
 
-  interaction.focusable.setSource(index, 1)
+  arrays.interactionFlags.set(index, FLAG_FOCUSABLE)
   if (props.tabIndex !== undefined) {
-    interaction.tabIndex.setSource(index, props.tabIndex)
+    disposals.push(repeat(numInput(props.tabIndex, -1), arrays.tabIndex, index))
   }
 
   // ==========================================================================
   // KEYBOARD HANDLERS
   // ==========================================================================
 
-  const handleKeyEvent = (event: KeyboardEvent): boolean => {
+  const handleKeyEvent = (event: KeyEvent): boolean => {
     const val = getValue()
     const pos = Math.min(cursorPos.value, val.length)
     const maxLen = props.maxLength ?? 0
 
-    switch (event.key) {
-      case 'ArrowLeft':
-        if (pos > 0) cursorPos.value = pos - 1
-        return true
+    // Get key name or character
+    const specialKey = getSpecialKeyName(event.keycode)
+    const charKey = keycodeToChar(event.keycode)
 
-      case 'ArrowRight':
-        if (pos < val.length) cursorPos.value = pos + 1
-        return true
-
-      case 'Home':
-        cursorPos.value = 0
-        return true
-
-      case 'End':
-        cursorPos.value = val.length
-        return true
-
-      case 'Backspace':
-        if (pos > 0) {
-          const newVal = val.slice(0, pos - 1) + val.slice(pos)
-          setValue(newVal)
-          cursorPos.value = pos - 1
-          props.onChange?.(newVal)
-        }
-        return true
-
-      case 'Delete':
-        if (pos < val.length) {
-          const newVal = val.slice(0, pos) + val.slice(pos + 1)
-          setValue(newVal)
-          props.onChange?.(newVal)
-        }
-        return true
-
-      case 'Enter':
-        props.onSubmit?.(val)
-        return true
-
-      case 'Escape':
-        props.onCancel?.()
-        return true
-
-      default:
-        if (event.key.length === 1 && !event.modifiers.ctrl && !event.modifiers.alt && !event.modifiers.meta) {
-          if (maxLen > 0 && val.length >= maxLen) {
-            return true
-          }
-          const newVal = val.slice(0, pos) + event.key + val.slice(pos)
-          setValue(newVal)
-          cursorPos.value = pos + 1
-          props.onChange?.(newVal)
+    if (specialKey) {
+      switch (specialKey) {
+        case 'ArrowLeft':
+          if (pos > 0) cursorPos.value = pos - 1
           return true
-        }
-        return false
+
+        case 'ArrowRight':
+          if (pos < val.length) cursorPos.value = pos + 1
+          return true
+
+        case 'Home':
+          cursorPos.value = 0
+          return true
+
+        case 'End':
+          cursorPos.value = val.length
+          return true
+
+        case 'Backspace':
+          if (pos > 0) {
+            const newVal = val.slice(0, pos - 1) + val.slice(pos)
+            setValue(newVal)
+            cursorPos.value = pos - 1
+            props.onChange?.(newVal)
+          }
+          return true
+
+        case 'Delete':
+          if (pos < val.length) {
+            const newVal = val.slice(0, pos) + val.slice(pos + 1)
+            setValue(newVal)
+            props.onChange?.(newVal)
+          }
+          return true
+
+        case 'Enter':
+          props.onSubmit?.(val)
+          return true
+
+        case 'Escape':
+          props.onCancel?.()
+          return true
+
+        default:
+          return false
+      }
     }
+
+    // Handle printable characters
+    if (charKey && !hasCtrl(event) && !hasAlt(event) && !hasMeta(event)) {
+      if (maxLen > 0 && val.length >= maxLen) {
+        return true
+      }
+      const newVal = val.slice(0, pos) + charKey + val.slice(pos)
+      setValue(newVal)
+      cursorPos.value = pos + 1
+      props.onChange?.(newVal)
+      return true
+    }
+
+    return false
   }
 
   const unsubKeyboard = onFocused(index, handleKeyEvent)
@@ -317,6 +546,7 @@ export function input(props: InputProps): Cleanup {
   // ==========================================================================
   // MOUSE HANDLERS
   // ==========================================================================
+
   const unsubMouse = onMouseComponent(index, {
     onMouseDown: props.onMouseDown,
     onMouseUp: props.onMouseUp,
@@ -349,12 +579,15 @@ export function input(props: InputProps): Cleanup {
   // ==========================================================================
 
   const cleanup = () => {
+    // Dispose all repeaters
+    for (const dispose of disposals) dispose()
+    disposals.length = 0
+
+    // Unsub event handlers
     unsubFocusCallbacks()
     unsubMouse()
-    cursor.dispose()
     unsubKeyboard()
     cleanupKeyboardListeners(index)
-    interaction.cursorPosition.clear(index)
     releaseIndex(index)
   }
 

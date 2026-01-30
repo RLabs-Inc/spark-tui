@@ -8,9 +8,9 @@
 //! 5. Key event → ring buffer for TS onKey handlers
 //! 6. Framework defaults (arrow scroll, page scroll, home/end)
 
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer_aos::AoSBuffer;
 use super::parser::{KeyEvent, KeyCode, Modifier, KeyState};
-use super::events::{Event, EventRingBuffer};
+use super::events::Event;
 use super::focus::FocusManager;
 use super::text_edit::TextEditor;
 use super::scroll::ScrollManager;
@@ -21,8 +21,7 @@ const COMP_INPUT: u8 = 3;
 /// Route a key event through the dispatch chain.
 /// Returns true if the event was consumed.
 pub fn dispatch_key(
-    buf: &SharedBuffer,
-    events: &mut EventRingBuffer,
+    buf: &AoSBuffer,
     focus: &mut FocusManager,
     editor: &mut TextEditor,
     scroll: &mut ScrollManager,
@@ -30,7 +29,7 @@ pub fn dispatch_key(
 ) -> bool {
     // 1. Ctrl+C → EXIT
     if key.code == KeyCode::Char('c') && key.modifiers.contains(Modifier::CTRL) {
-        events.push(Event::exit());
+        buf.push_event(&Event::exit());
         return true;
     }
 
@@ -38,7 +37,7 @@ pub fn dispatch_key(
     if key.state != KeyState::Press {
         if let Some(focused) = focus.focused() {
             let keycode = key_code_to_u32(&key.code);
-            events.push(Event::key(focused as u16, keycode, key.modifiers.bits()));
+            buf.push_event(&Event::key(focused as u16, keycode, key.modifiers.bits()));
         }
         return false;
     }
@@ -46,9 +45,9 @@ pub fn dispatch_key(
     // 3. Tab / Shift+Tab → focus navigation
     if key.code == KeyCode::Tab {
         if key.modifiers.contains(Modifier::SHIFT) {
-            focus.focus_previous(buf, events);
+            focus.focus_previous(buf);
         } else {
-            focus.focus_next(buf, events);
+            focus.focus_next(buf);
         }
         return true;
     }
@@ -57,7 +56,7 @@ pub fn dispatch_key(
     if let Some(focused) = focus.focused() {
         let comp_type = buf.component_type(focused);
         if comp_type == COMP_INPUT {
-            if editor.handle_key(buf, events, focused, key) {
+            if editor.handle_key(buf, focused, key) {
                 return true;
             }
         }
@@ -66,7 +65,7 @@ pub fn dispatch_key(
     // 5. Write key event to ring buffer (TS dispatches onKey)
     if let Some(focused) = focus.focused() {
         let keycode = key_code_to_u32(&key.code);
-        events.push(Event::key(focused as u16, keycode, key.modifiers.bits()));
+        buf.push_event(&Event::key(focused as u16, keycode, key.modifiers.bits()));
     }
 
     // 6. Framework defaults (arrow scroll, page scroll, home/end)

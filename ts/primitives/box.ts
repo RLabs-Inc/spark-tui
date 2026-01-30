@@ -1,11 +1,11 @@
 /**
- * TUI Framework - Box Primitive
+ * TUI Framework - Box Primitive (AoS)
  *
  * Container component with flexbox layout, borders, and background.
+ * Uses AoS SharedBuffer for cache-friendly Rust reads.
  *
  * REACTIVITY: Props are passed directly to repeat() which preserves reactive links.
  * repeat() handles signals, getters, deriveds, and static values natively.
- * The repeater forwards value changes inline during markReactions — no scheduling.
  *
  * Usage:
  * ```ts
@@ -41,19 +41,21 @@ import { registerFocusCallbacks, focus as focusComponent } from '../state/focus'
 import { onComponent as onMouseComponent } from '../state/mouse'
 import { getVariantStyle } from '../state/theme'
 import { getActiveScope } from './scope'
-import { getArrays } from '../bridge'
-import { packColor } from '../bridge/shared-buffer'
+import { getAoSArrays } from '../bridge'
+import { packColor } from '../bridge/shared-buffer-aos'
 import type { BoxProps, Cleanup } from './types'
 
 // =============================================================================
 // CONVERSION HELPERS — inline, minimal
 // =============================================================================
 
-/** Dimension → Taffy float: NaN = auto, 0-1 = percentage, >1 = absolute */
+/** Dimension → Taffy float: NaN = auto, negative = percentage, positive = pixels
+ *  Rust convention: -100.0 = 100%, -50.0 = 50%, 40.0 = 40px
+ */
 function toDim(dim: number | string | undefined | null): number {
   if (dim === undefined || dim === null || dim === 0) return NaN
   if (typeof dim === 'string') {
-    if (dim.endsWith('%')) return parseFloat(dim) / 100
+    if (dim.endsWith('%')) return -parseFloat(dim) // '100%' → -100.0
     return parseFloat(dim) || NaN
   }
   return dim
@@ -165,7 +167,7 @@ function alignSelfToNum(a: string | undefined): number {
 // =============================================================================
 
 export function box(props: BoxProps = {}): Cleanup {
-  const arrays = getArrays()
+  const arrays = getAoSArrays()
   const index = allocateIndex(props.id)
   const disposals: (() => void)[] = []
 
@@ -177,10 +179,8 @@ export function box(props: BoxProps = {}): Cleanup {
   arrays.componentType.set(index, ComponentType.BOX)
   disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
 
-  // Visibility
-  if (props.visible !== undefined) {
-    disposals.push(repeat(numInput(props.visible, 1), arrays.visible, index))
-  }
+  // Visibility (default: visible)
+  disposals.push(repeat(numInput(props.visible ?? 1, 1), arrays.visible, index))
 
   // --------------------------------------------------------------------------
   // LAYOUT — dimensions, flex, spacing
@@ -265,7 +265,7 @@ export function box(props: BoxProps = {}): Cleanup {
   // --------------------------------------------------------------------------
   const shouldBeFocusable = props.focusable || (props.overflow === 'scroll' && props.focusable !== false)
   if (shouldBeFocusable) {
-    arrays.focusable.set(index, 1)
+    arrays.interactionFlags.set(index, 1) // FLAG_FOCUSABLE
     if (props.tabIndex !== undefined) disposals.push(repeat(numInput(props.tabIndex, -1), arrays.tabIndex, index))
   }
 
@@ -329,13 +329,6 @@ export function box(props: BoxProps = {}): Cleanup {
     if (props.borderColor !== undefined) disposals.push(repeat(colorInput(props.borderColor), arrays.borderColor, index))
   }
   if (props.opacity !== undefined) disposals.push(repeat(numInput(props.opacity), arrays.opacity, index))
-
-  // Border style (for rendering — separate from border width for layout)
-  if (props.border !== undefined)      disposals.push(repeat(numInput(props.border), arrays.borderStyle, index))
-  if (props.borderTop !== undefined)   disposals.push(repeat(numInput(props.borderTop), arrays.borderStyleTop, index))
-  if (props.borderRight !== undefined) disposals.push(repeat(numInput(props.borderRight), arrays.borderStyleRight, index))
-  if (props.borderBottom !== undefined) disposals.push(repeat(numInput(props.borderBottom), arrays.borderStyleBottom, index))
-  if (props.borderLeft !== undefined)  disposals.push(repeat(numInput(props.borderLeft), arrays.borderStyleLeft, index))
 
   // --------------------------------------------------------------------------
   // CHILDREN

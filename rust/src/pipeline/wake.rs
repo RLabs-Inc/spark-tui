@@ -1,6 +1,6 @@
 //! Wake watcher — adaptive spin-wait for TS → Rust notification.
 //!
-//! Monitors the wake flag in SharedBuffer using adaptive spinning:
+//! Monitors the wake flag in AoSBuffer using adaptive spinning:
 //!
 //! - Active use (typing, mouse):  spin_loop()  → nanosecond detection
 //! - Brief idle (between keys):   yield_now()  → microsecond detection
@@ -20,11 +20,11 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::input::reader::StdinMessage;
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer_aos::AoSBuffer;
 
 /// Adaptive spin-wait wake watcher thread.
 ///
-/// Monitors the SharedBuffer wake flag and forwards wake events
+/// Monitors the AoSBuffer wake flag and forwards wake events
 /// through the unified engine channel.
 pub struct WakeWatcher {
     handle: Option<JoinHandle<()>>,
@@ -33,11 +33,11 @@ pub struct WakeWatcher {
 impl WakeWatcher {
     /// Spawn the wake watcher thread.
     ///
-    /// - `buf`: SharedBuffer with the wake flag to monitor
+    /// - `buf`: AoSBuffer with the wake flag to monitor
     /// - `tx`: Sender for the unified engine channel (shared with stdin reader)
     /// - `running`: Shared shutdown flag
     pub fn spawn(
-        buf: &'static SharedBuffer,
+        buf: &'static AoSBuffer,
         tx: Sender<StdinMessage>,
         running: Arc<AtomicBool>,
     ) -> Self {
@@ -54,7 +54,7 @@ impl WakeWatcher {
     }
 
     fn watch_loop(
-        buf: &'static SharedBuffer,
+        buf: &'static AoSBuffer,
         tx: Sender<StdinMessage>,
         running: Arc<AtomicBool>,
     ) {

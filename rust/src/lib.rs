@@ -16,17 +16,14 @@
 //!        │ writes props                                 │ writes events
 //!        ▼                                              ▼
 //!   ┌────────────────────────────────────────────────────┐
-//!   │            SharedArrayBuffer (~2MB+)                │
-//!   │  Layout arrays ← TS writes, Rust reads              │
-//!   │  Visual arrays ← TS writes, Rust reads              │
-//!   │  Text pool     ← TS writes (+ Rust for input edits) │
-//!   │  Interaction   ← Rust writes (focus, scroll, hover)  │
-//!   │  Output        ← Rust writes (computed layout)        │
-//!   │  Event Ring    ← Rust writes, TS reads (callbacks)    │
+//!   │            SharedArrayBuffer (AoS ~26MB)            │
+//!   │  256 bytes per node (contiguous, cache-friendly)    │
+//!   │  Layout, Visual, Text, Interaction, Output          │
+//!   │  Event Ring Buffer (256 events)                     │
 //!   └────────────────────────────────────────────────────┘
 //! ```
 
-pub mod shared_buffer;
+pub mod shared_buffer_aos;
 pub mod types;
 pub mod layout;
 pub mod renderer;
@@ -34,18 +31,18 @@ pub mod framebuffer;
 pub mod input;
 pub mod pipeline;
 
-use shared_buffer::SharedBuffer;
+use shared_buffer_aos::AoSBuffer;
 use std::sync::OnceLock;
 
 // =============================================================================
 // GLOBAL STATE
 // =============================================================================
 
-/// The shared buffer, initialized once via FFI.
-static BUFFER: OnceLock<SharedBuffer> = OnceLock::new();
+/// The shared buffer (AoS layout), initialized once via FFI.
+static BUFFER: OnceLock<AoSBuffer> = OnceLock::new();
 
-fn get_buffer() -> &'static SharedBuffer {
-    BUFFER.get().expect("SharedBuffer not initialized - call spark_init() first")
+fn get_buffer() -> &'static AoSBuffer {
+    BUFFER.get().expect("AoSBuffer not initialized - call spark_init() first")
 }
 
 /// Global engine handle.
@@ -58,7 +55,7 @@ static ENGINE: OnceLock<pipeline::Engine> = OnceLock::new();
 /// Initialize the engine with a pointer to the SharedArrayBuffer.
 ///
 /// This:
-/// 1. Creates the SharedBuffer view
+/// 1. Creates the AoSBuffer view (256 bytes per node, cache-friendly)
 /// 2. Starts the engine thread (terminal setup, stdin, reactive pipeline)
 ///
 /// Called once from TypeScript:
@@ -68,11 +65,11 @@ static ENGINE: OnceLock<pipeline::Engine> = OnceLock::new();
 /// ```
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_init(ptr: *mut u8, len: u32) -> u32 {
-    let buf = unsafe { SharedBuffer::from_ptr(ptr, len as usize) };
+    let buf = unsafe { AoSBuffer::from_raw(ptr, len as usize) };
     match BUFFER.set(buf) {
         Ok(_) => {
-            eprintln!("[spark-engine] Initialized with {}KB shared buffer ({} max nodes)",
-                len / 1024, shared_buffer::MAX_NODES);
+            eprintln!("[spark-engine] Initialized with {}KB AoS buffer ({} max nodes)",
+                len / 1024, shared_buffer_aos::MAX_NODES);
 
             // Start the engine
             let buf = get_buffer();
@@ -96,28 +93,28 @@ pub extern "C" fn spark_init(ptr: *mut u8, len: u32) -> u32 {
 
 /// Compute layout using Taffy's low-level trait API and write results to the output section.
 ///
-/// Uses `LayoutTree` which implements Taffy's traits directly on SharedBuffer.
+/// Uses AoS buffer with cache-friendly 256-byte node stride.
 /// NodeId IS the component index — zero translation, zero double-bookkeeping.
 ///
 /// Returns the number of nodes laid out.
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_compute_layout() -> u32 {
     let buf = get_buffer();
-    layout::compute_layout_direct(buf)
+    layout::compute_layout_aos(buf)
 }
 
-/// Compute framebuffer from SharedBuffer data and render to terminal.
+/// Compute framebuffer from AoSBuffer data and render to terminal.
 ///
 /// Called by TS after writing props to trigger a render.
 /// In the full reactive pipeline, this happens automatically via the engine thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_render() -> u32 {
     let buf = get_buffer();
-    let tw = buf.terminal_width();
-    let th = buf.terminal_height();
+    let tw = buf.terminal_width() as u16;
+    let th = buf.terminal_height() as u16;
 
     // Layout
-    layout::compute_layout_direct(buf);
+    layout::compute_layout_aos(buf);
 
     // Framebuffer
     let (fb, _hit_regions) = framebuffer::compute_framebuffer(buf, tw, th);
@@ -129,7 +126,7 @@ pub extern "C" fn spark_render() -> u32 {
 /// Get the total shared buffer size needed (for TypeScript to allocate).
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_buffer_size() -> u32 {
-    shared_buffer::TOTAL_BUFFER_SIZE as u32
+    shared_buffer_aos::TOTAL_BUFFER_SIZE as u32
 }
 
 /// Wake the engine (TS calls this after writing props to SharedBuffer).
@@ -323,3 +320,4 @@ pub extern "C" fn spark_test_atomic_wait(ptr: *mut u8, mode: u32) -> u32 {
 
     0
 }
+

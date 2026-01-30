@@ -5,9 +5,9 @@
 //!
 //! All text editing happens directly in SharedBuffer's text pool.
 
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer_aos::AoSBuffer;
 use super::parser::{KeyEvent, KeyCode, Modifier};
-use super::events::{Event, EventRingBuffer};
+use super::events::Event;
 
 /// Text editor for input components.
 pub struct TextEditor;
@@ -21,8 +21,7 @@ impl TextEditor {
     /// Returns true if the event was consumed.
     pub fn handle_key(
         &mut self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         index: usize,
         key: &KeyEvent,
     ) -> bool {
@@ -31,15 +30,15 @@ impl TextEditor {
                 if key.modifiers.contains(Modifier::CTRL) || key.modifiers.contains(Modifier::ALT) {
                     return false; // Don't consume modified chars
                 }
-                self.insert_char(buf, events, index, *ch);
+                self.insert_char(buf, index, *ch);
                 true
             }
             KeyCode::Backspace => {
-                self.delete_backward(buf, events, index);
+                self.delete_backward(buf, index);
                 true
             }
             KeyCode::Delete => {
-                self.delete_forward(buf, events, index);
+                self.delete_forward(buf, index);
                 true
             }
             KeyCode::Left => {
@@ -60,11 +59,11 @@ impl TextEditor {
                 true
             }
             KeyCode::Enter => {
-                events.push(Event::submit(index as u16));
+                buf.push_event(&Event::submit(index as u16));
                 true
             }
             KeyCode::Escape => {
-                events.push(Event::cancel(index as u16));
+                buf.push_event(&Event::cancel(index as u16));
                 true
             }
             _ => false,
@@ -74,8 +73,7 @@ impl TextEditor {
     /// Insert a character at the cursor position.
     fn insert_char(
         &self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         index: usize,
         ch: char,
     ) {
@@ -94,14 +92,13 @@ impl TextEditor {
         buf.write_text(index, &new_text);
         buf.set_cursor_position(index, (cursor + 1) as i32);
 
-        events.push(Event::value_change(index as u16));
+        buf.push_event(&Event::value_change(index as u16));
     }
 
     /// Delete character before cursor (Backspace).
     fn delete_backward(
         &self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         index: usize,
     ) {
         let content = buf.text_content(index).to_string();
@@ -119,14 +116,13 @@ impl TextEditor {
         buf.write_text(index, &new_text);
         buf.set_cursor_position(index, (cursor - 1) as i32);
 
-        events.push(Event::value_change(index as u16));
+        buf.push_event(&Event::value_change(index as u16));
     }
 
     /// Delete character after cursor (Delete key).
     fn delete_forward(
         &self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         index: usize,
     ) {
         let content = buf.text_content(index).to_string();
@@ -144,11 +140,11 @@ impl TextEditor {
         buf.write_text(index, &new_text);
         // Cursor stays at same position
 
-        events.push(Event::value_change(index as u16));
+        buf.push_event(&Event::value_change(index as u16));
     }
 
     /// Move cursor by delta (-1 for left, +1 for right).
-    fn move_cursor(&self, buf: &SharedBuffer, index: usize, delta: i32) {
+    fn move_cursor(&self, buf: &AoSBuffer, index: usize, delta: i32) {
         let len = self.char_count(buf, index) as i32;
         let current = buf.cursor_position(index);
         let new_pos = (current + delta).clamp(0, len);
@@ -156,7 +152,7 @@ impl TextEditor {
     }
 
     /// Get the character count of the text content.
-    fn char_count(&self, buf: &SharedBuffer, index: usize) -> usize {
+    fn char_count(&self, buf: &AoSBuffer, index: usize) -> usize {
         buf.text_content(index).chars().count()
     }
 }

@@ -7,21 +7,24 @@
 
 import type { RGBA } from '../types'
 import { TERMINAL_DEFAULT } from '../types/color'
-import * as core from './arrays/core'
-import * as visual from './arrays/visual'
+import { getAoSArrays, isInitialized } from '../bridge'
+import { unpackColor } from '../bridge/shared-buffer-aos'
 
 /**
  * Get inherited foreground color by walking up the parent tree.
  * Returns TERMINAL_DEFAULT if no explicit color is found.
  */
 export function getInheritedFg(index: number): RGBA {
+  if (!isInitialized()) return TERMINAL_DEFAULT
+
+  const arrays = getAoSArrays()
   let current: number = index
 
   while (current >= 0) {
-    const fg = visual.fgColor[current]
-    if (fg !== null && fg !== undefined) return fg
-    const parent = core.parentIndex[current]
-    if (parent === undefined || parent < 0) break
+    const fgPacked = arrays.fgColor.get(current)
+    if (fgPacked !== 0) return unpackColor(fgPacked)
+    const parent = arrays.parentIndex.get(current)
+    if (parent < 0) break
     current = parent
   }
 
@@ -33,13 +36,16 @@ export function getInheritedFg(index: number): RGBA {
  * Returns TERMINAL_DEFAULT if no explicit color is found.
  */
 export function getInheritedBg(index: number): RGBA {
+  if (!isInitialized()) return TERMINAL_DEFAULT
+
+  const arrays = getAoSArrays()
   let current: number = index
 
   while (current >= 0) {
-    const bg = visual.bgColor[current]
-    if (bg !== null && bg !== undefined) return bg
-    const parent = core.parentIndex[current]
-    if (parent === undefined || parent < 0) break
+    const bgPacked = arrays.bgColor.get(current)
+    if (bgPacked !== 0) return unpackColor(bgPacked)
+    const parent = arrays.parentIndex.get(current)
+    if (parent < 0) break
     current = parent
   }
 
@@ -47,23 +53,18 @@ export function getInheritedBg(index: number): RGBA {
 }
 
 /**
- * Get inherited border color for a specific side.
+ * Get inherited border color.
  * Falls back to unified border color, then foreground color.
+ * Note: Per-side border colors not yet in AoS layout.
  */
-export function getInheritedBorderColor(index: number, side: 'top' | 'right' | 'bottom' | 'left'): RGBA {
-  const colorArray = {
-    top: visual.borderColorTop,
-    right: visual.borderColorRight,
-    bottom: visual.borderColorBottom,
-    left: visual.borderColorLeft,
-  }[side]
+export function getInheritedBorderColor(index: number, _side: 'top' | 'right' | 'bottom' | 'left'): RGBA {
+  if (!isInitialized()) return TERMINAL_DEFAULT
 
-  const color = colorArray[index]
-  if (color !== null && color !== undefined) return color
+  const arrays = getAoSArrays()
 
   // Try unified border color
-  const unifiedColor = visual.borderColor[index]
-  if (unifiedColor !== null && unifiedColor !== undefined) return unifiedColor
+  const borderPacked = arrays.borderColor.get(index)
+  if (borderPacked !== 0) return unpackColor(borderPacked)
 
   // Fall back to foreground color
   return getInheritedFg(index)
@@ -79,14 +80,21 @@ export function getBorderColors(index: number): {
   left: RGBA
 } {
   const fg = getInheritedFg(index)
-  const unified = visual.borderColor[index]
-  const fallback = unified ?? fg
 
+  if (!isInitialized()) {
+    return { top: fg, right: fg, bottom: fg, left: fg }
+  }
+
+  const arrays = getAoSArrays()
+  const borderPacked = arrays.borderColor.get(index)
+  const fallback = borderPacked !== 0 ? unpackColor(borderPacked) : fg
+
+  // Note: Per-side border colors not yet in AoS layout, use unified
   return {
-    top: visual.borderColorTop[index] ?? fallback,
-    right: visual.borderColorRight[index] ?? fallback,
-    bottom: visual.borderColorBottom[index] ?? fallback,
-    left: visual.borderColorLeft[index] ?? fallback,
+    top: fallback,
+    right: fallback,
+    bottom: fallback,
+    left: fallback,
   }
 }
 
@@ -100,13 +108,17 @@ export function getBorderStyles(index: number): {
   bottom: number
   left: number
 } {
-  const unified = visual.borderStyle[index] || 0
+  if (!isInitialized()) {
+    return { top: 0, right: 0, bottom: 0, left: 0 }
+  }
+
+  const arrays = getAoSArrays()
 
   return {
-    top: visual.borderTop[index] || unified,
-    right: visual.borderRight[index] || unified,
-    bottom: visual.borderBottom[index] || unified,
-    left: visual.borderLeft[index] || unified,
+    top: arrays.borderTopWidth.get(index),
+    right: arrays.borderRightWidth.get(index),
+    bottom: arrays.borderBottomWidth.get(index),
+    left: arrays.borderLeftWidth.get(index),
   }
 }
 
@@ -122,15 +134,19 @@ export function hasBorder(index: number): boolean {
  * Get effective opacity by multiplying down the parent chain.
  */
 export function getEffectiveOpacity(index: number): number {
-  let opacity = 1
-  let current: number | undefined = index
+  if (!isInitialized()) return 1
 
-  while (current !== undefined && current >= 0) {
-    const nodeOpacity = visual.opacity[current]
-    if (nodeOpacity !== undefined && nodeOpacity !== 1) {
-      opacity *= nodeOpacity
+  const arrays = getAoSArrays()
+  let opacity = 1
+  let current: number = index
+
+  while (current >= 0) {
+    const nodeOpacity = arrays.opacity.get(current)
+    if (nodeOpacity !== 0 && nodeOpacity !== 255) {
+      // opacity is stored as u8 (0-255), convert to 0-1
+      opacity *= nodeOpacity / 255
     }
-    current = core.parentIndex[current]
+    current = arrays.parentIndex.get(current)
   }
 
   return opacity

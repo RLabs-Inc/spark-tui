@@ -12,13 +12,8 @@
 
 import { ReactiveSet } from '@rlabs-inc/signals'
 import { runDestroyCallbacks, resetLifecycle } from './lifecycle'
-import { isInitialized, getArrays, getViews } from '../bridge'
-import {
-  setNodeCount,
-  I32_PARENT_INDEX,
-  COMPONENT_NONE,
-  U8_COMPONENT_TYPE,
-} from '../bridge/shared-buffer'
+import { isInitializedAoS, getAoSBuffer, getAoSArrays } from '../bridge'
+import { setNodeCount, COMPONENT_NONE } from '../bridge/shared-buffer-aos'
 
 // =============================================================================
 // Registry State
@@ -100,10 +95,10 @@ export function allocateIndex(id?: string): number {
   allocatedIndices.add(index)
 
   // Update node count in shared buffer header
-  if (isInitialized()) {
-    const views = getViews()
+  if (isInitializedAoS()) {
+    const buf = getAoSBuffer()
     const count = allocatedIndices.size
-    setNodeCount(views, count > nextIndex ? count : nextIndex)
+    setNodeCount(buf, count > nextIndex ? count : nextIndex)
   }
 
   return index
@@ -120,13 +115,10 @@ export function releaseIndex(index: number): void {
   if (id === undefined) return
 
   // FIRST: Find and release all children (recursive!)
-  // Read parent index from SharedArrayBuffer (raw i32 view — non-reactive, just a lookup)
-  const views = isInitialized() ? getViews() : null
+  const arrays = isInitializedAoS() ? getAoSArrays() : null
   const children: number[] = []
   for (const childIndex of allocatedIndices) {
-    const parentIdx = views
-      ? views.i32[I32_PARENT_INDEX][childIndex]
-      : -1
+    const parentIdx = arrays ? arrays.parentIndex.get(childIndex) : -1
     if (parentIdx === index) {
       children.push(childIndex)
     }
@@ -145,9 +137,9 @@ export function releaseIndex(index: number): void {
   allocatedIndices.delete(index)
 
   // Mark node as unused in SharedBuffer (Rust skips NONE component type)
-  if (views) {
-    views.u8[U8_COMPONENT_TYPE][index] = COMPONENT_NONE
-    views.i32[I32_PARENT_INDEX][index] = -1
+  if (arrays) {
+    arrays.componentType.set(index, COMPONENT_NONE)
+    arrays.parentIndex.set(index, -1)
   }
 
   // Return to pool for reuse
@@ -157,7 +149,9 @@ export function releaseIndex(index: number): void {
   if (allocatedIndices.size === 0) {
     freeIndices.length = 0
     nextIndex = 0
-    if (views) setNodeCount(views, 0)
+    if (isInitializedAoS()) {
+      setNodeCount(getAoSBuffer(), 0)
+    }
   }
 }
 
@@ -209,7 +203,7 @@ export function resetRegistry(): void {
   idCounter = 0
   parentStack.length = 0
   resetLifecycle()
-  if (isInitialized()) {
-    setNodeCount(getViews(), 0)
+  if (isInitializedAoS()) {
+    setNodeCount(getAoSBuffer(), 0)
   }
 }

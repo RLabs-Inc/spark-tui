@@ -5,8 +5,8 @@
 //!
 //! All state is stored in SharedBuffer interaction arrays.
 
-use crate::shared_buffer::SharedBuffer;
-use super::events::{Event, EventRingBuffer};
+use crate::shared_buffer_aos::AoSBuffer;
+use super::events::Event;
 
 // =============================================================================
 // Focus State
@@ -44,8 +44,7 @@ impl FocusManager {
     /// Focus a specific component.
     pub fn focus(
         &mut self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         index: usize,
     ) {
         let node_count = buf.node_count();
@@ -60,23 +59,25 @@ impl FocusManager {
 
         // Blur previous
         if let Some(prev) = self.focused() {
-            events.push(Event::blur(prev as u16));
+            buf.push_event(&Event::blur(prev as u16));
         }
 
         self.focused_index = index as i32;
-        events.push(Event::focus(index as u16));
+        buf.set_focused_index(index as i32); // Sync to SharedBuffer for rendering!
+        buf.push_event(&Event::focus(index as u16));
     }
 
     /// Clear focus.
-    pub fn blur(&mut self, events: &mut EventRingBuffer) {
+    pub fn blur(&mut self, buf: &AoSBuffer) {
         if let Some(prev) = self.focused() {
-            events.push(Event::blur(prev as u16));
+            buf.push_event(&Event::blur(prev as u16));
         }
         self.focused_index = -1;
+        buf.set_focused_index(-1); // Sync to SharedBuffer!
     }
 
     /// Focus next focusable component (Tab navigation).
-    pub fn focus_next(&mut self, buf: &SharedBuffer, events: &mut EventRingBuffer) {
+    pub fn focus_next(&mut self, buf: &AoSBuffer) {
         let focusables = self.get_focusable_list(buf);
         if focusables.is_empty() {
             return;
@@ -93,11 +94,11 @@ impl FocusManager {
             None => focusables[0],
         };
 
-        self.focus(buf, events, next);
+        self.focus(buf, next);
     }
 
     /// Focus previous focusable component (Shift+Tab navigation).
-    pub fn focus_previous(&mut self, buf: &SharedBuffer, events: &mut EventRingBuffer) {
+    pub fn focus_previous(&mut self, buf: &AoSBuffer) {
         let focusables = self.get_focusable_list(buf);
         if focusables.is_empty() {
             return;
@@ -115,11 +116,11 @@ impl FocusManager {
             None => focusables[focusables.len() - 1],
         };
 
-        self.focus(buf, events, prev);
+        self.focus(buf, prev);
     }
 
     /// Get sorted list of focusable component indices.
-    fn get_focusable_list(&self, buf: &SharedBuffer) -> Vec<usize> {
+    fn get_focusable_list(&self, buf: &AoSBuffer) -> Vec<usize> {
         let node_count = buf.node_count();
         let mut focusables: Vec<(i32, usize)> = Vec::new();
 
@@ -150,7 +151,7 @@ impl FocusManager {
     }
 
     /// Check if a component is within the current focus trap.
-    fn is_in_focus_trap(&self, buf: &SharedBuffer, index: usize) -> bool {
+    fn is_in_focus_trap(&self, buf: &AoSBuffer, index: usize) -> bool {
         if self.trap_stack.is_empty() {
             return true; // No trap active
         }
@@ -186,12 +187,12 @@ impl FocusManager {
     }
 
     /// Restore focus from history.
-    pub fn restore_focus(&mut self, buf: &SharedBuffer, events: &mut EventRingBuffer) {
+    pub fn restore_focus(&mut self, buf: &AoSBuffer) {
         if let Some(idx) = self.history.pop() {
             if idx >= 0 {
-                self.focus(buf, events, idx as usize);
+                self.focus(buf, idx as usize);
             } else {
-                self.blur(events);
+                self.blur(buf);
             }
         }
     }
@@ -199,15 +200,14 @@ impl FocusManager {
     /// Focus a component by click (focus-on-click).
     pub fn focus_by_click(
         &mut self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         component_index: usize,
     ) {
         // Walk up from clicked component to find a focusable ancestor
         let mut current = Some(component_index);
         while let Some(idx) = current {
             if buf.focusable(idx) && buf.visible(idx) {
-                self.focus(buf, events, idx);
+                self.focus(buf, idx);
                 return;
             }
             current = buf.parent_index(idx);

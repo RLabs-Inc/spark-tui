@@ -1,14 +1,14 @@
-//! Color and opacity inheritance via SharedBuffer parent chain.
+//! Color and opacity inheritance via AoSBuffer parent chain.
 //!
 //! Components inherit fg/bg colors from ancestors. Opacity cascades
 //! (multiplies) down the tree.
 
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer_aos::AoSBuffer;
 use crate::types::Rgba;
 
 /// Get effective foreground color, walking up the parent chain.
 /// Returns the first non-terminal-default fg, or TERMINAL_DEFAULT if none.
-pub fn get_inherited_fg(buf: &SharedBuffer, node: usize) -> Rgba {
+pub fn get_inherited_fg(buf: &AoSBuffer, node: usize) -> Rgba {
     let mut current = Some(node);
     while let Some(idx) = current {
         let fg = buf.fg_rgba(idx);
@@ -22,7 +22,7 @@ pub fn get_inherited_fg(buf: &SharedBuffer, node: usize) -> Rgba {
 
 /// Get effective background color, walking up the parent chain.
 /// Returns the first non-terminal-default bg, or TERMINAL_DEFAULT if none.
-pub fn get_inherited_bg(buf: &SharedBuffer, node: usize) -> Rgba {
+pub fn get_inherited_bg(buf: &AoSBuffer, node: usize) -> Rgba {
     let mut current = Some(node);
     while let Some(idx) = current {
         let bg = buf.bg_rgba(idx);
@@ -36,7 +36,7 @@ pub fn get_inherited_bg(buf: &SharedBuffer, node: usize) -> Rgba {
 
 /// Get effective opacity, multiplying up the parent chain.
 /// Opacity stored as u8 (0-255), returned as f32 (0.0-1.0).
-pub fn get_effective_opacity(buf: &SharedBuffer, node: usize) -> f32 {
+pub fn get_effective_opacity(buf: &AoSBuffer, node: usize) -> f32 {
     let mut opacity = 1.0f32;
     let mut current = Some(node);
     while let Some(idx) = current {

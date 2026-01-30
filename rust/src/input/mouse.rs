@@ -1,14 +1,14 @@
 //! Mouse dispatch and HitGrid for O(1) component lookup.
 //!
 //! Routes mouse events through:
-//! - HitGrid: O(1) lookup from (x, y) → component_index
+//! - HitGrid: O(1) lookup from (x, y) -> component_index
 //! - Hover tracking: enter/leave events
 //! - Click detection: press + release on same component
 //! - Scroll wheel: route to component under cursor
 
-use crate::shared_buffer::SharedBuffer;
+use crate::shared_buffer_aos::AoSBuffer;
 use super::parser::{MouseEvent, MouseKind, MouseButton};
-use super::events::{Event, EventType, EventRingBuffer};
+use super::events::{Event, EventType};
 use super::focus::FocusManager;
 use super::scroll::ScrollManager;
 
@@ -16,7 +16,7 @@ use super::scroll::ScrollManager;
 // HitGrid
 // =============================================================================
 
-/// Flat grid mapping screen coordinates → component index.
+/// Flat grid mapping screen coordinates -> component index.
 ///
 /// O(1) lookup: just index `grid[y * width + x]`.
 /// -1 = no component at this position.
@@ -103,8 +103,7 @@ impl MouseManager {
     /// Dispatch a mouse event.
     pub fn dispatch(
         &mut self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         focus: &mut FocusManager,
         scroll: &mut ScrollManager,
         mouse: &MouseEvent,
@@ -113,32 +112,32 @@ impl MouseManager {
 
         match mouse.kind {
             MouseKind::Move => {
-                self.handle_hover(buf, events, target);
+                self.handle_hover(buf, target);
             }
             MouseKind::Press(button) => {
                 // Update hover first
-                self.handle_hover(buf, events, target);
+                self.handle_hover(buf, target);
 
                 if let Some(idx) = target {
                     self.pressed_component = Some(idx);
                     self.pressed_button = Some(button);
 
-                    // Set pressed state in SharedBuffer
+                    // Set pressed state in AoSBuffer
                     buf.set_pressed(idx, true);
 
                     // Write mouse down event
-                    events.push(Event::mouse(
+                    buf.push_event(&Event::mouse(
                         EventType::MouseDown, idx as u16, mouse.x, mouse.y, button as u8,
                     ));
 
                     // Focus on click
-                    focus.focus_by_click(buf, events, idx);
+                    focus.focus_by_click(buf, idx);
                 }
             }
             MouseKind::Release(button) => {
                 if let Some(idx) = target {
                     // Write mouse up event
-                    events.push(Event::mouse(
+                    buf.push_event(&Event::mouse(
                         EventType::MouseUp, idx as u16, mouse.x, mouse.y, button as u8,
                     ));
 
@@ -146,7 +145,7 @@ impl MouseManager {
                     if self.pressed_component == Some(idx)
                         && self.pressed_button == Some(button)
                     {
-                        events.push(Event::mouse(
+                        buf.push_event(&Event::mouse(
                             EventType::Click, idx as u16, mouse.x, mouse.y, button as u8,
                         ));
                     }
@@ -162,19 +161,19 @@ impl MouseManager {
                 // Route to component under cursor, or focused scrollable
                 if let Some(idx) = target {
                     scroll.scroll_by(buf, idx, 0, -3);
-                    events.push(Event::scroll(idx as u16, 0, -3));
+                    buf.push_event(&Event::scroll(idx as u16, 0, -3));
                 } else if let Some(focused) = focus.focused() {
                     scroll.scroll_by(buf, focused, 0, -3);
-                    events.push(Event::scroll(focused as u16, 0, -3));
+                    buf.push_event(&Event::scroll(focused as u16, 0, -3));
                 }
             }
             MouseKind::ScrollDown => {
                 if let Some(idx) = target {
                     scroll.scroll_by(buf, idx, 0, 3);
-                    events.push(Event::scroll(idx as u16, 0, 3));
+                    buf.push_event(&Event::scroll(idx as u16, 0, 3));
                 } else if let Some(focused) = focus.focused() {
                     scroll.scroll_by(buf, focused, 0, 3);
-                    events.push(Event::scroll(focused as u16, 0, 3));
+                    buf.push_event(&Event::scroll(focused as u16, 0, 3));
                 }
             }
         }
@@ -183,8 +182,7 @@ impl MouseManager {
     /// Handle hover state changes (enter/leave events).
     fn handle_hover(
         &mut self,
-        buf: &SharedBuffer,
-        events: &mut EventRingBuffer,
+        buf: &AoSBuffer,
         target: Option<usize>,
     ) {
         if target == self.hovered {
@@ -194,7 +192,7 @@ impl MouseManager {
         // Leave previous
         if let Some(prev) = self.hovered.take() {
             buf.set_hovered(prev, false);
-            events.push(Event::mouse(
+            buf.push_event(&Event::mouse(
                 EventType::MouseLeave, prev as u16, 0, 0, 0,
             ));
         }
@@ -202,7 +200,7 @@ impl MouseManager {
         // Enter new
         if let Some(idx) = target {
             buf.set_hovered(idx, true);
-            events.push(Event::mouse(
+            buf.push_event(&Event::mouse(
                 EventType::MouseEnter, idx as u16, 0, 0, 0,
             ));
             self.hovered = Some(idx);
