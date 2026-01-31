@@ -1,17 +1,17 @@
-//! Color and opacity inheritance via AoSBuffer parent chain.
+//! Color and opacity inheritance via SharedBuffer parent chain.
 //!
 //! Components inherit fg/bg colors from ancestors. Opacity cascades
 //! (multiplies) down the tree.
 
-use crate::shared_buffer_aos::AoSBuffer;
+use crate::shared_buffer::SharedBuffer;
 use crate::utils::Rgba;
 
 /// Get effective foreground color, walking up the parent chain.
 /// Returns the first non-terminal-default fg, or TERMINAL_DEFAULT if none.
-pub fn get_inherited_fg(buf: &AoSBuffer, node: usize) -> Rgba {
+pub fn get_inherited_fg(buf: &SharedBuffer, node: usize) -> Rgba {
     let mut current = Some(node);
     while let Some(idx) = current {
-        let fg = buf.fg_rgba(idx);
+        let fg = Rgba::from_u32(buf.fg_color(idx));
         if !fg.is_terminal_default() {
             return fg;
         }
@@ -22,10 +22,10 @@ pub fn get_inherited_fg(buf: &AoSBuffer, node: usize) -> Rgba {
 
 /// Get effective background color, walking up the parent chain.
 /// Returns the first non-terminal-default bg, or TERMINAL_DEFAULT if none.
-pub fn get_inherited_bg(buf: &AoSBuffer, node: usize) -> Rgba {
+pub fn get_inherited_bg(buf: &SharedBuffer, node: usize) -> Rgba {
     let mut current = Some(node);
     while let Some(idx) = current {
-        let bg = buf.bg_rgba(idx);
+        let bg = Rgba::from_u32(buf.bg_color(idx));
         if !bg.is_terminal_default() {
             return bg;
         }
@@ -35,13 +35,17 @@ pub fn get_inherited_bg(buf: &AoSBuffer, node: usize) -> Rgba {
 }
 
 /// Get effective opacity, multiplying up the parent chain.
-/// Opacity stored as u8 (0-255), returned as f32 (0.0-1.0).
-pub fn get_effective_opacity(buf: &AoSBuffer, node: usize) -> f32 {
+/// Opacity is stored as f32 (0.0-1.0) in SharedBuffer.
+pub fn get_effective_opacity(buf: &SharedBuffer, node: usize) -> f32 {
     let mut opacity = 1.0f32;
     let mut current = Some(node);
     while let Some(idx) = current {
         let op = buf.opacity(idx);
-        opacity *= op as f32 / 255.0;
+        // SharedBuffer stores opacity as f32 0.0-1.0
+        // Treat 0.0 as "not set" (fully opaque)
+        if op > 0.0 {
+            opacity *= op;
+        }
         current = buf.parent_index(idx);
     }
     opacity.clamp(0.0, 1.0)

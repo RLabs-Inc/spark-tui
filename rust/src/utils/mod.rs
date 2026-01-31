@@ -241,44 +241,108 @@ impl Default for Cell {
 
 /// A clipping rectangle for overflow handling.
 ///
-/// TODO: When rewriting render_tree.rs/buffer.rs, change x/y to i32
-/// to support negative scroll positions properly.
+/// Uses i32 for x/y to support negative positions from scroll offsets.
+/// Width/height remain u16 (dimensions are never negative).
+///
+/// The coordinate system:
+/// - Negative x/y means the rect starts off-screen (scrolled out of view)
+/// - Intersection handles negatives naturally
+/// - Clamp to >= 0 only at final render time (in FrameBuffer methods)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClipRect {
-    pub x: u16,
-    pub y: u16,
+    pub x: i32,
+    pub y: i32,
     pub width: u16,
     pub height: u16,
 }
 
 impl ClipRect {
-    pub const fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
+    pub const fn new(x: i32, y: i32, width: u16, height: u16) -> Self {
         Self { x, y, width, height }
     }
 
-    /// Check if a point is inside this rect.
+    /// Create from unsigned coordinates (convenience for screen-space rects).
+    #[inline]
+    pub const fn from_unsigned(x: u16, y: u16, width: u16, height: u16) -> Self {
+        Self { x: x as i32, y: y as i32, width, height }
+    }
+
+    /// Right edge (x + width).
+    #[inline]
+    pub const fn right(&self) -> i32 {
+        self.x + self.width as i32
+    }
+
+    /// Bottom edge (y + height).
+    #[inline]
+    pub const fn bottom(&self) -> i32 {
+        self.y + self.height as i32
+    }
+
+    /// Check if a screen point (always non-negative) is inside this rect.
+    ///
+    /// Screen points are u16 because terminal coordinates are never negative.
+    /// The clip rect may have negative x/y from scroll offsets.
     #[inline]
     pub fn contains(&self, px: u16, py: u16) -> bool {
-        px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
+        let px = px as i32;
+        let py = py as i32;
+        px >= self.x && px < self.right() && py >= self.y && py < self.bottom()
+    }
+
+    /// Check if a signed point is inside this rect.
+    #[inline]
+    pub fn contains_signed(&self, px: i32, py: i32) -> bool {
+        px >= self.x && px < self.right() && py >= self.y && py < self.bottom()
     }
 
     /// Compute intersection of two rects.
+    ///
+    /// Works correctly with negative coordinates. Returns None if no overlap.
     pub fn intersect(&self, other: &ClipRect) -> Option<ClipRect> {
         let x1 = self.x.max(other.x);
         let y1 = self.y.max(other.y);
-        let x2 = (self.x + self.width).min(other.x + other.width);
-        let y2 = (self.y + self.height).min(other.y + other.height);
+        let x2 = self.right().min(other.right());
+        let y2 = self.bottom().min(other.bottom());
 
         if x2 > x1 && y2 > y1 {
             Some(ClipRect {
                 x: x1,
                 y: y1,
-                width: x2 - x1,
-                height: y2 - y1,
+                width: (x2 - x1) as u16,
+                height: (y2 - y1) as u16,
             })
         } else {
             None
         }
+    }
+
+    /// Get the visible portion of this rect on screen (clamped to non-negative).
+    ///
+    /// Call this only when actually rendering to get screen coordinates.
+    /// Returns None if the rect is entirely off-screen.
+    pub fn visible_on_screen(&self) -> Option<(u16, u16, u16, u16)> {
+        // If entirely off screen (negative right/bottom), nothing visible
+        if self.right() <= 0 || self.bottom() <= 0 {
+            return None;
+        }
+
+        // Clamp to screen (x,y >= 0)
+        let screen_x = self.x.max(0) as u16;
+        let screen_y = self.y.max(0) as u16;
+
+        // Adjust width/height for the portion that was clipped
+        let clipped_left = if self.x < 0 { (-self.x) as u16 } else { 0 };
+        let clipped_top = if self.y < 0 { (-self.y) as u16 } else { 0 };
+
+        let visible_width = self.width.saturating_sub(clipped_left);
+        let visible_height = self.height.saturating_sub(clipped_top);
+
+        if visible_width == 0 || visible_height == 0 {
+            return None;
+        }
+
+        Some((screen_x, screen_y, visible_width, visible_height))
     }
 }
 

@@ -5,8 +5,7 @@
 //!
 //! All state is stored in SharedBuffer interaction arrays.
 
-use crate::shared_buffer_aos::AoSBuffer;
-use super::events::Event;
+use crate::shared_buffer::SharedBuffer;
 
 // =============================================================================
 // Focus State
@@ -44,7 +43,7 @@ impl FocusManager {
     /// Focus a specific component.
     pub fn focus(
         &mut self,
-        buf: &AoSBuffer,
+        buf: &SharedBuffer,
         index: usize,
     ) {
         let node_count = buf.node_count();
@@ -53,32 +52,32 @@ impl FocusManager {
         }
 
         // Must be focusable (explicit OR implicit via scrollable) and visible
-        let is_focusable = buf.focusable(index) || buf.output_scrollable(index);
+        let is_focusable = buf.focusable(index) || buf.is_scrollable(index);
         if !is_focusable || !buf.visible(index) {
             return;
         }
 
         // Blur previous
         if let Some(prev) = self.focused() {
-            buf.push_event(&Event::blur(prev as u16));
+            buf.push_blur_event(prev as u16);
         }
 
         self.focused_index = index as i32;
         buf.set_focused_index(index as i32); // Sync to SharedBuffer for rendering!
-        buf.push_event(&Event::focus(index as u16));
+        buf.push_focus_event(index as u16);
     }
 
     /// Clear focus.
-    pub fn blur(&mut self, buf: &AoSBuffer) {
+    pub fn blur(&mut self, buf: &SharedBuffer) {
         if let Some(prev) = self.focused() {
-            buf.push_event(&Event::blur(prev as u16));
+            buf.push_blur_event(prev as u16);
         }
         self.focused_index = -1;
         buf.set_focused_index(-1); // Sync to SharedBuffer!
     }
 
     /// Focus next focusable component (Tab navigation).
-    pub fn focus_next(&mut self, buf: &AoSBuffer) {
+    pub fn focus_next(&mut self, buf: &SharedBuffer) {
         let focusables = self.get_focusable_list(buf);
         if focusables.is_empty() {
             return;
@@ -99,7 +98,7 @@ impl FocusManager {
     }
 
     /// Focus previous focusable component (Shift+Tab navigation).
-    pub fn focus_previous(&mut self, buf: &AoSBuffer) {
+    pub fn focus_previous(&mut self, buf: &SharedBuffer) {
         let focusables = self.get_focusable_list(buf);
         if focusables.is_empty() {
             return;
@@ -121,7 +120,7 @@ impl FocusManager {
     }
 
     /// Get sorted list of focusable component indices.
-    fn get_focusable_list(&self, buf: &AoSBuffer) -> Vec<usize> {
+    fn get_focusable_list(&self, buf: &SharedBuffer) -> Vec<usize> {
         let node_count = buf.node_count();
         let mut focusables: Vec<(i32, usize)> = Vec::new();
 
@@ -131,7 +130,7 @@ impl FocusManager {
             }
             if !buf.focusable(i) {
                 // Check implicit focusable: scrollable boxes
-                if buf.output_scrollable(i) {
+                if buf.is_scrollable(i) {
                     // Implicit focusable (scroll boxes)
                 } else {
                     continue;
@@ -152,7 +151,7 @@ impl FocusManager {
     }
 
     /// Check if a component is within the current focus trap.
-    fn is_in_focus_trap(&self, buf: &AoSBuffer, index: usize) -> bool {
+    fn is_in_focus_trap(&self, buf: &SharedBuffer, index: usize) -> bool {
         if self.trap_stack.is_empty() {
             return true; // No trap active
         }
@@ -188,7 +187,7 @@ impl FocusManager {
     }
 
     /// Restore focus from history.
-    pub fn restore_focus(&mut self, buf: &AoSBuffer) {
+    pub fn restore_focus(&mut self, buf: &SharedBuffer) {
         if let Some(idx) = self.history.pop() {
             if idx >= 0 {
                 self.focus(buf, idx as usize);
@@ -201,7 +200,7 @@ impl FocusManager {
     /// Focus a component by click (focus-on-click).
     pub fn focus_by_click(
         &mut self,
-        buf: &AoSBuffer,
+        buf: &SharedBuffer,
         component_index: usize,
     ) {
         // Walk up from clicked component to find a focusable ancestor

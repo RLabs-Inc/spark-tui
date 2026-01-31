@@ -51,7 +51,6 @@ use crate::input::keyboard;
 use crate::input::mouse::MouseManager;
 use crate::input::scroll::ScrollManager;
 use crate::input::text_edit::TextEditor;
-use crate::input::cursor::BlinkManager;
 use crate::input::reader::{StdinReader, StdinMessage};
 use super::terminal::TerminalSetup;
 use super::wake::WakeWatcher;
@@ -153,7 +152,7 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     let mut focus = FocusManager::new();
     let mut editor = TextEditor::new();
     let mut scroll = ScrollManager::new();
-    let mut blink = BlinkManager::new();
+    // Cursor blink is handled by TS pulse() signal - no Rust-side timer needed
     let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(
         buf.terminal_width() as u16,
         buf.terminal_height() as u16,
@@ -265,15 +264,11 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     //
     // The engine thread blocks on channel.recv(). It wakes IMMEDIATELY when
     // either stdin data arrives OR the wake watcher detects TS wrote props.
-    // The only timeout is for cursor blink timers — a legitimate time-based
-    // signal source, not polling.
+    // No polling, no timers. Cursor blink is driven by TS pulse() signal.
 
     while running.load(Ordering::SeqCst) {
-        // Calculate timeout: only for blink timer, otherwise block indefinitely
-        let msg = match blink.next_deadline() {
-            Some(timeout) => rx.recv_timeout(timeout),
-            None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
-        };
+        // Block indefinitely until input or wake
+        let msg = rx.recv();
 
         match msg {
             Ok(StdinMessage::Data(data)) => {
@@ -313,13 +308,7 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
                 generation.set(generation.get() + 1);
             }
             Ok(StdinMessage::Closed) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Only blink timer expired — cursor blink is a signal SOURCE
-                if blink.tick(buf) {
-                    generation.set(generation.get() + 1);
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(_) => break, // Channel disconnected
         }
 
         // Flush incomplete escape sequences after timeout

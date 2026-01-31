@@ -6,12 +6,12 @@
  *
  * Memory Layout:
  *   - Header (256 bytes): Global state, wake flags, config
- *   - Nodes (512 bytes × MAX_NODES): Per-component data
+ *   - Nodes (1024 bytes × MAX_NODES): Per-component data
  *   - Text Pool (configurable): UTF-8 text content
  *   - Event Ring (5,132 bytes): Rust → TS event queue
  *
- * @version 2.0
- * @date 2026-01-30
+ * @version 3.0
+ * @date 2026-01-31
  */
 
 // =============================================================================
@@ -21,8 +21,8 @@
 /** Header size in bytes */
 export const HEADER_SIZE = 256;
 
-/** Bytes per node (8 cache lines × 64 bytes) */
-export const NODE_STRIDE = 512;
+/** Bytes per node (16 cache lines × 64 bytes) */
+export const NODE_STRIDE = 1024;
 
 /** Default maximum nodes */
 export const DEFAULT_MAX_NODES = 10_000;
@@ -41,6 +41,12 @@ export const MAX_EVENTS = 256;
 
 /** Total event ring size */
 export const EVENT_RING_SIZE = EVENT_RING_HEADER_SIZE + MAX_EVENTS * EVENT_SLOT_SIZE;
+
+/** Maximum grid tracks per axis */
+export const MAX_GRID_TRACKS = 32;
+
+/** Bytes per grid track (type u8 + padding u8 + value f32) */
+export const GRID_TRACK_SIZE = 6;
 
 /** NaN represents "auto" for dimension values */
 export const AUTO = NaN;
@@ -92,134 +98,169 @@ export const H_LAYOUT_COUNT = 196;
 // 200-255: reserved
 
 // =============================================================================
-// NODE FIELD OFFSETS (512 bytes per node)
+// NODE FIELD OFFSETS (1024 bytes per node)
 // =============================================================================
+// Organized in 16 cache lines (64 bytes each)
 
-// --- Cache Line 1 (0-63): Layout Dimensions ---
-export const F_WIDTH = 0;
-export const F_HEIGHT = 4;
-export const F_MIN_WIDTH = 8;
-export const F_MIN_HEIGHT = 12;
-export const F_MAX_WIDTH = 16;
-export const F_MAX_HEIGHT = 20;
-export const F_FLEX_BASIS = 24;
-export const F_FLEX_GROW = 28;
-export const F_FLEX_SHRINK = 32;
-export const F_PADDING_TOP = 36;
-export const F_PADDING_RIGHT = 40;
-export const F_PADDING_BOTTOM = 44;
-export const F_PADDING_LEFT = 48;
-export const F_MARGIN_TOP = 52;
-export const F_MARGIN_RIGHT = 56;
-export const F_MARGIN_BOTTOM = 60;
+// --- Cache Line 1 (0-63): Core Layout Dimensions ---
+export const N_WIDTH = 0;
+export const N_HEIGHT = 4;
+export const N_MIN_WIDTH = 8;
+export const N_MIN_HEIGHT = 12;
+export const N_MAX_WIDTH = 16;
+export const N_MAX_HEIGHT = 20;
+export const N_ASPECT_RATIO = 24;
+export const N_COMPONENT_TYPE = 28;
+export const N_DISPLAY = 29;
+export const N_POSITION = 30;
+export const N_OVERFLOW = 31;
+export const N_VISIBLE = 32;
+export const N_BOX_SIZING = 33;
+export const N_DIRTY_FLAGS = 34;
+// 35: reserved
+// 36-63: reserved
 
-// --- Cache Line 2 (64-127): Layout Spacing & Enums ---
-export const F_MARGIN_LEFT = 64;
-export const F_GAP = 68;
-export const F_ROW_GAP = 72;
-export const F_COLUMN_GAP = 76;
-export const F_INSET_TOP = 80;
-export const F_INSET_RIGHT = 84;
-export const F_INSET_BOTTOM = 88;
-export const F_INSET_LEFT = 92;
-export const U_FLEX_DIRECTION = 96;
-export const U_FLEX_WRAP = 97;
-export const U_JUSTIFY_CONTENT = 98;
-export const U_ALIGN_ITEMS = 99;
-export const U_ALIGN_CONTENT = 100;
-export const U_ALIGN_SELF = 101;
-export const U_POSITION = 102;
-export const U_OVERFLOW = 103;
-export const U_DISPLAY = 104;
-export const U_BORDER_WIDTH_TOP = 105;
-export const U_BORDER_WIDTH_RIGHT = 106;
-export const U_BORDER_WIDTH_BOTTOM = 107;
-export const U_BORDER_WIDTH_LEFT = 108;
-export const U_COMPONENT_TYPE = 109;
-export const U_VISIBLE = 110;
-// 111: reserved
-export const I_PARENT_INDEX = 112;
-export const I_TAB_INDEX = 116;
-export const I_CHILD_COUNT = 120;
-// 124-127: reserved
+// --- Cache Line 2 (64-127): Flexbox Properties ---
+export const N_FLEX_DIRECTION = 64;
+export const N_FLEX_WRAP = 65;
+export const N_JUSTIFY_CONTENT = 66;
+export const N_ALIGN_ITEMS = 67;
+export const N_ALIGN_CONTENT = 68;
+export const N_ALIGN_SELF = 69;
+// 70-71: reserved (alignment)
+export const N_FLEX_GROW = 72;
+export const N_FLEX_SHRINK = 76;
+export const N_FLEX_BASIS = 80;
+export const N_GAP = 84;
+export const N_ROW_GAP = 88;
+export const N_COLUMN_GAP = 92;
+// 96-127: reserved
 
-// --- Cache Line 3 (128-191): Output & Colors ---
-export const F_COMPUTED_X = 128;
-export const F_COMPUTED_Y = 132;
-export const F_COMPUTED_WIDTH = 136;
-export const F_COMPUTED_HEIGHT = 140;
-export const F_SCROLL_WIDTH = 144;
-export const F_SCROLL_HEIGHT = 148;
-export const F_MAX_SCROLL_X = 152;
-export const F_MAX_SCROLL_Y = 156;
-export const C_FG_COLOR = 160;
-export const C_BG_COLOR = 164;
-export const C_BORDER_COLOR = 168;
-export const C_BORDER_TOP_COLOR = 172;
-export const C_BORDER_RIGHT_COLOR = 176;
-export const C_BORDER_BOTTOM_COLOR = 180;
-export const C_BORDER_LEFT_COLOR = 184;
-export const C_FOCUS_RING_COLOR = 188;
+// --- Cache Line 3 (128-191): Spacing Properties ---
+export const N_PADDING_TOP = 128;
+export const N_PADDING_RIGHT = 132;
+export const N_PADDING_BOTTOM = 136;
+export const N_PADDING_LEFT = 140;
+export const N_MARGIN_TOP = 144;
+export const N_MARGIN_RIGHT = 148;
+export const N_MARGIN_BOTTOM = 152;
+export const N_MARGIN_LEFT = 156;
+export const N_INSET_TOP = 160;
+export const N_INSET_RIGHT = 164;
+export const N_INSET_BOTTOM = 168;
+export const N_INSET_LEFT = 172;
+export const N_BORDER_WIDTH_TOP = 176;
+export const N_BORDER_WIDTH_RIGHT = 177;
+export const N_BORDER_WIDTH_BOTTOM = 178;
+export const N_BORDER_WIDTH_LEFT = 179;
+export const N_PARENT_INDEX = 180;
+export const N_TAB_INDEX = 184;
+// 188-191: reserved
 
-// --- Cache Line 4 (192-255): Visual Properties ---
-export const C_CURSOR_FG_COLOR = 192;
-export const C_CURSOR_BG_COLOR = 196;
-export const C_SELECTION_COLOR = 200;
-export const U_OPACITY = 204;
-export const I_Z_INDEX = 205;
-export const U_BORDER_STYLE = 206;
-export const U_BORDER_STYLE_TOP = 207;
-export const U_BORDER_STYLE_RIGHT = 208;
-export const U_BORDER_STYLE_BOTTOM = 209;
-export const U_BORDER_STYLE_LEFT = 210;
-export const U_SCROLLABLE_FLAGS = 211;
-export const U_BORDER_CHAR_H = 212;
-export const U_BORDER_CHAR_V = 214;
-export const U_BORDER_CHAR_TL = 216;
-export const U_BORDER_CHAR_TR = 218;
-export const U_BORDER_CHAR_BL = 220;
-export const U_BORDER_CHAR_BR = 222;
-export const U_FOCUS_INDICATOR_CHAR = 224;
-export const U_FOCUS_INDICATOR_ENABLED = 225;
-// 226-255: reserved
+// --- Cache Line 4 (192-255): Grid Container Properties ---
+export const N_GRID_AUTO_FLOW = 192;
+export const N_JUSTIFY_ITEMS = 193;
+export const N_GRID_COLUMN_COUNT = 194;
+export const N_GRID_ROW_COUNT = 195;
+export const N_GRID_AUTO_COLUMNS_TYPE = 196;
+export const N_GRID_AUTO_ROWS_TYPE = 197;
+// 198-199: reserved (alignment)
+export const N_GRID_AUTO_COLUMNS_VALUE = 200;
+export const N_GRID_AUTO_ROWS_VALUE = 204;
+export const N_GRID_COLUMN_START = 208;
+export const N_GRID_COLUMN_END = 210;
+export const N_GRID_ROW_START = 212;
+export const N_GRID_ROW_END = 214;
+export const N_JUSTIFY_SELF = 216;
+// 217-255: reserved
 
-// --- Cache Line 5 (256-319): Text Properties ---
-export const U_TEXT_OFFSET = 256;
-export const U_TEXT_LENGTH = 260;
-export const U_TEXT_ALIGN = 264;
-export const U_TEXT_WRAP = 265;
-export const U_TEXT_OVERFLOW = 266;
-export const U_TEXT_ATTRS = 267;
-export const U_TEXT_DECORATION = 268;
-export const U_TEXT_DECORATION_STYLE = 269;
-export const C_TEXT_DECORATION_COLOR = 270;
-export const U_LINE_HEIGHT = 274;
-export const U_LETTER_SPACING = 275;
-export const U_MAX_LINES = 276;
-// 277-319: reserved
+// --- Cache Lines 5-7 (256-447): Grid Column Tracks ---
+// 32 tracks × 6 bytes each = 192 bytes
+export const N_GRID_COLUMN_TRACKS = 256;
 
-// --- Cache Line 6 (320-383): Interaction State ---
-export const I_SCROLL_X = 320;
-export const I_SCROLL_Y = 324;
-export const I_CURSOR_POSITION = 328;
-export const I_SELECTION_START = 332;
-export const I_SELECTION_END = 336;
-export const U_CURSOR_CHAR = 340;
-export const U_CURSOR_ALT_CHAR = 344;
-export const U_DIRTY_FLAGS = 348;
-export const U_INTERACTION_FLAGS = 349;
-export const U_CURSOR_FLAGS = 350;
-export const U_CURSOR_STYLE = 351;
-export const U_CURSOR_BLINK_RATE = 352;
-export const U_MAX_LENGTH = 353;
-export const U_INPUT_TYPE = 354;
-// 356-383: reserved
+// --- Cache Lines 8-10 (448-639): Grid Row Tracks ---
+// 32 tracks × 6 bytes each = 192 bytes
+export const N_GRID_ROW_TRACKS = 448;
 
-// --- Cache Line 7 (384-447): Animation (Reserved) ---
-// Reserved for future animation system
+// --- Cache Line 11 (640-703): Computed Output ---
+export const N_COMPUTED_X = 640;
+export const N_COMPUTED_Y = 644;
+export const N_COMPUTED_WIDTH = 648;
+export const N_COMPUTED_HEIGHT = 652;
+export const N_CONTENT_WIDTH = 656;
+export const N_CONTENT_HEIGHT = 660;
+export const N_MAX_SCROLL_X = 664;
+export const N_MAX_SCROLL_Y = 668;
+export const N_IS_SCROLLABLE = 672;
+// 673-703: reserved
 
-// --- Cache Line 8 (448-511): Effects & Transforms (Reserved) ---
-// Reserved for future effects and physics
+// --- Cache Line 12 (704-767): Visual Properties ---
+export const N_OPACITY = 704;
+export const N_Z_INDEX = 708;
+export const N_BORDER_STYLE = 712;
+export const N_BORDER_STYLE_TOP = 713;
+export const N_BORDER_STYLE_RIGHT = 714;
+export const N_BORDER_STYLE_BOTTOM = 715;
+export const N_BORDER_STYLE_LEFT = 716;
+export const N_SCROLLBAR_VISIBILITY = 717;
+export const N_BORDER_CHAR_H = 718;
+export const N_BORDER_CHAR_V = 720;
+export const N_BORDER_CHAR_TL = 722;
+export const N_BORDER_CHAR_TR = 724;
+export const N_BORDER_CHAR_BL = 726;
+export const N_BORDER_CHAR_BR = 728;
+export const N_FOCUS_INDICATOR_CHAR = 730;
+export const N_FOCUS_INDICATOR_ENABLED = 731;
+// 732-767: reserved
+
+// --- Cache Line 13 (768-831): Colors ---
+export const N_FG_COLOR = 768;
+export const N_BG_COLOR = 772;
+export const N_BORDER_COLOR = 776;
+export const N_BORDER_TOP_COLOR = 780;
+export const N_BORDER_RIGHT_COLOR = 784;
+export const N_BORDER_BOTTOM_COLOR = 788;
+export const N_BORDER_LEFT_COLOR = 792;
+export const N_FOCUS_RING_COLOR = 796;
+export const N_CURSOR_FG_COLOR = 800;
+export const N_CURSOR_BG_COLOR = 804;
+export const N_SELECTION_COLOR = 808;
+// 812-831: reserved
+
+// --- Cache Line 14 (832-895): Text Properties ---
+export const N_TEXT_OFFSET = 832;
+export const N_TEXT_LENGTH = 836;
+export const N_TEXT_ALIGN = 840;
+export const N_TEXT_WRAP = 841;
+export const N_TEXT_OVERFLOW = 842;
+export const N_TEXT_ATTRS = 843;
+export const N_TEXT_DECORATION = 844;
+export const N_TEXT_DECORATION_STYLE = 845;
+// 846-847: reserved (alignment)
+export const N_TEXT_DECORATION_COLOR = 848;
+export const N_LINE_HEIGHT = 852;
+export const N_LETTER_SPACING = 853;
+export const N_MAX_LINES = 854;
+// 855-895: reserved
+
+// --- Cache Line 15 (896-959): Interaction State ---
+export const N_SCROLL_X = 896;
+export const N_SCROLL_Y = 900;
+export const N_CURSOR_POSITION = 904;
+export const N_SELECTION_START = 908;
+export const N_SELECTION_END = 912;
+export const N_CURSOR_CHAR = 916;
+export const N_CURSOR_ALT_CHAR = 920;
+export const N_INTERACTION_FLAGS = 924;
+export const N_CURSOR_FLAGS = 925;
+export const N_CURSOR_STYLE = 926;
+export const N_CURSOR_BLINK_RATE = 927;
+export const N_MAX_LENGTH = 928;
+export const N_INPUT_TYPE = 929;
+// 930-959: reserved
+
+// --- Cache Line 16 (960-1023): Reserved (Animation, Effects, Transforms) ---
+// Reserved for future animation/effects/physics
 
 // =============================================================================
 // CONFIG FLAGS (bitfield at H_CONFIG_FLAGS)
@@ -239,7 +280,7 @@ export const CONFIG_KITTY_KEYBOARD = 1 << 8;
 export const CONFIG_DEFAULT = 0x00ff;
 
 // =============================================================================
-// DIRTY FLAGS (bitfield at U_DIRTY_FLAGS)
+// DIRTY FLAGS (bitfield at N_DIRTY_FLAGS)
 // =============================================================================
 
 export const DIRTY_LAYOUT = 1 << 0;
@@ -248,7 +289,7 @@ export const DIRTY_TEXT = 1 << 2;
 export const DIRTY_HIERARCHY = 1 << 3;
 
 // =============================================================================
-// INTERACTION FLAGS (bitfield at U_INTERACTION_FLAGS)
+// INTERACTION FLAGS (bitfield at N_INTERACTION_FLAGS)
 // =============================================================================
 
 export const FLAG_FOCUSABLE = 1 << 0;
@@ -258,7 +299,7 @@ export const FLAG_PRESSED = 1 << 3;
 export const FLAG_DISABLED = 1 << 4;
 
 // =============================================================================
-// TEXT ATTRIBUTES (bitfield at U_TEXT_ATTRS)
+// TEXT ATTRIBUTES (bitfield at N_TEXT_ATTRS)
 // =============================================================================
 
 export const ATTR_BOLD = 1 << 0;
@@ -291,6 +332,13 @@ export const BORDER_THICK = 4;
 export const BORDER_DASHED = 5;
 export const BORDER_DOTTED = 6;
 export const BORDER_ASCII = 7;
+export const BORDER_BLOCK = 8;
+export const BORDER_DOUBLE_HORZ = 9;
+export const BORDER_DOUBLE_VERT = 10;
+export const BORDER_HEAVY_DASHED = 11;
+export const BORDER_HEAVY_DOTTED = 12;
+export const BORDER_BOLD = 13;
+export const BORDER_CUSTOM = 255;
 
 // =============================================================================
 // EVENT TYPES
@@ -379,6 +427,7 @@ export const enum Overflow {
 export const enum Display {
   None = 0,
   Flex = 1,
+  Grid = 2,
 }
 
 export const enum TextAlign {
@@ -431,6 +480,64 @@ export const enum RenderMode {
   Diff = 0,
   Inline = 1,
   Append = 2,
+}
+
+// =============================================================================
+// GRID ENUMS
+// =============================================================================
+
+/** Grid track sizing type */
+export const enum TrackType {
+  /** Track not used (sentinel for unused slots) */
+  None = 0,
+  /** Auto sizing */
+  Auto = 1,
+  /** Minimum content size */
+  MinContent = 2,
+  /** Maximum content size */
+  MaxContent = 3,
+  /** Fixed size in terminal cells */
+  Length = 4,
+  /** Percentage of container (0.0-1.0) */
+  Percent = 5,
+  /** Fractional unit */
+  Fr = 6,
+  /** FitContent (maximum size clamped to content) */
+  FitContent = 7,
+}
+
+/** Grid auto flow direction */
+export const enum GridAutoFlow {
+  Row = 0,
+  Column = 1,
+  RowDense = 2,
+  ColumnDense = 3,
+}
+
+/** Justify items (grid container property) */
+export const enum JustifyItems {
+  Start = 0,
+  End = 1,
+  Center = 2,
+  Stretch = 3,
+}
+
+/** Justify self (grid item property) */
+export const enum JustifySelf {
+  Auto = 0,
+  Start = 1,
+  End = 2,
+  Center = 3,
+  Stretch = 4,
+}
+
+// =============================================================================
+// GRID TRACK INTERFACE
+// =============================================================================
+
+export interface GridTrack {
+  trackType: TrackType;
+  value: number;
 }
 
 // =============================================================================
@@ -499,7 +606,7 @@ export function createSharedBuffer(config: SharedBufferConfig = {}): SharedBuffe
   };
 
   // Initialize header
-  view.setUint32(H_VERSION, 2, true);
+  view.setUint32(H_VERSION, 3, true);
   view.setUint32(H_NODE_COUNT, 0, true);
   view.setUint32(H_MAX_NODES, maxNodes, true);
   view.setUint32(H_TEXT_POOL_SIZE, textPoolSize, true);
@@ -542,138 +649,144 @@ function initializeNode(buffer: SharedBuffer, nodeIndex: number): void {
   const base = HEADER_SIZE + nodeIndex * NODE_STRIDE;
   const v = buffer.view;
 
-  // Layout dimensions - NaN = auto
-  v.setFloat32(base + F_WIDTH, NaN, true);
-  v.setFloat32(base + F_HEIGHT, NaN, true);
-  v.setFloat32(base + F_MIN_WIDTH, NaN, true);
-  v.setFloat32(base + F_MIN_HEIGHT, NaN, true);
-  v.setFloat32(base + F_MAX_WIDTH, NaN, true);
-  v.setFloat32(base + F_MAX_HEIGHT, NaN, true);
-  v.setFloat32(base + F_FLEX_BASIS, NaN, true);
-  v.setFloat32(base + F_FLEX_GROW, 0, true);
-  v.setFloat32(base + F_FLEX_SHRINK, 1, true);
+  // === Cache Line 1: Core Layout Dimensions ===
+  v.setFloat32(base + N_WIDTH, NaN, true);
+  v.setFloat32(base + N_HEIGHT, NaN, true);
+  v.setFloat32(base + N_MIN_WIDTH, NaN, true);
+  v.setFloat32(base + N_MIN_HEIGHT, NaN, true);
+  v.setFloat32(base + N_MAX_WIDTH, NaN, true);
+  v.setFloat32(base + N_MAX_HEIGHT, NaN, true);
+  v.setFloat32(base + N_ASPECT_RATIO, NaN, true);
+  v.setUint8(base + N_COMPONENT_TYPE, COMPONENT_NONE);
+  v.setUint8(base + N_DISPLAY, Display.Flex);
+  v.setUint8(base + N_POSITION, Position.Relative);
+  v.setUint8(base + N_OVERFLOW, Overflow.Visible);
+  v.setUint8(base + N_VISIBLE, 1);
+  v.setUint8(base + N_BOX_SIZING, 0); // border-box
+  v.setUint8(base + N_DIRTY_FLAGS, 0);
 
-  // Padding/margin - 0
-  v.setFloat32(base + F_PADDING_TOP, 0, true);
-  v.setFloat32(base + F_PADDING_RIGHT, 0, true);
-  v.setFloat32(base + F_PADDING_BOTTOM, 0, true);
-  v.setFloat32(base + F_PADDING_LEFT, 0, true);
-  v.setFloat32(base + F_MARGIN_TOP, 0, true);
-  v.setFloat32(base + F_MARGIN_RIGHT, 0, true);
-  v.setFloat32(base + F_MARGIN_BOTTOM, 0, true);
-  v.setFloat32(base + F_MARGIN_LEFT, 0, true);
+  // === Cache Line 2: Flexbox Properties ===
+  v.setUint8(base + N_FLEX_DIRECTION, FlexDirection.Row);
+  v.setUint8(base + N_FLEX_WRAP, FlexWrap.NoWrap);
+  v.setUint8(base + N_JUSTIFY_CONTENT, JustifyContent.Start);
+  v.setUint8(base + N_ALIGN_ITEMS, AlignItems.Stretch);
+  v.setUint8(base + N_ALIGN_CONTENT, AlignContent.Start);
+  v.setUint8(base + N_ALIGN_SELF, AlignSelf.Auto);
+  v.setFloat32(base + N_FLEX_GROW, 0, true);
+  v.setFloat32(base + N_FLEX_SHRINK, 1, true);
+  v.setFloat32(base + N_FLEX_BASIS, NaN, true);
+  v.setFloat32(base + N_GAP, 0, true);
+  v.setFloat32(base + N_ROW_GAP, 0, true);
+  v.setFloat32(base + N_COLUMN_GAP, 0, true);
 
-  // Gap - 0
-  v.setFloat32(base + F_GAP, 0, true);
-  v.setFloat32(base + F_ROW_GAP, 0, true);
-  v.setFloat32(base + F_COLUMN_GAP, 0, true);
+  // === Cache Line 3: Spacing Properties ===
+  v.setFloat32(base + N_PADDING_TOP, 0, true);
+  v.setFloat32(base + N_PADDING_RIGHT, 0, true);
+  v.setFloat32(base + N_PADDING_BOTTOM, 0, true);
+  v.setFloat32(base + N_PADDING_LEFT, 0, true);
+  v.setFloat32(base + N_MARGIN_TOP, 0, true);
+  v.setFloat32(base + N_MARGIN_RIGHT, 0, true);
+  v.setFloat32(base + N_MARGIN_BOTTOM, 0, true);
+  v.setFloat32(base + N_MARGIN_LEFT, 0, true);
+  v.setFloat32(base + N_INSET_TOP, NaN, true);
+  v.setFloat32(base + N_INSET_RIGHT, NaN, true);
+  v.setFloat32(base + N_INSET_BOTTOM, NaN, true);
+  v.setFloat32(base + N_INSET_LEFT, NaN, true);
+  v.setUint8(base + N_BORDER_WIDTH_TOP, 0);
+  v.setUint8(base + N_BORDER_WIDTH_RIGHT, 0);
+  v.setUint8(base + N_BORDER_WIDTH_BOTTOM, 0);
+  v.setUint8(base + N_BORDER_WIDTH_LEFT, 0);
+  v.setInt32(base + N_PARENT_INDEX, -1, true);
+  v.setInt32(base + N_TAB_INDEX, 0, true);
 
-  // Insets - NaN = auto
-  v.setFloat32(base + F_INSET_TOP, NaN, true);
-  v.setFloat32(base + F_INSET_RIGHT, NaN, true);
-  v.setFloat32(base + F_INSET_BOTTOM, NaN, true);
-  v.setFloat32(base + F_INSET_LEFT, NaN, true);
+  // === Cache Line 4: Grid Container Properties ===
+  v.setUint8(base + N_GRID_AUTO_FLOW, GridAutoFlow.Row);
+  v.setUint8(base + N_JUSTIFY_ITEMS, JustifyItems.Start);
+  v.setUint8(base + N_GRID_COLUMN_COUNT, 0);
+  v.setUint8(base + N_GRID_ROW_COUNT, 0);
+  v.setUint8(base + N_GRID_AUTO_COLUMNS_TYPE, TrackType.Auto);
+  v.setUint8(base + N_GRID_AUTO_ROWS_TYPE, TrackType.Auto);
+  v.setFloat32(base + N_GRID_AUTO_COLUMNS_VALUE, 0, true);
+  v.setFloat32(base + N_GRID_AUTO_ROWS_VALUE, 0, true);
+  v.setInt16(base + N_GRID_COLUMN_START, 0, true);
+  v.setInt16(base + N_GRID_COLUMN_END, 0, true);
+  v.setInt16(base + N_GRID_ROW_START, 0, true);
+  v.setInt16(base + N_GRID_ROW_END, 0, true);
+  v.setUint8(base + N_JUSTIFY_SELF, JustifySelf.Auto);
 
-  // Layout enums - defaults
-  v.setUint8(base + U_FLEX_DIRECTION, FlexDirection.Row);
-  v.setUint8(base + U_FLEX_WRAP, FlexWrap.NoWrap);
-  v.setUint8(base + U_JUSTIFY_CONTENT, JustifyContent.Start);
-  v.setUint8(base + U_ALIGN_ITEMS, AlignItems.Stretch);
-  v.setUint8(base + U_ALIGN_CONTENT, AlignContent.Start);
-  v.setUint8(base + U_ALIGN_SELF, AlignSelf.Auto);
-  v.setUint8(base + U_POSITION, Position.Relative);
-  v.setUint8(base + U_OVERFLOW, Overflow.Visible);
-  v.setUint8(base + U_DISPLAY, Display.Flex);
+  // === Cache Lines 5-10: Grid Tracks (zero-initialized by SharedArrayBuffer) ===
+  // No explicit initialization needed - tracks start as TrackType.None
 
-  // Border widths - 0
-  v.setUint8(base + U_BORDER_WIDTH_TOP, 0);
-  v.setUint8(base + U_BORDER_WIDTH_RIGHT, 0);
-  v.setUint8(base + U_BORDER_WIDTH_BOTTOM, 0);
-  v.setUint8(base + U_BORDER_WIDTH_LEFT, 0);
+  // === Cache Line 11: Computed Output ===
+  v.setFloat32(base + N_COMPUTED_X, 0, true);
+  v.setFloat32(base + N_COMPUTED_Y, 0, true);
+  v.setFloat32(base + N_COMPUTED_WIDTH, 0, true);
+  v.setFloat32(base + N_COMPUTED_HEIGHT, 0, true);
+  v.setFloat32(base + N_CONTENT_WIDTH, 0, true);
+  v.setFloat32(base + N_CONTENT_HEIGHT, 0, true);
+  v.setFloat32(base + N_MAX_SCROLL_X, 0, true);
+  v.setFloat32(base + N_MAX_SCROLL_Y, 0, true);
+  v.setUint8(base + N_IS_SCROLLABLE, 0);
 
-  // Component type and visibility
-  v.setUint8(base + U_COMPONENT_TYPE, COMPONENT_NONE);
-  v.setUint8(base + U_VISIBLE, 1);
+  // === Cache Line 12: Visual Properties ===
+  v.setFloat32(base + N_OPACITY, 1.0, true);
+  v.setInt32(base + N_Z_INDEX, 0, true);
+  v.setUint8(base + N_BORDER_STYLE, BORDER_NONE);
+  v.setUint8(base + N_BORDER_STYLE_TOP, 0);
+  v.setUint8(base + N_BORDER_STYLE_RIGHT, 0);
+  v.setUint8(base + N_BORDER_STYLE_BOTTOM, 0);
+  v.setUint8(base + N_BORDER_STYLE_LEFT, 0);
+  v.setUint8(base + N_SCROLLBAR_VISIBILITY, 0);
+  v.setUint16(base + N_BORDER_CHAR_H, 0, true);
+  v.setUint16(base + N_BORDER_CHAR_V, 0, true);
+  v.setUint16(base + N_BORDER_CHAR_TL, 0, true);
+  v.setUint16(base + N_BORDER_CHAR_TR, 0, true);
+  v.setUint16(base + N_BORDER_CHAR_BL, 0, true);
+  v.setUint16(base + N_BORDER_CHAR_BR, 0, true);
+  v.setUint8(base + N_FOCUS_INDICATOR_CHAR, 0x2a); // '*'
+  v.setUint8(base + N_FOCUS_INDICATOR_ENABLED, 1);
 
-  // Hierarchy
-  v.setInt32(base + I_PARENT_INDEX, -1, true);
-  v.setInt32(base + I_TAB_INDEX, 0, true);
-  v.setInt32(base + I_CHILD_COUNT, 0, true);
+  // === Cache Line 13: Colors ===
+  v.setUint32(base + N_FG_COLOR, 0, true);
+  v.setUint32(base + N_BG_COLOR, 0, true);
+  v.setUint32(base + N_BORDER_COLOR, 0, true);
+  v.setUint32(base + N_BORDER_TOP_COLOR, 0, true);
+  v.setUint32(base + N_BORDER_RIGHT_COLOR, 0, true);
+  v.setUint32(base + N_BORDER_BOTTOM_COLOR, 0, true);
+  v.setUint32(base + N_BORDER_LEFT_COLOR, 0, true);
+  v.setUint32(base + N_FOCUS_RING_COLOR, 0, true);
+  v.setUint32(base + N_CURSOR_FG_COLOR, 0, true);
+  v.setUint32(base + N_CURSOR_BG_COLOR, 0, true);
+  v.setUint32(base + N_SELECTION_COLOR, 0, true);
 
-  // Output - Rust writes these, initialize to 0
-  v.setFloat32(base + F_COMPUTED_X, 0, true);
-  v.setFloat32(base + F_COMPUTED_Y, 0, true);
-  v.setFloat32(base + F_COMPUTED_WIDTH, 0, true);
-  v.setFloat32(base + F_COMPUTED_HEIGHT, 0, true);
-  v.setFloat32(base + F_SCROLL_WIDTH, 0, true);
-  v.setFloat32(base + F_SCROLL_HEIGHT, 0, true);
-  v.setFloat32(base + F_MAX_SCROLL_X, 0, true);
-  v.setFloat32(base + F_MAX_SCROLL_Y, 0, true);
+  // === Cache Line 14: Text Properties ===
+  v.setUint32(base + N_TEXT_OFFSET, 0, true);
+  v.setUint32(base + N_TEXT_LENGTH, 0, true);
+  v.setUint8(base + N_TEXT_ALIGN, TextAlign.Left);
+  v.setUint8(base + N_TEXT_WRAP, TextWrap.NoWrap);
+  v.setUint8(base + N_TEXT_OVERFLOW, TextOverflow.Clip);
+  v.setUint8(base + N_TEXT_ATTRS, 0);
+  v.setUint8(base + N_TEXT_DECORATION, TextDecoration.None);
+  v.setUint8(base + N_TEXT_DECORATION_STYLE, TextDecorationStyle.Solid);
+  v.setUint32(base + N_TEXT_DECORATION_COLOR, 0, true);
+  v.setUint8(base + N_LINE_HEIGHT, 0);
+  v.setUint8(base + N_LETTER_SPACING, 0);
+  v.setUint8(base + N_MAX_LINES, 0);
 
-  // Colors - 0 = transparent/inherit
-  v.setUint32(base + C_FG_COLOR, 0, true);
-  v.setUint32(base + C_BG_COLOR, 0, true);
-  v.setUint32(base + C_BORDER_COLOR, 0, true);
-  v.setUint32(base + C_BORDER_TOP_COLOR, 0, true);
-  v.setUint32(base + C_BORDER_RIGHT_COLOR, 0, true);
-  v.setUint32(base + C_BORDER_BOTTOM_COLOR, 0, true);
-  v.setUint32(base + C_BORDER_LEFT_COLOR, 0, true);
-  v.setUint32(base + C_FOCUS_RING_COLOR, 0, true);
-  v.setUint32(base + C_CURSOR_FG_COLOR, 0, true);
-  v.setUint32(base + C_CURSOR_BG_COLOR, 0, true);
-  v.setUint32(base + C_SELECTION_COLOR, 0, true);
-
-  // Visual properties
-  v.setUint8(base + U_OPACITY, 255);
-  v.setInt8(base + I_Z_INDEX, 0);
-  v.setUint8(base + U_BORDER_STYLE, BORDER_NONE);
-  v.setUint8(base + U_BORDER_STYLE_TOP, 0);
-  v.setUint8(base + U_BORDER_STYLE_RIGHT, 0);
-  v.setUint8(base + U_BORDER_STYLE_BOTTOM, 0);
-  v.setUint8(base + U_BORDER_STYLE_LEFT, 0);
-  v.setUint8(base + U_SCROLLABLE_FLAGS, 0);
-
-  // Custom border chars - 0 = use style
-  v.setUint16(base + U_BORDER_CHAR_H, 0, true);
-  v.setUint16(base + U_BORDER_CHAR_V, 0, true);
-  v.setUint16(base + U_BORDER_CHAR_TL, 0, true);
-  v.setUint16(base + U_BORDER_CHAR_TR, 0, true);
-  v.setUint16(base + U_BORDER_CHAR_BL, 0, true);
-  v.setUint16(base + U_BORDER_CHAR_BR, 0, true);
-
-  // Focus indicator
-  v.setUint8(base + U_FOCUS_INDICATOR_CHAR, 0x2a); // '*'
-  v.setUint8(base + U_FOCUS_INDICATOR_ENABLED, 1);
-
-  // Text properties
-  v.setUint32(base + U_TEXT_OFFSET, 0, true);
-  v.setUint32(base + U_TEXT_LENGTH, 0, true);
-  v.setUint8(base + U_TEXT_ALIGN, TextAlign.Left);
-  v.setUint8(base + U_TEXT_WRAP, TextWrap.NoWrap);
-  v.setUint8(base + U_TEXT_OVERFLOW, TextOverflow.Clip);
-  v.setUint8(base + U_TEXT_ATTRS, 0);
-  v.setUint8(base + U_TEXT_DECORATION, TextDecoration.None);
-  v.setUint8(base + U_TEXT_DECORATION_STYLE, TextDecorationStyle.Solid);
-  v.setUint32(base + C_TEXT_DECORATION_COLOR, 0, true);
-  v.setUint8(base + U_LINE_HEIGHT, 0);
-  v.setUint8(base + U_LETTER_SPACING, 0);
-  v.setUint8(base + U_MAX_LINES, 0);
-
-  // Interaction state
-  v.setInt32(base + I_SCROLL_X, 0, true);
-  v.setInt32(base + I_SCROLL_Y, 0, true);
-  v.setInt32(base + I_CURSOR_POSITION, 0, true);
-  v.setInt32(base + I_SELECTION_START, -1, true);
-  v.setInt32(base + I_SELECTION_END, -1, true);
-  v.setUint32(base + U_CURSOR_CHAR, 0, true);
-  v.setUint32(base + U_CURSOR_ALT_CHAR, 0, true);
-  v.setUint8(base + U_DIRTY_FLAGS, 0);
-  v.setUint8(base + U_INTERACTION_FLAGS, 0);
-  v.setUint8(base + U_CURSOR_FLAGS, 0);
-  v.setUint8(base + U_CURSOR_STYLE, CursorStyle.Block);
-  v.setUint8(base + U_CURSOR_BLINK_RATE, 0);
-  v.setUint8(base + U_MAX_LENGTH, 0);
-  v.setUint16(base + U_INPUT_TYPE, InputType.Text, true);
+  // === Cache Line 15: Interaction State ===
+  v.setInt32(base + N_SCROLL_X, 0, true);
+  v.setInt32(base + N_SCROLL_Y, 0, true);
+  v.setInt32(base + N_CURSOR_POSITION, 0, true);
+  v.setInt32(base + N_SELECTION_START, -1, true);
+  v.setInt32(base + N_SELECTION_END, -1, true);
+  v.setUint32(base + N_CURSOR_CHAR, 0, true);
+  v.setUint32(base + N_CURSOR_ALT_CHAR, 0, true);
+  v.setUint8(base + N_INTERACTION_FLAGS, 0);
+  v.setUint8(base + N_CURSOR_FLAGS, 0);
+  v.setUint8(base + N_CURSOR_STYLE, CursorStyle.Block);
+  v.setUint8(base + N_CURSOR_BLINK_RATE, 0);
+  v.setUint8(base + N_MAX_LENGTH, 0);
+  v.setUint8(base + N_INPUT_TYPE, InputType.Text);
 }
 
 // =============================================================================
@@ -710,6 +823,15 @@ export function getI8(buf: SharedBuffer, nodeIndex: number, field: number): numb
 
 export function setI8(buf: SharedBuffer, nodeIndex: number, field: number, value: number): void {
   buf.view.setInt8(nodeBase(nodeIndex) + field, value);
+}
+
+// --- Int16 ---
+export function getI16(buf: SharedBuffer, nodeIndex: number, field: number): number {
+  return buf.view.getInt16(nodeBase(nodeIndex) + field, true);
+}
+
+export function setI16(buf: SharedBuffer, nodeIndex: number, field: number, value: number): void {
+  buf.view.setInt16(nodeBase(nodeIndex) + field, value, true);
 }
 
 // --- Uint16 ---
@@ -907,25 +1029,25 @@ export function checkWakeFromRust(buf: SharedBuffer): boolean {
 // =============================================================================
 
 export function markDirty(buf: SharedBuffer, nodeIndex: number, flags: number): void {
-  const current = getU8(buf, nodeIndex, U_DIRTY_FLAGS);
-  setU8(buf, nodeIndex, U_DIRTY_FLAGS, current | flags);
+  const current = getU8(buf, nodeIndex, N_DIRTY_FLAGS);
+  setU8(buf, nodeIndex, N_DIRTY_FLAGS, current | flags);
 }
 
 export function clearDirty(buf: SharedBuffer, nodeIndex: number, flags: number): void {
-  const current = getU8(buf, nodeIndex, U_DIRTY_FLAGS);
-  setU8(buf, nodeIndex, U_DIRTY_FLAGS, current & ~flags);
+  const current = getU8(buf, nodeIndex, N_DIRTY_FLAGS);
+  setU8(buf, nodeIndex, N_DIRTY_FLAGS, current & ~flags);
 }
 
 export function clearAllDirty(buf: SharedBuffer, nodeIndex: number): void {
-  setU8(buf, nodeIndex, U_DIRTY_FLAGS, 0);
+  setU8(buf, nodeIndex, N_DIRTY_FLAGS, 0);
 }
 
 export function isDirty(buf: SharedBuffer, nodeIndex: number, flags: number): boolean {
-  return (getU8(buf, nodeIndex, U_DIRTY_FLAGS) & flags) !== 0;
+  return (getU8(buf, nodeIndex, N_DIRTY_FLAGS) & flags) !== 0;
 }
 
 export function getDirtyFlags(buf: SharedBuffer, nodeIndex: number): number {
-  return getU8(buf, nodeIndex, U_DIRTY_FLAGS);
+  return getU8(buf, nodeIndex, N_DIRTY_FLAGS);
 }
 
 // =============================================================================
@@ -933,11 +1055,11 @@ export function getDirtyFlags(buf: SharedBuffer, nodeIndex: number): number {
 // =============================================================================
 
 export function getInteractionFlags(buf: SharedBuffer, nodeIndex: number): number {
-  return getU8(buf, nodeIndex, U_INTERACTION_FLAGS);
+  return getU8(buf, nodeIndex, N_INTERACTION_FLAGS);
 }
 
 export function setInteractionFlags(buf: SharedBuffer, nodeIndex: number, flags: number): void {
-  setU8(buf, nodeIndex, U_INTERACTION_FLAGS, flags);
+  setU8(buf, nodeIndex, N_INTERACTION_FLAGS, flags);
 }
 
 export function isFocusable(buf: SharedBuffer, nodeIndex: number): boolean {
@@ -975,28 +1097,120 @@ export function setDisabled(buf: SharedBuffer, nodeIndex: number, value: boolean
 // =============================================================================
 
 export function getParentIndex(buf: SharedBuffer, nodeIndex: number): number {
-  return getI32(buf, nodeIndex, I_PARENT_INDEX);
+  return getI32(buf, nodeIndex, N_PARENT_INDEX);
 }
 
 export function setParentIndex(buf: SharedBuffer, nodeIndex: number, parentIndex: number): void {
-  setI32(buf, nodeIndex, I_PARENT_INDEX, parentIndex);
+  setI32(buf, nodeIndex, N_PARENT_INDEX, parentIndex);
   markDirty(buf, nodeIndex, DIRTY_HIERARCHY);
 }
 
 export function getTabIndex(buf: SharedBuffer, nodeIndex: number): number {
-  return getI32(buf, nodeIndex, I_TAB_INDEX);
+  return getI32(buf, nodeIndex, N_TAB_INDEX);
 }
 
 export function setTabIndex(buf: SharedBuffer, nodeIndex: number, tabIndex: number): void {
-  setI32(buf, nodeIndex, I_TAB_INDEX, tabIndex);
+  setI32(buf, nodeIndex, N_TAB_INDEX, tabIndex);
 }
 
-export function getChildCount(buf: SharedBuffer, nodeIndex: number): number {
-  return getI32(buf, nodeIndex, I_CHILD_COUNT);
+// =============================================================================
+// GRID TRACK ACCESSORS
+// =============================================================================
+
+/**
+ * Get a grid column track at the given index (0-31).
+ */
+export function getGridColumnTrack(buf: SharedBuffer, nodeIndex: number, trackIdx: number): GridTrack {
+  const offset = N_GRID_COLUMN_TRACKS + trackIdx * GRID_TRACK_SIZE;
+  return {
+    trackType: getU8(buf, nodeIndex, offset) as TrackType,
+    value: getF32(buf, nodeIndex, offset + 2),
+  };
 }
 
-export function setChildCount(buf: SharedBuffer, nodeIndex: number, count: number): void {
-  setI32(buf, nodeIndex, I_CHILD_COUNT, count);
+/**
+ * Set a grid column track at the given index (0-31).
+ */
+export function setGridColumnTrack(buf: SharedBuffer, nodeIndex: number, trackIdx: number, track: GridTrack): void {
+  const offset = N_GRID_COLUMN_TRACKS + trackIdx * GRID_TRACK_SIZE;
+  setU8(buf, nodeIndex, offset, track.trackType);
+  setF32(buf, nodeIndex, offset + 2, track.value);
+  markDirty(buf, nodeIndex, DIRTY_LAYOUT);
+}
+
+/**
+ * Get a grid row track at the given index (0-31).
+ */
+export function getGridRowTrack(buf: SharedBuffer, nodeIndex: number, trackIdx: number): GridTrack {
+  const offset = N_GRID_ROW_TRACKS + trackIdx * GRID_TRACK_SIZE;
+  return {
+    trackType: getU8(buf, nodeIndex, offset) as TrackType,
+    value: getF32(buf, nodeIndex, offset + 2),
+  };
+}
+
+/**
+ * Set a grid row track at the given index (0-31).
+ */
+export function setGridRowTrack(buf: SharedBuffer, nodeIndex: number, trackIdx: number, track: GridTrack): void {
+  const offset = N_GRID_ROW_TRACKS + trackIdx * GRID_TRACK_SIZE;
+  setU8(buf, nodeIndex, offset, track.trackType);
+  setF32(buf, nodeIndex, offset + 2, track.value);
+  markDirty(buf, nodeIndex, DIRTY_LAYOUT);
+}
+
+/**
+ * Get all column tracks (up to grid_column_count).
+ */
+export function getGridColumnTracks(buf: SharedBuffer, nodeIndex: number): GridTrack[] {
+  const count = getU8(buf, nodeIndex, N_GRID_COLUMN_COUNT);
+  const tracks: GridTrack[] = [];
+  for (let i = 0; i < Math.min(count, MAX_GRID_TRACKS); i++) {
+    tracks.push(getGridColumnTrack(buf, nodeIndex, i));
+  }
+  return tracks;
+}
+
+/**
+ * Get all row tracks (up to grid_row_count).
+ */
+export function getGridRowTracks(buf: SharedBuffer, nodeIndex: number): GridTrack[] {
+  const count = getU8(buf, nodeIndex, N_GRID_ROW_COUNT);
+  const tracks: GridTrack[] = [];
+  for (let i = 0; i < Math.min(count, MAX_GRID_TRACKS); i++) {
+    tracks.push(getGridRowTrack(buf, nodeIndex, i));
+  }
+  return tracks;
+}
+
+/**
+ * Set grid column tracks from an array.
+ */
+export function setGridColumnTracks(buf: SharedBuffer, nodeIndex: number, tracks: GridTrack[]): void {
+  const count = Math.min(tracks.length, MAX_GRID_TRACKS);
+  setU8(buf, nodeIndex, N_GRID_COLUMN_COUNT, count);
+  for (let i = 0; i < count; i++) {
+    setGridColumnTrack(buf, nodeIndex, i, tracks[i]);
+  }
+  // Clear remaining tracks
+  for (let i = count; i < MAX_GRID_TRACKS; i++) {
+    setGridColumnTrack(buf, nodeIndex, i, { trackType: TrackType.None, value: 0 });
+  }
+}
+
+/**
+ * Set grid row tracks from an array.
+ */
+export function setGridRowTracks(buf: SharedBuffer, nodeIndex: number, tracks: GridTrack[]): void {
+  const count = Math.min(tracks.length, MAX_GRID_TRACKS);
+  setU8(buf, nodeIndex, N_GRID_ROW_COUNT, count);
+  for (let i = 0; i < count; i++) {
+    setGridRowTrack(buf, nodeIndex, i, tracks[i]);
+  }
+  // Clear remaining tracks
+  for (let i = count; i < MAX_GRID_TRACKS; i++) {
+    setGridRowTrack(buf, nodeIndex, i, { trackType: TrackType.None, value: 0 });
+  }
 }
 
 // =============================================================================
@@ -1037,8 +1251,8 @@ export function setText(buf: SharedBuffer, nodeIndex: number, text: string): boo
   poolView.set(encoded);
 
   // Update node's offset and length
-  setU32(buf, nodeIndex, U_TEXT_OFFSET, writePtr);
-  setU32(buf, nodeIndex, U_TEXT_LENGTH, encoded.length);
+  setU32(buf, nodeIndex, N_TEXT_OFFSET, writePtr);
+  setU32(buf, nodeIndex, N_TEXT_LENGTH, encoded.length);
 
   // Update pool write pointer
   buf.view.setUint32(H_TEXT_POOL_WRITE_PTR, writePtr + encoded.length, true);
@@ -1053,8 +1267,8 @@ export function setText(buf: SharedBuffer, nodeIndex: number, text: string): boo
  * Get text content for a node.
  */
 export function getText(buf: SharedBuffer, nodeIndex: number): string {
-  const offset = getU32(buf, nodeIndex, U_TEXT_OFFSET);
-  const length = getU32(buf, nodeIndex, U_TEXT_LENGTH);
+  const offset = getU32(buf, nodeIndex, N_TEXT_OFFSET);
+  const length = getU32(buf, nodeIndex, N_TEXT_LENGTH);
 
   if (length === 0) {
     return '';
@@ -1193,206 +1407,243 @@ export function isTransparent(color: number): boolean {
 // --- Layout properties (mark DIRTY_LAYOUT) ---
 
 export function setWidth(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_WIDTH, value);
+  setF32(buf, nodeIndex, N_WIDTH, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setHeight(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_HEIGHT, value);
+  setF32(buf, nodeIndex, N_HEIGHT, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setMinWidth(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_MIN_WIDTH, value);
+  setF32(buf, nodeIndex, N_MIN_WIDTH, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setMinHeight(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_MIN_HEIGHT, value);
+  setF32(buf, nodeIndex, N_MIN_HEIGHT, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setMaxWidth(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_MAX_WIDTH, value);
+  setF32(buf, nodeIndex, N_MAX_WIDTH, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setMaxHeight(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_MAX_HEIGHT, value);
+  setF32(buf, nodeIndex, N_MAX_HEIGHT, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setFlexGrow(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_FLEX_GROW, value);
+  setF32(buf, nodeIndex, N_FLEX_GROW, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setFlexShrink(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_FLEX_SHRINK, value);
+  setF32(buf, nodeIndex, N_FLEX_SHRINK, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setFlexBasis(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_FLEX_BASIS, value);
+  setF32(buf, nodeIndex, N_FLEX_BASIS, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setPadding(buf: SharedBuffer, nodeIndex: number, top: number, right: number, bottom: number, left: number): void {
-  setF32(buf, nodeIndex, F_PADDING_TOP, top);
-  setF32(buf, nodeIndex, F_PADDING_RIGHT, right);
-  setF32(buf, nodeIndex, F_PADDING_BOTTOM, bottom);
-  setF32(buf, nodeIndex, F_PADDING_LEFT, left);
+  setF32(buf, nodeIndex, N_PADDING_TOP, top);
+  setF32(buf, nodeIndex, N_PADDING_RIGHT, right);
+  setF32(buf, nodeIndex, N_PADDING_BOTTOM, bottom);
+  setF32(buf, nodeIndex, N_PADDING_LEFT, left);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setMargin(buf: SharedBuffer, nodeIndex: number, top: number, right: number, bottom: number, left: number): void {
-  setF32(buf, nodeIndex, F_MARGIN_TOP, top);
-  setF32(buf, nodeIndex, F_MARGIN_RIGHT, right);
-  setF32(buf, nodeIndex, F_MARGIN_BOTTOM, bottom);
-  setF32(buf, nodeIndex, F_MARGIN_LEFT, left);
+  setF32(buf, nodeIndex, N_MARGIN_TOP, top);
+  setF32(buf, nodeIndex, N_MARGIN_RIGHT, right);
+  setF32(buf, nodeIndex, N_MARGIN_BOTTOM, bottom);
+  setF32(buf, nodeIndex, N_MARGIN_LEFT, left);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setGap(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setF32(buf, nodeIndex, F_GAP, value);
+  setF32(buf, nodeIndex, N_GAP, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setFlexDirection(buf: SharedBuffer, nodeIndex: number, value: FlexDirection): void {
-  setU8(buf, nodeIndex, U_FLEX_DIRECTION, value);
+  setU8(buf, nodeIndex, N_FLEX_DIRECTION, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setFlexWrap(buf: SharedBuffer, nodeIndex: number, value: FlexWrap): void {
-  setU8(buf, nodeIndex, U_FLEX_WRAP, value);
+  setU8(buf, nodeIndex, N_FLEX_WRAP, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setJustifyContent(buf: SharedBuffer, nodeIndex: number, value: JustifyContent): void {
-  setU8(buf, nodeIndex, U_JUSTIFY_CONTENT, value);
+  setU8(buf, nodeIndex, N_JUSTIFY_CONTENT, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setAlignItems(buf: SharedBuffer, nodeIndex: number, value: AlignItems): void {
-  setU8(buf, nodeIndex, U_ALIGN_ITEMS, value);
+  setU8(buf, nodeIndex, N_ALIGN_ITEMS, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setPosition(buf: SharedBuffer, nodeIndex: number, value: Position): void {
-  setU8(buf, nodeIndex, U_POSITION, value);
+  setU8(buf, nodeIndex, N_POSITION, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setOverflow(buf: SharedBuffer, nodeIndex: number, value: Overflow): void {
-  setU8(buf, nodeIndex, U_OVERFLOW, value);
+  setU8(buf, nodeIndex, N_OVERFLOW, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setDisplay(buf: SharedBuffer, nodeIndex: number, value: Display): void {
-  setU8(buf, nodeIndex, U_DISPLAY, value);
+  setU8(buf, nodeIndex, N_DISPLAY, value);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 export function setBorderWidth(buf: SharedBuffer, nodeIndex: number, top: number, right: number, bottom: number, left: number): void {
-  setU8(buf, nodeIndex, U_BORDER_WIDTH_TOP, top);
-  setU8(buf, nodeIndex, U_BORDER_WIDTH_RIGHT, right);
-  setU8(buf, nodeIndex, U_BORDER_WIDTH_BOTTOM, bottom);
-  setU8(buf, nodeIndex, U_BORDER_WIDTH_LEFT, left);
+  setU8(buf, nodeIndex, N_BORDER_WIDTH_TOP, top);
+  setU8(buf, nodeIndex, N_BORDER_WIDTH_RIGHT, right);
+  setU8(buf, nodeIndex, N_BORDER_WIDTH_BOTTOM, bottom);
+  setU8(buf, nodeIndex, N_BORDER_WIDTH_LEFT, left);
+  markDirty(buf, nodeIndex, DIRTY_LAYOUT);
+}
+
+// --- Grid placement ---
+
+export function setGridPlacement(
+  buf: SharedBuffer,
+  nodeIndex: number,
+  columnStart: number,
+  columnEnd: number,
+  rowStart: number,
+  rowEnd: number
+): void {
+  setI16(buf, nodeIndex, N_GRID_COLUMN_START, columnStart);
+  setI16(buf, nodeIndex, N_GRID_COLUMN_END, columnEnd);
+  setI16(buf, nodeIndex, N_GRID_ROW_START, rowStart);
+  setI16(buf, nodeIndex, N_GRID_ROW_END, rowEnd);
   markDirty(buf, nodeIndex, DIRTY_LAYOUT);
 }
 
 // --- Visual properties (mark DIRTY_VISUAL) ---
 
 export function setFgColor(buf: SharedBuffer, nodeIndex: number, color: number): void {
-  setU32(buf, nodeIndex, C_FG_COLOR, color);
+  setU32(buf, nodeIndex, N_FG_COLOR, color);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 export function setBgColor(buf: SharedBuffer, nodeIndex: number, color: number): void {
-  setU32(buf, nodeIndex, C_BG_COLOR, color);
+  setU32(buf, nodeIndex, N_BG_COLOR, color);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 export function setBorderColor(buf: SharedBuffer, nodeIndex: number, color: number): void {
-  setU32(buf, nodeIndex, C_BORDER_COLOR, color);
+  setU32(buf, nodeIndex, N_BORDER_COLOR, color);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 export function setBorderStyle(buf: SharedBuffer, nodeIndex: number, style: number): void {
-  setU8(buf, nodeIndex, U_BORDER_STYLE, style);
+  setU8(buf, nodeIndex, N_BORDER_STYLE, style);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 export function setOpacity(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setU8(buf, nodeIndex, U_OPACITY, Math.round(value * 255));
+  setF32(buf, nodeIndex, N_OPACITY, value);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 export function setZIndex(buf: SharedBuffer, nodeIndex: number, value: number): void {
-  setI8(buf, nodeIndex, I_Z_INDEX, value);
+  setI32(buf, nodeIndex, N_Z_INDEX, value);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 export function setVisible(buf: SharedBuffer, nodeIndex: number, value: boolean): void {
-  setU8(buf, nodeIndex, U_VISIBLE, value ? 1 : 0);
+  setU8(buf, nodeIndex, N_VISIBLE, value ? 1 : 0);
   markDirty(buf, nodeIndex, DIRTY_VISUAL);
 }
 
 // --- Component type ---
 
 export function setComponentType(buf: SharedBuffer, nodeIndex: number, type: number): void {
-  setU8(buf, nodeIndex, U_COMPONENT_TYPE, type);
+  setU8(buf, nodeIndex, N_COMPONENT_TYPE, type);
 }
 
 export function getComponentType(buf: SharedBuffer, nodeIndex: number): number {
-  return getU8(buf, nodeIndex, U_COMPONENT_TYPE);
+  return getU8(buf, nodeIndex, N_COMPONENT_TYPE);
 }
 
 // --- Scroll ---
 
 export function setScroll(buf: SharedBuffer, nodeIndex: number, x: number, y: number): void {
-  setI32(buf, nodeIndex, I_SCROLL_X, x);
-  setI32(buf, nodeIndex, I_SCROLL_Y, y);
+  setI32(buf, nodeIndex, N_SCROLL_X, x);
+  setI32(buf, nodeIndex, N_SCROLL_Y, y);
 }
 
 export function getScrollX(buf: SharedBuffer, nodeIndex: number): number {
-  return getI32(buf, nodeIndex, I_SCROLL_X);
+  return getI32(buf, nodeIndex, N_SCROLL_X);
 }
 
 export function getScrollY(buf: SharedBuffer, nodeIndex: number): number {
-  return getI32(buf, nodeIndex, I_SCROLL_Y);
+  return getI32(buf, nodeIndex, N_SCROLL_Y);
 }
 
 // --- Output (Rust writes, TS reads) ---
 
 export function getComputedX(buf: SharedBuffer, nodeIndex: number): number {
-  return getF32(buf, nodeIndex, F_COMPUTED_X);
+  return getF32(buf, nodeIndex, N_COMPUTED_X);
 }
 
 export function getComputedY(buf: SharedBuffer, nodeIndex: number): number {
-  return getF32(buf, nodeIndex, F_COMPUTED_Y);
+  return getF32(buf, nodeIndex, N_COMPUTED_Y);
 }
 
 export function getComputedWidth(buf: SharedBuffer, nodeIndex: number): number {
-  return getF32(buf, nodeIndex, F_COMPUTED_WIDTH);
+  return getF32(buf, nodeIndex, N_COMPUTED_WIDTH);
 }
 
 export function getComputedHeight(buf: SharedBuffer, nodeIndex: number): number {
-  return getF32(buf, nodeIndex, F_COMPUTED_HEIGHT);
+  return getF32(buf, nodeIndex, N_COMPUTED_HEIGHT);
 }
 
 export function getMaxScrollX(buf: SharedBuffer, nodeIndex: number): number {
-  return getF32(buf, nodeIndex, F_MAX_SCROLL_X);
+  return getF32(buf, nodeIndex, N_MAX_SCROLL_X);
 }
 
 export function getMaxScrollY(buf: SharedBuffer, nodeIndex: number): number {
-  return getF32(buf, nodeIndex, F_MAX_SCROLL_Y);
+  return getF32(buf, nodeIndex, N_MAX_SCROLL_Y);
 }
 
 // =============================================================================
-// EXPORTS FOR BACKWARDS COMPATIBILITY
+// SPEC VERIFICATION
 // =============================================================================
 
-// Re-export common patterns
-export type { SharedBuffer as AoSBuffer };
-export { createSharedBuffer as createAoSBuffer };
+/**
+ * Verify that constants match the spec checksums.
+ * Call this during development to ensure TS/Rust alignment.
+ */
+export function verifySpecChecksums(): void {
+  const checks = [
+    { name: 'HEADER_SIZE', expected: 256, actual: HEADER_SIZE },
+    { name: 'NODE_STRIDE', expected: 1024, actual: NODE_STRIDE },
+    { name: 'N_GRID_COLUMN_TRACKS', expected: 256, actual: N_GRID_COLUMN_TRACKS },
+    { name: 'N_GRID_ROW_TRACKS', expected: 448, actual: N_GRID_ROW_TRACKS },
+    { name: 'N_COMPUTED_X', expected: 640, actual: N_COMPUTED_X },
+    { name: 'N_FG_COLOR', expected: 768, actual: N_FG_COLOR },
+    { name: 'N_TEXT_OFFSET', expected: 832, actual: N_TEXT_OFFSET },
+    { name: 'N_SCROLL_X', expected: 896, actual: N_SCROLL_X },
+    { name: 'EVENT_SLOT_SIZE', expected: 20, actual: EVENT_SLOT_SIZE },
+  ];
+
+  for (const check of checks) {
+    if (check.expected !== check.actual) {
+      throw new Error(`Spec checksum mismatch: ${check.name} expected ${check.expected}, got ${check.actual}`);
+    }
+  }
+}

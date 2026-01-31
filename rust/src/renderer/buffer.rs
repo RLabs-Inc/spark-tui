@@ -201,24 +201,33 @@ impl FrameBuffer {
 
     /// Fill a rectangle with a background color.
     pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, bg: Rgba, clip: Option<&ClipRect>) {
-        // Compute effective bounds
-        let x1 = x;
-        let y1 = y;
-        let x2 = x.saturating_add(width).min(self.width);
-        let y2 = y.saturating_add(height).min(self.height);
+        // Compute effective bounds (screen coordinates, always non-negative)
+        let x1 = x as i32;
+        let y1 = y as i32;
+        let x2 = (x as i32 + width as i32).min(self.width as i32);
+        let y2 = (y as i32 + height as i32).min(self.height as i32);
 
-        // Apply clipping
+        // Apply clipping (clip rect may have negative x/y from scroll)
         let (x1, y1, x2, y2) = if let Some(clip) = clip {
-            let cx2 = clip.x.saturating_add(clip.width);
-            let cy2 = clip.y.saturating_add(clip.height);
-            (x1.max(clip.x), y1.max(clip.y), x2.min(cx2), y2.min(cy2))
+            (
+                x1.max(clip.x).max(0),
+                y1.max(clip.y).max(0),
+                x2.min(clip.right()),
+                y2.min(clip.bottom()),
+            )
         } else {
-            (x1, y1, x2, y2)
+            (x1.max(0), y1.max(0), x2, y2)
         };
 
         if x2 <= x1 || y2 <= y1 {
             return;
         }
+
+        // Convert back to u16 for indexing (guaranteed non-negative after above checks)
+        let x1 = x1 as u16;
+        let y1 = y1 as u16;
+        let x2 = x2 as u16;
+        let y2 = y2 as u16;
 
         // Fast path for opaque fill
         let is_opaque = bg.is_opaque() || bg.is_terminal_default() || bg.is_ansi();

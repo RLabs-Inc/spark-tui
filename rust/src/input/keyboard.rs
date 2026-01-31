@@ -8,9 +8,8 @@
 //! 5. Key event → ring buffer for TS onKey handlers
 //! 6. Framework defaults (arrow scroll, page scroll, home/end)
 
-use crate::shared_buffer_aos::AoSBuffer;
+use crate::shared_buffer::{SharedBuffer, EventType};
 use super::parser::{KeyEvent, KeyCode, Modifier, KeyState};
-use super::events::Event;
 use super::focus::FocusManager;
 use super::text_edit::TextEditor;
 use super::scroll::ScrollManager;
@@ -21,7 +20,7 @@ const COMP_INPUT: u8 = 3;
 /// Route a key event through the dispatch chain.
 /// Returns true if the event was consumed.
 pub fn dispatch_key(
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     focus: &mut FocusManager,
     editor: &mut TextEditor,
     scroll: &mut ScrollManager,
@@ -29,15 +28,14 @@ pub fn dispatch_key(
 ) -> bool {
     // 1. Ctrl+C → EXIT
     if key.code == KeyCode::Char('c') && key.modifiers.contains(Modifier::CTRL) {
-        buf.push_event(&Event::exit());
+        buf.push_exit_event(0);
         return true;
     }
 
     // 2. Non-press events → send to TS for handling
     if key.state != KeyState::Press {
         let target = focus.focused().unwrap_or(0);
-        let keycode = key_code_to_u32(&key.code);
-        buf.push_event(&Event::key(target as u16, keycode, key.modifiers.bits()));
+        push_key_event(buf, target as u16, &key.code, key.modifiers.bits());
         return false;
     }
 
@@ -64,8 +62,7 @@ pub fn dispatch_key(
     // 5. Write key event to ring buffer (TS dispatches onKey)
     // Default to root (0) if nothing is focused
     let target = focus.focused().unwrap_or(0);
-    let keycode = key_code_to_u32(&key.code);
-    buf.push_event(&Event::key(target as u16, keycode, key.modifiers.bits()));
+    push_key_event(buf, target as u16, &key.code, key.modifiers.bits());
 
     // 6. Framework defaults (arrow scroll, page scroll, home/end)
     if let Some(focused) = focus.focused() {
@@ -87,12 +84,12 @@ pub fn dispatch_key(
                 return true;
             }
             KeyCode::PageUp => {
-                let viewport_h = buf.output_height(focused) as i32;
+                let viewport_h = buf.computed_height(focused) as i32;
                 scroll.scroll_by(buf, focused, 0, -viewport_h);
                 return true;
             }
             KeyCode::PageDown => {
-                let viewport_h = buf.output_height(focused) as i32;
+                let viewport_h = buf.computed_height(focused) as i32;
                 scroll.scroll_by(buf, focused, 0, viewport_h);
                 return true;
             }
@@ -101,7 +98,7 @@ pub fn dispatch_key(
                 return true;
             }
             KeyCode::End => {
-                let max_y = buf.output_max_scroll_y(focused) as i32;
+                let max_y = buf.max_scroll_y(focused) as i32;
                 scroll.scroll_to(buf, focused, 0, max_y);
                 return true;
             }
@@ -110,6 +107,15 @@ pub fn dispatch_key(
     }
 
     false
+}
+
+/// Push a key event to the SharedBuffer event ring.
+fn push_key_event(buf: &SharedBuffer, target: u16, code: &KeyCode, modifiers: u8) {
+    let keycode = key_code_to_u32(code);
+    let mut data = [0u8; 16];
+    data[0..4].copy_from_slice(&keycode.to_le_bytes());
+    data[4] = modifiers;
+    buf.push_event(EventType::Key, target, &data);
 }
 
 /// Convert KeyCode to u32 for event data.

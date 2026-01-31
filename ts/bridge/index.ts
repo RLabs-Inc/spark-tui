@@ -1,22 +1,22 @@
 /**
  * SparkTUI Bridge — Global initialization.
  *
- * Creates the AoS SharedArrayBuffer, reactive arrays, and wake notifier.
- * Call initBridgeAoS() once at startup. Primitives import getAoSArrays()/getAoSBuffer().
+ * Creates the SharedArrayBuffer, reactive arrays, and wake notifier.
+ * Call initBridge() once at startup. Primitives import getBuffer()/getArrays().
  */
 
-import { createAoSBuffer, type AoSBuffer, MAX_NODES } from './shared-buffer-aos'
-import { createReactiveArraysAoS, type ReactiveArraysAoS } from './reactive-arrays-aos'
-import { createNoopNotifier, createWakeNotifierAoS } from './notify'
+import { createSharedBuffer, type SharedBuffer, DEFAULT_MAX_NODES } from './shared-buffer'
+import { createReactiveArrays, type ReactiveArrays } from './reactive-arrays'
+import { createNoopNotifier, createWakeNotifier } from './notify'
 import type { Notifier } from '@rlabs-inc/signals'
 
 // =============================================================================
 // Singleton state
 // =============================================================================
 
-let _aosBuf: AoSBuffer | null = null
-let _aosArrays: ReactiveArraysAoS | null = null
-let _aosNotifier: Notifier | null = null
+let _buffer: SharedBuffer | null = null
+let _arrays: ReactiveArrays | null = null
+let _notifier: Notifier | null = null
 
 // =============================================================================
 // Init
@@ -29,56 +29,53 @@ export interface BridgeOptions {
 
 /** Check if bridge is initialized. */
 export function isInitialized(): boolean {
-  return _aosBuf !== null
+  return _buffer !== null
 }
-
-/** Alias for isInitialized (for compatibility). */
-export const isInitializedAoS = isInitialized
 
 /**
- * Initialize the AoS shared memory bridge.
+ * Initialize the shared memory bridge.
  *
- * Creates AoS SharedArrayBuffer + reactive SharedSlotBuffers + notifier.
+ * Creates SharedArrayBuffer + reactive slot buffers + notifier.
  * Safe to call multiple times — returns existing state after first init.
  */
-export function initBridgeAoS(opts?: BridgeOptions): {
-  buffer: AoSBuffer
-  arrays: ReactiveArraysAoS
+export function initBridge(opts?: BridgeOptions): {
+  buffer: SharedBuffer
+  arrays: ReactiveArrays
   notifier: Notifier
 } {
-  if (_aosBuf) {
-    return { buffer: _aosBuf, arrays: _aosArrays!, notifier: _aosNotifier! }
+  if (_buffer) {
+    return { buffer: _buffer, arrays: _arrays!, notifier: _notifier! }
   }
 
-  _aosBuf = createAoSBuffer()
-  _aosNotifier = opts?.noopNotifier
+  _buffer = createSharedBuffer()
+  _notifier = opts?.noopNotifier
     ? createNoopNotifier()
-    : createWakeNotifierAoS(_aosBuf)
-  _aosArrays = createReactiveArraysAoS(_aosBuf, _aosNotifier)
+    : createWakeNotifier(_buffer)
+  _arrays = createReactiveArrays(_buffer, _notifier)
 
-  return { buffer: _aosBuf, arrays: _aosArrays, notifier: _aosNotifier }
+  return { buffer: _buffer, arrays: _arrays, notifier: _notifier }
 }
 
 // =============================================================================
-// AoS Accessors
+// Accessors
 // =============================================================================
 
-/** Get the AoS buffer. Throws if not initialized. */
-export function getAoSBuffer(): AoSBuffer {
-  if (!_aosBuf) throw new Error('AoS Bridge not initialized — call initBridgeAoS() first')
-  return _aosBuf
+/** Get the shared buffer. Throws if not initialized. */
+export function getBuffer(): SharedBuffer {
+  if (!_buffer) throw new Error('Bridge not initialized — call initBridge() first')
+  return _buffer
 }
 
-/** Get the AoS reactive arrays. Throws if not initialized. */
-export function getAoSArrays(): ReactiveArraysAoS {
-  if (!_aosArrays) throw new Error('AoS Bridge not initialized — call initBridgeAoS() first')
-  return _aosArrays
+/** Get the reactive arrays. Throws if not initialized. */
+export function getArrays(): ReactiveArrays {
+  if (!_arrays) throw new Error('Bridge not initialized — call initBridge() first')
+  return _arrays
 }
 
-/** Get the AoS notifier. Throws if not initialized. */
-export function getAoSNotifier(): Notifier {
-  if (!_aosNotifier) throw new Error('AoS Bridge not initialized — call initBridgeAoS() first')
-  return _aosNotifier
+/** Get the notifier. Throws if not initialized. */
+export function getNotifier(): Notifier {
+  if (!_notifier) throw new Error('Bridge not initialized — call initBridge() first')
+  return _notifier
 }
 
 // =============================================================================
@@ -87,7 +84,15 @@ export function getAoSNotifier(): Notifier {
 
 /** Reset bridge state. For testing only. */
 export function resetBridge(): void {
-  _aosBuf = null
-  _aosArrays = null
-  _aosNotifier = null
+  _buffer = null
+  _arrays = null
+  _notifier = null
 }
+
+// =============================================================================
+// Re-exports for convenience
+// =============================================================================
+
+export type { SharedBuffer } from './shared-buffer'
+export type { ReactiveArrays } from './reactive-arrays'
+export { DEFAULT_MAX_NODES } from './shared-buffer'

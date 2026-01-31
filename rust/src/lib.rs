@@ -39,7 +39,6 @@
 // =============================================================================
 
 pub mod shared_buffer;
-pub mod shared_buffer_aos; // Legacy - being removed
 pub mod utils;
 pub mod layout;
 pub mod renderer;

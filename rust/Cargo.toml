@@ -12,7 +12,7 @@ engine = []
 
 [dependencies]
 spark-signals = "0.3"
-taffy = { version = "0.7", features = ["content_size"] }
+taffy = { version = "0.9", features = ["content_size"] }
 bitflags = "2.9"
 unicode-width = "0.2"
 unicode-segmentation = "1"

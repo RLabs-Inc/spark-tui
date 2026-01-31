@@ -1,7 +1,19 @@
-//! Component tree rendering from AoSBuffer to FrameBuffer.
+//! Component tree rendering from SharedBuffer to FrameBuffer.
 //!
 //! Reads layout output, visual properties, text content, and interaction state
-//! from the AoSBuffer. Renders each component to the 2D cell grid.
+//! from the SharedBuffer. Renders each component to the 2D cell grid.
+//!
+//! # Coordinate System
+//!
+//! Taffy computes layout positions relative to parent's content box. To get
+//! screen position, we transform through the parent chain:
+//!
+//! ```text
+//! screen_position = parent_screen + layout_position - parent_scroll
+//! ```
+//!
+//! Positions can be negative (scrolled out of view). We use i32 throughout
+//! and only clamp to screen coordinates at final render time.
 //!
 //! # Traversal Order
 //!
@@ -9,9 +21,8 @@
 //! 2. Sort children by z-index
 //! 3. DFS traversal: background → border → content → children → focus indicator
 
-use crate::renderer::{FrameBuffer, BorderSides, BorderColors};
-use crate::shared_buffer_aos::AoSBuffer;
-use crate::shared_buffer::BorderStyle;
+use crate::renderer::FrameBuffer;
+use crate::shared_buffer::{SharedBuffer, BorderStyle, COMPONENT_BOX, COMPONENT_TEXT, COMPONENT_INPUT};
 use crate::utils::{Attr, ClipRect, Rgba};
 use crate::layout::{string_width, truncate_text, wrap_text_word};
 use super::inheritance::{get_inherited_fg, get_inherited_bg, get_effective_opacity, apply_opacity};
@@ -30,32 +41,24 @@ pub struct HitRegion {
     pub component_index: usize,
 }
 
-// Component type constants (matching META_COMPONENT_TYPE values)
+// Component types (from SharedBuffer constants)
 const COMP_NONE: u8 = 0;
-const COMP_BOX: u8 = 1;
-const COMP_TEXT: u8 = 2;
-const COMP_INPUT: u8 = 3;
+const COMP_BOX: u8 = COMPONENT_BOX;
+const COMP_TEXT: u8 = COMPONENT_TEXT;
+const COMP_INPUT: u8 = COMPONENT_INPUT;
 const COMP_SELECT: u8 = 4;
 const COMP_PROGRESS: u8 = 5;
-
-// Text alignment constants (matching META_TEXT_ALIGN values)
-const ALIGN_CENTER: u8 = 1;
-const ALIGN_RIGHT: u8 = 2;
-
-// Text wrap constants (matching META_TEXT_WRAP values)
-const WRAP_WRAP: u8 = 1;
-const WRAP_TRUNCATE: u8 = 2;
 
 // =============================================================================
 // Entry Point
 // =============================================================================
 
-/// Compute the framebuffer from AoSBuffer data.
+/// Compute the framebuffer from SharedBuffer data.
 ///
 /// Reads layout output + visual + text + interaction sections.
 /// Returns the filled FrameBuffer and collected hit regions.
 pub fn compute_framebuffer(
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     width: u16,
     height: u16,
 ) -> (FrameBuffer, Vec<HitRegion>) {
@@ -95,6 +98,9 @@ pub fn compute_framebuffer(
         }
     }
 
+    // Screen bounds (root clip rect)
+    let screen_clip = ClipRect::new(0, 0, width, height);
+
     // Render each root and its subtree
     for root_idx in &roots {
         render_component(
@@ -103,9 +109,8 @@ pub fn compute_framebuffer(
             *root_idx,
             &child_map,
             &mut hit_regions,
-            None,  // no parent clip
-            0, 0,  // no parent scroll
-            0, 0,  // parent absolute position
+            &screen_clip,
+            0, 0,  // parent screen position
         );
     }
 
@@ -117,18 +122,20 @@ pub fn compute_framebuffer(
 // =============================================================================
 
 /// Render a component and its children recursively.
+///
+/// Arguments:
+/// - `parent_clip`: The clipping rectangle from the parent
+/// - `parent_screen_x/y`: Parent's absolute screen position (i32, can be negative)
 #[allow(clippy::too_many_arguments)]
 fn render_component(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
     child_map: &[Vec<usize>],
     hit_regions: &mut Vec<HitRegion>,
-    parent_clip: Option<&ClipRect>,
-    parent_scroll_x: i32,
-    parent_scroll_y: i32,
-    parent_abs_x: i32,
-    parent_abs_y: i32,
+    parent_clip: &ClipRect,
+    parent_screen_x: i32,
+    parent_screen_y: i32,
 ) {
     // Visibility check
     if !buf.visible(index) || buf.component_type(index) == COMP_NONE {
@@ -136,34 +143,47 @@ fn render_component(
     }
 
     // Read computed layout from output section
-    let rel_x = buf.output_x(index) as i32;
-    let rel_y = buf.output_y(index) as i32;
-    let w = buf.output_width(index) as u16;
-    let h = buf.output_height(index) as u16;
+    // These are positions relative to parent's content box
+    let rel_x = buf.computed_x(index) as i32;
+    let rel_y = buf.computed_y(index) as i32;
+    let w = buf.computed_width(index) as u16;
+    let h = buf.computed_height(index) as u16;
 
     if w == 0 || h == 0 {
         return;
     }
 
-    // Absolute position: parent absolute + relative - scroll offset
-    let abs_x = parent_abs_x + rel_x - parent_scroll_x;
-    let abs_y = parent_abs_y + rel_y - parent_scroll_y;
-
-    let x = abs_x.max(0) as u16;
-    let y = abs_y.max(0) as u16;
-
-    // Component bounds
-    let component_bounds = ClipRect::new(x, y, w, h);
-
-    // Effective clip (intersection with parent)
-    let effective_clip = if let Some(parent) = parent_clip {
-        match component_bounds.intersect(parent) {
-            Some(clip) => clip,
-            None => return, // completely clipped
-        }
+    // Read parent's scroll offset (if parent is scrollable)
+    let parent_scroll_x = if let Some(parent_idx) = buf.parent_index(index) {
+        if buf.is_scrollable(parent_idx) { buf.scroll_x(parent_idx) } else { 0 }
     } else {
-        component_bounds
+        0
     };
+    let parent_scroll_y = if let Some(parent_idx) = buf.parent_index(index) {
+        if buf.is_scrollable(parent_idx) { buf.scroll_y(parent_idx) } else { 0 }
+    } else {
+        0
+    };
+
+    // Calculate screen position (can be negative if scrolled out of view)
+    let screen_x = parent_screen_x + rel_x - parent_scroll_x;
+    let screen_y = parent_screen_y + rel_y - parent_scroll_y;
+
+    // Create component bounds (with signed x/y)
+    let component_bounds = ClipRect::new(screen_x, screen_y, w, h);
+
+    // Intersect with parent clip (handles negative positions correctly)
+    let effective_clip = match component_bounds.intersect(parent_clip) {
+        Some(clip) => clip,
+        None => return, // Completely clipped out
+    };
+
+    // Get visible screen region (clamped to non-negative)
+    let visible = match effective_clip.visible_on_screen() {
+        Some(v) => v,
+        None => return, // Nothing visible on screen
+    };
+    let (vis_x, vis_y, vis_w, vis_h) = visible;
 
     // Color inheritance + opacity
     let fg = get_inherited_fg(buf, index);
@@ -172,46 +192,46 @@ fn render_component(
     let effective_fg = apply_opacity(fg, opacity);
     let effective_bg = apply_opacity(bg, opacity);
 
-    // Background fill
+    // Background fill (at screen coordinates)
     if effective_bg.a > 0 && !effective_bg.is_terminal_default() {
-        buffer.fill_rect(x, y, w, h, effective_bg, Some(&effective_clip));
+        buffer.fill_rect(vis_x, vis_y, vis_w, vis_h, effective_bg, Some(&effective_clip));
     }
 
-    // Collect hit region
+    // Collect hit region (use visible coordinates)
     hit_regions.push(HitRegion {
-        x,
-        y,
-        width: w,
-        height: h,
+        x: vis_x,
+        y: vis_y,
+        width: vis_w,
+        height: vis_h,
         component_index: index,
     });
 
     // Render borders
-    render_borders(buffer, buf, index, x, y, w, h, &effective_clip);
+    render_borders(buffer, buf, index, screen_x, screen_y, w, h, &effective_clip);
 
     // Calculate content area (inside borders + padding)
-    let border_t = if buf.border_top(index) > 0 { 1u16 } else { 0 };
-    let border_r = if buf.border_right(index) > 0 { 1u16 } else { 0 };
-    let border_b = if buf.border_bottom(index) > 0 { 1u16 } else { 0 };
-    let border_l = if buf.border_left(index) > 0 { 1u16 } else { 0 };
+    let border_t = if buf.border_top(index) > 0 { 1i32 } else { 0 };
+    let border_r = if buf.border_right(index) > 0 { 1i32 } else { 0 };
+    let border_b = if buf.border_bottom(index) > 0 { 1i32 } else { 0 };
+    let border_l = if buf.border_left(index) > 0 { 1i32 } else { 0 };
 
-    let pad_top = buf.padding_top(index) as u16;
-    let pad_right = buf.padding_right(index) as u16;
-    let pad_bottom = buf.padding_bottom(index) as u16;
-    let pad_left = buf.padding_left(index) as u16;
+    let pad_top = buf.padding_top(index) as i32;
+    let pad_right = buf.padding_right(index) as i32;
+    let pad_bottom = buf.padding_bottom(index) as i32;
+    let pad_left = buf.padding_left(index) as i32;
 
-    let total_top = pad_top.saturating_add(border_t);
-    let total_right = pad_right.saturating_add(border_r);
-    let total_bottom = pad_bottom.saturating_add(border_b);
-    let total_left = pad_left.saturating_add(border_l);
+    let total_top = pad_top + border_t;
+    let total_right = pad_right + border_r;
+    let total_bottom = pad_bottom + border_b;
+    let total_left = pad_left + border_l;
 
-    let content_x = x.saturating_add(total_left);
-    let content_y = y.saturating_add(total_top);
-    let content_w = w.saturating_sub(total_left).saturating_sub(total_right);
-    let content_h = h.saturating_sub(total_top).saturating_sub(total_bottom);
+    let content_x = screen_x + total_left;
+    let content_y = screen_y + total_top;
+    let content_w = (w as i32 - total_left - total_right).max(0) as u16;
+    let content_h = (h as i32 - total_top - total_bottom).max(0) as u16;
 
     if content_w == 0 || content_h == 0 {
-        render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, 0, 0, abs_x, abs_y);
+        render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, content_x, content_y);
         return;
     }
 
@@ -219,12 +239,12 @@ fn render_component(
     let content_clip = match content_bounds.intersect(&effective_clip) {
         Some(clip) => clip,
         None => {
-            render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, 0, 0, abs_x, abs_y);
+            render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, content_x, content_y);
             return;
         }
     };
 
-    // Type dispatch
+    // Type dispatch for content rendering
     let comp_type = buf.component_type(index);
     match comp_type {
         COMP_BOX => {
@@ -245,17 +265,17 @@ fn render_component(
         _ => {}
     }
 
-    // Render children
-    render_children(buffer, buf, index, child_map, hit_regions, &content_clip, 0, 0, abs_x, abs_y);
+    // Render children (pass content area as their parent screen position)
+    render_children(buffer, buf, index, child_map, hit_regions, &content_clip, content_x, content_y);
 
-    // Focus indicator: draw '*' at top-right if focused + focusable
-    render_focus_indicator(buffer, buf, index, x, y, w, comp_type, &effective_clip, effective_fg);
+    // Focus indicator
+    render_focus_indicator(buffer, buf, index, screen_x, screen_y, w, comp_type, &effective_clip, effective_fg);
 
     // Scrollbar
-    if buf.output_scrollable(index) {
-        let scrollbar_x = x.saturating_add(w).saturating_sub(1).saturating_sub(border_r);
-        let scrollbar_y = y.saturating_add(border_t);
-        let scrollbar_h = h.saturating_sub(border_t).saturating_sub(border_b);
+    if buf.is_scrollable(index) {
+        let scrollbar_x = (screen_x + w as i32 - 1 - border_r).max(0);
+        let scrollbar_y = screen_y + border_t;
+        let scrollbar_h = (h as i32 - border_t - border_b).max(0) as u16;
         render_scrollbar(buffer, buf, index, scrollbar_x, scrollbar_y, scrollbar_h, effective_fg, &effective_clip);
     }
 }
@@ -264,15 +284,13 @@ fn render_component(
 #[allow(clippy::too_many_arguments)]
 fn render_children(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
     child_map: &[Vec<usize>],
     hit_regions: &mut Vec<HitRegion>,
     clip: &ClipRect,
-    parent_scroll_x: i32,
-    parent_scroll_y: i32,
-    parent_abs_x: i32,
-    parent_abs_y: i32,
+    parent_screen_x: i32,
+    parent_screen_y: i32,
 ) {
     if index >= child_map.len() {
         return;
@@ -283,21 +301,6 @@ fn render_children(
         return;
     }
 
-    // Accumulate scroll offsets
-    let scroll_x = if buf.output_scrollable(index) {
-        buf.scroll_x(index)
-    } else {
-        0
-    };
-    let scroll_y = if buf.output_scrollable(index) {
-        buf.scroll_y(index)
-    } else {
-        0
-    };
-
-    let child_scroll_x = parent_scroll_x + scroll_x;
-    let child_scroll_y = parent_scroll_y + scroll_y;
-
     for &child_idx in children {
         render_component(
             buffer,
@@ -305,11 +308,9 @@ fn render_children(
             child_idx,
             child_map,
             hit_regions,
-            Some(clip),
-            child_scroll_x,
-            child_scroll_y,
-            parent_abs_x,
-            parent_abs_y,
+            clip,
+            parent_screen_x,
+            parent_screen_y,
         );
     }
 }
@@ -320,66 +321,111 @@ fn render_children(
 
 fn render_borders(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
+    screen_x: i32,
+    screen_y: i32,
     w: u16,
     h: u16,
     clip: &ClipRect,
 ) {
-    // Read per-side border styles
-    let base_style = buf.border_style(index);
-    let style_top = buf.border_style_top(index);
-    let style_right = buf.border_style_right(index);
-    let style_bottom = buf.border_style_bottom(index);
-    let style_left = buf.border_style_left(index);
-
-    // If per-side styles are all 0, use the base style
-    let top = if style_top != 0 { BorderStyle::from(style_top) } else { BorderStyle::from(base_style) };
-    let right = if style_right != 0 { BorderStyle::from(style_right) } else { BorderStyle::from(base_style) };
-    let bottom = if style_bottom != 0 { BorderStyle::from(style_bottom) } else { BorderStyle::from(base_style) };
-    let left = if style_left != 0 { BorderStyle::from(style_left) } else { BorderStyle::from(base_style) };
-
-    // Check if any borders exist (by width)
-    let has_top = buf.border_top(index) > 0 && top != BorderStyle::None;
-    let has_right = buf.border_right(index) > 0 && right != BorderStyle::None;
-    let has_bottom = buf.border_bottom(index) > 0 && bottom != BorderStyle::None;
-    let has_left = buf.border_left(index) > 0 && left != BorderStyle::None;
+    // Check if any borders exist
+    let has_top = buf.border_top(index) > 0;
+    let has_right = buf.border_right(index) > 0;
+    let has_bottom = buf.border_bottom(index) > 0;
+    let has_left = buf.border_left(index) > 0;
 
     if !has_top && !has_right && !has_bottom && !has_left {
         return;
     }
 
-    // Read per-side border colors
-    let color_top = buf.border_color_top_rgba(index);
-    let color_right = buf.border_color_right_rgba(index);
-    let color_bottom = buf.border_color_bottom_rgba(index);
-    let color_left = buf.border_color_left_rgba(index);
+    // Get border style and characters
+    let style = buf.border_style(index);
+    if style == BorderStyle::None {
+        return;
+    }
 
-    // If all sides have same style, use simple draw_border
-    if top == right && right == bottom && bottom == left
-        && color_top == color_right && color_right == color_bottom && color_bottom == color_left
-    {
-        buffer.draw_border(x, y, w, h, top, color_top, None, Some(clip));
-    } else {
-        buffer.draw_border_sides(
-            x, y, w, h,
-            BorderSides {
-                top: if has_top { top } else { BorderStyle::None },
-                right: if has_right { right } else { BorderStyle::None },
-                bottom: if has_bottom { bottom } else { BorderStyle::None },
-                left: if has_left { left } else { BorderStyle::None },
-            },
-            BorderColors {
-                top: color_top,
-                right: color_right,
-                bottom: color_bottom,
-                left: color_left,
-            },
-            None,
-            Some(clip),
-        );
+    let (h_char, v_char, tl_char, tr_char, bl_char, br_char) = buf.border_chars(index);
+
+    // Get border color (convert from packed u32 to utils::Rgba)
+    let border_color = Rgba::from_u32(buf.border_color(index));
+
+    // Early return if nothing visible on screen
+    if clip.visible_on_screen().is_none() {
+        return;
+    }
+
+    // Draw borders (only if visible on screen)
+    // We need to check each position against the clip rect
+
+    // Top border
+    if has_top && screen_y >= 0 {
+        let y = screen_y as u16;
+        if clip.contains(0, y) || screen_y >= clip.y {
+            // Top-left corner
+            if has_left && screen_x >= 0 && clip.contains_signed(screen_x, screen_y) {
+                buffer.draw_char(screen_x.max(0) as u16, y, tl_char, border_color, None, Attr::NONE, Some(clip));
+            }
+            // Top edge
+            let start_x = if has_left { screen_x + 1 } else { screen_x };
+            let end_x = if has_right { screen_x + w as i32 - 1 } else { screen_x + w as i32 };
+            for x in start_x..end_x {
+                if x >= 0 && clip.contains_signed(x, screen_y) {
+                    buffer.draw_char(x as u16, y, h_char, border_color, None, Attr::NONE, Some(clip));
+                }
+            }
+            // Top-right corner
+            if has_right && screen_x + w as i32 - 1 >= 0 && clip.contains_signed(screen_x + w as i32 - 1, screen_y) {
+                buffer.draw_char((screen_x + w as i32 - 1).max(0) as u16, y, tr_char, border_color, None, Attr::NONE, Some(clip));
+            }
+        }
+    }
+
+    // Bottom border
+    let bottom_y = screen_y + h as i32 - 1;
+    if has_bottom && bottom_y >= 0 {
+        let y = bottom_y as u16;
+        // Bottom-left corner
+        if has_left && screen_x >= 0 && clip.contains_signed(screen_x, bottom_y) {
+            buffer.draw_char(screen_x.max(0) as u16, y, bl_char, border_color, None, Attr::NONE, Some(clip));
+        }
+        // Bottom edge
+        let start_x = if has_left { screen_x + 1 } else { screen_x };
+        let end_x = if has_right { screen_x + w as i32 - 1 } else { screen_x + w as i32 };
+        for x in start_x..end_x {
+            if x >= 0 && clip.contains_signed(x, bottom_y) {
+                buffer.draw_char(x as u16, y, h_char, border_color, None, Attr::NONE, Some(clip));
+            }
+        }
+        // Bottom-right corner
+        if has_right && screen_x + w as i32 - 1 >= 0 && clip.contains_signed(screen_x + w as i32 - 1, bottom_y) {
+            buffer.draw_char((screen_x + w as i32 - 1).max(0) as u16, y, br_char, border_color, None, Attr::NONE, Some(clip));
+        }
+    }
+
+    // Left border (excluding corners)
+    if has_left && screen_x >= 0 {
+        let x = screen_x as u16;
+        let start_y = if has_top { screen_y + 1 } else { screen_y };
+        let end_y = if has_bottom { screen_y + h as i32 - 1 } else { screen_y + h as i32 };
+        for y in start_y..end_y {
+            if y >= 0 && clip.contains_signed(screen_x, y) {
+                buffer.draw_char(x, y as u16, v_char, border_color, None, Attr::NONE, Some(clip));
+            }
+        }
+    }
+
+    // Right border (excluding corners)
+    let right_x = screen_x + w as i32 - 1;
+    if has_right && right_x >= 0 {
+        let x = right_x as u16;
+        let start_y = if has_top { screen_y + 1 } else { screen_y };
+        let end_y = if has_bottom { screen_y + h as i32 - 1 } else { screen_y + h as i32 };
+        for y in start_y..end_y {
+            if y >= 0 && clip.contains_signed(right_x, y) {
+                buffer.draw_char(x, y as u16, v_char, border_color, None, Attr::NONE, Some(clip));
+            }
+        }
     }
 }
 
@@ -389,16 +435,16 @@ fn render_borders(
 
 fn render_text(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
+    content_x: i32,
+    content_y: i32,
+    content_w: u16,
+    content_h: u16,
     fg: Rgba,
     clip: &ClipRect,
 ) {
-    let content = buf.text_content(index);
+    let content = buf.text(index);
     if content.is_empty() {
         return;
     }
@@ -409,17 +455,16 @@ fn render_text(
 
     // Handle text wrapping
     let lines: Vec<String> = match wrap {
-        WRAP_WRAP => {
-            wrap_text_word(content, w as usize)
+        crate::shared_buffer::TextWrap::Wrap => {
+            wrap_text_word(content, content_w as usize)
                 .into_iter()
                 .map(|s| s.to_string())
                 .collect()
         }
-        WRAP_TRUNCATE => {
-            // Single line, truncated
+        crate::shared_buffer::TextWrap::Truncate => {
             let text_w = string_width(content);
-            if text_w > w as usize {
-                vec![truncate_text(content, w as usize, "…")]
+            if text_w > content_w as usize {
+                vec![truncate_text(content, content_w as usize, "...")]
             } else {
                 vec![content.to_string()]
             }
@@ -431,21 +476,26 @@ fn render_text(
     };
 
     for (line_idx, line) in lines.iter().enumerate() {
-        let line_y = y + line_idx as u16;
-        if line_y >= y + h {
+        let line_y = content_y + line_idx as i32;
+        if line_y >= content_y + content_h as i32 {
             break;
+        }
+        if line_y < 0 {
+            continue;
         }
 
         let text_width = string_width(line) as u16;
 
         // Alignment
         let draw_x = match align {
-            ALIGN_CENTER => x + w.saturating_sub(text_width) / 2,
-            ALIGN_RIGHT => x + w.saturating_sub(text_width),
-            _ => x, // Left
+            crate::shared_buffer::TextAlign::Center => content_x + (content_w.saturating_sub(text_width) / 2) as i32,
+            crate::shared_buffer::TextAlign::Right => content_x + content_w.saturating_sub(text_width) as i32,
+            _ => content_x, // Left
         };
 
-        buffer.draw_text(draw_x, line_y, line, fg, None, attrs, Some(clip));
+        if draw_x >= 0 {
+            buffer.draw_text(draw_x as u16, line_y as u16, line, fg, None, attrs, Some(clip));
+        }
     }
 }
 
@@ -456,17 +506,24 @@ fn render_text(
 #[allow(clippy::too_many_arguments)]
 fn render_input(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
-    w: u16,
-    _h: u16,
+    content_x: i32,
+    content_y: i32,
+    content_w: u16,
+    _content_h: u16,
     fg: Rgba,
     bg: Rgba,
     clip: &ClipRect,
 ) {
-    let content = buf.text_content(index);
+    if content_x < 0 || content_y < 0 {
+        return; // Off screen
+    }
+
+    let x = content_x as u16;
+    let y = content_y as u16;
+
+    let content = buf.text(index);
     let attrs = Attr::from_bits_truncate(buf.text_attrs(index));
 
     // Horizontal scroll offset
@@ -478,8 +535,8 @@ fn render_input(
     let visible_chars: String = chars.iter().skip(visible_start).collect();
 
     // Truncate to fit width
-    let display_text = if string_width(&visible_chars) > w as usize {
-        truncate_text(&visible_chars, w as usize, "…")
+    let display_text = if string_width(&visible_chars) > content_w as usize {
+        truncate_text(&visible_chars, content_w as usize, "...")
     } else {
         visible_chars
     };
@@ -488,17 +545,17 @@ fn render_input(
     buffer.draw_text(x, y, &display_text, fg, None, attrs, Some(clip));
 
     // Render selection highlighting
-    render_input_selection(buffer, buf, index, x, y, w, &chars, fg, bg, scroll_x, clip);
+    render_input_selection(buffer, buf, index, x, y, content_w, &chars, fg, bg, scroll_x, clip);
 
     // Render cursor
-    render_input_cursor(buffer, buf, index, x, y, w, &chars, fg, bg, scroll_x, clip);
+    render_input_cursor(buffer, buf, index, x, y, content_w, &chars, fg, bg, scroll_x, clip);
 }
 
 /// Render selection highlighting (inverse colors).
 #[allow(clippy::too_many_arguments)]
 fn render_input_selection(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
     content_x: u16,
     content_y: u16,
@@ -534,15 +591,10 @@ fn render_input_selection(
 }
 
 /// Render cursor for input field.
-///
-/// Cursor styles:
-/// - cursorChar == 0, visible → block (inverse fg/bg)
-/// - cursorChar > 0, visible → custom char with cursor colors
-/// - not visible → show alt char (blink off phase)
 #[allow(clippy::too_many_arguments)]
 fn render_input_cursor(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
     content_x: u16,
     content_y: u16,
@@ -557,9 +609,6 @@ fn render_input_cursor(
     if !buf.focusable(index) {
         return;
     }
-    // We check focus via the interaction section — focused_index is tracked
-    // by the input system. For now, we use cursor_visible as a proxy:
-    // if cursor_visible is set, it means this input is focused and cursor should show.
 
     let cursor_pos = buf.cursor_position(index) as usize;
     let screen_pos = cursor_pos.saturating_sub(scroll_x);
@@ -574,7 +623,7 @@ fn render_input_cursor(
     let cursor_visible = buf.cursor_visible(index);
 
     if !cursor_visible {
-        // Blink off phase: show alt char if set, otherwise show normal text
+        // Blink off phase: show alt char if set
         let alt_char = buf.cursor_alt_char(index);
         if alt_char > 0 {
             if let Some(ch) = char::from_u32(alt_char) {
@@ -585,8 +634,8 @@ fn render_input_cursor(
     }
 
     // Cursor visible
-    let cursor_fg = buf.cursor_fg_rgba(index);
-    let cursor_bg = buf.cursor_bg_rgba(index);
+    let cursor_fg = Rgba::from_u32(buf.cursor_fg_color(index));
+    let cursor_bg = Rgba::from_u32(buf.cursor_bg_color(index));
 
     if cursor_char == 0 {
         // Block cursor: inverse
@@ -597,7 +646,7 @@ fn render_input_cursor(
         // Custom cursor char with cursor colors
         let effective_fg = if cursor_fg.is_terminal_default() { fg } else { cursor_fg };
         let effective_bg = if cursor_bg.is_terminal_default() { bg } else { cursor_bg };
-        buffer.set_cell(render_x, content_y, cursor_char as u32, effective_fg, effective_bg, Attr::NONE, Some(clip));
+        buffer.set_cell(render_x, content_y, cursor_char, effective_fg, effective_bg, Attr::NONE, Some(clip));
     }
 }
 
@@ -605,13 +654,12 @@ fn render_input_cursor(
 // Focus Indicator
 // =============================================================================
 
-/// Render focus indicator: single character (default '*') at top-right corner (box) or end of text (text).
 fn render_focus_indicator(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
+    screen_x: i32,
+    screen_y: i32,
     w: u16,
     comp_type: u8,
     clip: &ClipRect,
@@ -629,14 +677,19 @@ fn render_focus_indicator(
 
     let indicator_char = buf.focus_indicator_char(index);
 
-    // Position: exactly at top-right corner, NO gap from edges
-    // x + w - 1 = rightmost column, y = topmost row
-    let indicator_x = if w > 0 { x + w - 1 } else { x };
-    let indicator_y = y; // top row, no offset
+    // Position: top-right corner
+    let indicator_x = screen_x + w as i32 - 1;
+    let indicator_y = screen_y;
+
+    if indicator_x < 0 || indicator_y < 0 {
+        return;
+    }
 
     match comp_type {
         COMP_BOX | COMP_TEXT => {
-            buffer.draw_char(indicator_x, indicator_y, indicator_char, fg, None, Attr::BOLD, Some(clip));
+            if clip.contains_signed(indicator_x, indicator_y) {
+                buffer.draw_char(indicator_x as u16, indicator_y as u16, indicator_char, fg, None, Attr::BOLD, Some(clip));
+            }
         }
         _ => {}
     }
@@ -648,19 +701,29 @@ fn render_focus_indicator(
 
 fn render_progress(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
+    content_x: i32,
+    content_y: i32,
+    content_w: u16,
+    content_h: u16,
     fg: Rgba,
     clip: &ClipRect,
 ) {
-    let content = buf.text_content(index);
+    if content_x < 0 || content_y < 0 {
+        return;
+    }
+
+    let content = buf.text(index);
     let progress: f32 = content.parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0);
-    let bar_y = y + h / 2;
-    buffer.draw_progress(x, bar_y, w, progress, '█', '░', fg, Rgba::GRAY, None, Some(clip));
+    let bar_y = content_y + (content_h / 2) as i32;
+
+    if bar_y >= 0 {
+        buffer.draw_progress(
+            content_x as u16, bar_y as u16, content_w,
+            progress, '█', '░', fg, Rgba::GRAY, None, Some(clip),
+        );
+    }
 }
 
 // =============================================================================
@@ -669,29 +732,36 @@ fn render_progress(
 
 fn render_select(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
-    w: u16,
+    content_x: i32,
+    content_y: i32,
+    content_w: u16,
     fg: Rgba,
     clip: &ClipRect,
 ) {
-    let content = buf.text_content(index);
+    if content_x < 0 || content_y < 0 {
+        return;
+    }
+
+    let x = content_x as u16;
+    let y = content_y as u16;
+
+    let content = buf.text(index);
     let attrs = Attr::from_bits_truncate(buf.text_attrs(index));
 
-    let indicator = " ▼";
+    let indicator = " \u{25BC}"; // Down arrow
     let indicator_width: u16 = 2;
-    let text_width = w.saturating_sub(indicator_width);
+    let text_width = content_w.saturating_sub(indicator_width);
 
     let display_text = if string_width(content) > text_width as usize {
-        truncate_text(content, text_width as usize, "…")
+        truncate_text(content, text_width as usize, "...")
     } else {
         content.to_string()
     };
 
     buffer.draw_text(x, y, &display_text, fg, None, attrs, Some(clip));
-    buffer.draw_text(x + w - indicator_width, y, indicator, fg, None, Attr::NONE, Some(clip));
+    buffer.draw_text(x + content_w - indicator_width, y, indicator, fg, None, Attr::NONE, Some(clip));
 }
 
 // =============================================================================
@@ -703,19 +773,20 @@ const SCROLLBAR_THUMB: char = '█';
 
 fn render_scrollbar(
     buffer: &mut FrameBuffer,
-    buf: &AoSBuffer,
+    buf: &SharedBuffer,
     index: usize,
-    x: u16,
-    y: u16,
+    x: i32,
+    y: i32,
     h: u16,
     fg: Rgba,
     clip: &ClipRect,
 ) {
-    let max_scroll_y = buf.output_max_scroll_y(index);
-    if max_scroll_y <= 0.0 || h == 0 {
+    let max_scroll_y = buf.max_scroll_y(index);
+    if max_scroll_y <= 0.0 || h == 0 || x < 0 || y < 0 {
         return;
     }
 
+    let x = x as u16;
     let scroll_y = buf.scroll_y(index) as f32;
     let scrollbar_color = fg.dim(0.5);
 
@@ -730,17 +801,17 @@ fn render_scrollbar(
 
     // Draw track
     for row in 0..h {
-        let draw_y = y + row;
-        if clip.contains(x, draw_y) {
-            buffer.draw_char(x, draw_y, SCROLLBAR_TRACK, scrollbar_color.dim(0.3), None, Attr::NONE, Some(clip));
+        let draw_y = y + row as i32;
+        if draw_y >= 0 && clip.contains(x, draw_y as u16) {
+            buffer.draw_char(x, draw_y as u16, SCROLLBAR_TRACK, scrollbar_color.dim(0.3), None, Attr::NONE, Some(clip));
         }
     }
 
     // Draw thumb
     for row in thumb_pos..(thumb_pos + thumb_height).min(h) {
-        let draw_y = y + row;
-        if clip.contains(x, draw_y) {
-            buffer.draw_char(x, draw_y, SCROLLBAR_THUMB, scrollbar_color, None, Attr::NONE, Some(clip));
+        let draw_y = y + row as i32;
+        if draw_y >= 0 && clip.contains(x, draw_y as u16) {
+            buffer.draw_char(x, draw_y as u16, SCROLLBAR_THUMB, scrollbar_color, None, Attr::NONE, Some(clip));
         }
     }
 }

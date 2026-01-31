@@ -754,8 +754,9 @@ impl LayoutPartialTree for LayoutTree<'_> {
             match comp {
                 COMPONENT_BOX => match tree.buf.display(idx) {
                     DISPLAY_NONE => compute_hidden_layout(tree, node),
+                    DISPLAY_FLEX => compute_flexbox_layout(tree, node, inputs),
                     DISPLAY_GRID => compute_grid_layout(tree, node, inputs),
-                    _ => compute_flexbox_layout(tree, node, inputs),
+                    _ => compute_hidden_layout(tree, node), // Unknown = hidden (fail visible)
                 },
                 COMPONENT_TEXT | COMPONENT_INPUT => {
                     let style = NodeStyle::new(tree.buf, idx);

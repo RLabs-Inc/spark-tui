@@ -1167,8 +1167,9 @@ impl SharedBuffer {
     /// - The buffer must remain valid for the lifetime of this struct
     pub unsafe fn from_raw(ptr: *mut u8, len: usize) -> Self {
         // Read configuration from header
-        let max_nodes = ptr::read_unaligned(ptr.add(H_MAX_NODES) as *const u32) as usize;
-        let text_pool_size = ptr::read_unaligned(ptr.add(H_TEXT_POOL_SIZE) as *const u32) as usize;
+        // SAFETY: caller guarantees ptr is valid and len is sufficient
+        let max_nodes = unsafe { ptr::read_unaligned(ptr.add(H_MAX_NODES) as *const u32) } as usize;
+        let text_pool_size = unsafe { ptr::read_unaligned(ptr.add(H_TEXT_POOL_SIZE) as *const u32) } as usize;
         let text_pool_offset = HEADER_SIZE + max_nodes * NODE_STRIDE;
         let event_ring_offset = text_pool_offset + text_pool_size;
 
@@ -1818,6 +1819,55 @@ impl SharedBuffer {
             let slice = std::slice::from_raw_parts(ptr, length);
             std::str::from_utf8_unchecked(slice)
         }
+    }
+
+    /// Get text pool write pointer
+    #[inline]
+    pub fn text_pool_write_ptr(&self) -> u32 {
+        self.read_header_u32(H_TEXT_POOL_WRITE_PTR)
+    }
+
+    /// Set text pool write pointer
+    #[inline]
+    pub fn set_text_pool_write_ptr(&self, ptr: u32) {
+        self.write_header_u32(H_TEXT_POOL_WRITE_PTR, ptr)
+    }
+
+    /// Write text content to text pool (bump allocation).
+    /// Allocates new space in the text pool and updates the node's offset/length.
+    /// Returns true if successful, false if pool is full.
+    pub fn set_text(&self, i: usize, text: &str) -> bool {
+        let bytes = text.as_bytes();
+        let len = bytes.len();
+
+        if len == 0 {
+            // Empty text - just set length to 0
+            self.write_node_u32(i, N_TEXT_LENGTH, 0);
+            return true;
+        }
+
+        let write_ptr = self.text_pool_write_ptr() as usize;
+        let text_end = write_ptr + len;
+
+        // Check if we have space in the text pool
+        if text_end > self.text_pool_size {
+            return false; // Pool is full
+        }
+
+        // Write bytes to text pool
+        unsafe {
+            let ptr = self.ptr.add(self.text_pool_offset + write_ptr);
+            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, len);
+        }
+
+        // Update node's text offset and length
+        self.write_node_u32(i, N_TEXT_OFFSET, write_ptr as u32);
+        self.write_node_u32(i, N_TEXT_LENGTH, len as u32);
+
+        // Advance write pointer
+        self.set_text_pool_write_ptr(text_end as u32);
+
+        true
     }
 
     // =========================================================================

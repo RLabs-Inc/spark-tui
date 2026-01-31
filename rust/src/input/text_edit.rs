@@ -5,9 +5,34 @@
 //!
 //! All text editing happens directly in SharedBuffer's text pool.
 
-use crate::shared_buffer_aos::AoSBuffer;
+use crate::shared_buffer::{SharedBuffer, EventType};
 use super::parser::{KeyEvent, KeyCode, Modifier};
-use super::events::Event;
+
+// =============================================================================
+// EVENT HELPERS
+// =============================================================================
+
+/// Push a value change event to the SharedBuffer event ring.
+#[inline]
+fn push_value_change_event(buf: &SharedBuffer, component: u16) {
+    buf.push_event(EventType::ValueChange, component, &[0; 16]);
+}
+
+/// Push a submit event to the SharedBuffer event ring.
+#[inline]
+fn push_submit_event(buf: &SharedBuffer, component: u16) {
+    buf.push_event(EventType::Submit, component, &[0; 16]);
+}
+
+/// Push a cancel event to the SharedBuffer event ring.
+#[inline]
+fn push_cancel_event(buf: &SharedBuffer, component: u16) {
+    buf.push_event(EventType::Cancel, component, &[0; 16]);
+}
+
+// =============================================================================
+// TEXT EDITOR
+// =============================================================================
 
 /// Text editor for input components.
 pub struct TextEditor;
@@ -21,7 +46,7 @@ impl TextEditor {
     /// Returns true if the event was consumed.
     pub fn handle_key(
         &mut self,
-        buf: &AoSBuffer,
+        buf: &SharedBuffer,
         index: usize,
         key: &KeyEvent,
     ) -> bool {
@@ -59,11 +84,11 @@ impl TextEditor {
                 true
             }
             KeyCode::Enter => {
-                buf.push_event(&Event::submit(index as u16));
+                push_submit_event(buf, index as u16);
                 true
             }
             KeyCode::Escape => {
-                buf.push_event(&Event::cancel(index as u16));
+                push_cancel_event(buf, index as u16);
                 true
             }
             _ => false,
@@ -73,15 +98,19 @@ impl TextEditor {
     /// Insert a character at the cursor position.
     fn insert_char(
         &self,
-        buf: &AoSBuffer,
+        buf: &SharedBuffer,
         index: usize,
         ch: char,
     ) {
-        let content = buf.text_content(index).to_string();
+        let content = buf.text(index).to_string();
         let chars: Vec<char> = content.chars().collect();
         let cursor = (buf.cursor_position(index) as usize).min(chars.len());
 
-        // TODO: maxLength enforcement would check chars.len() + 1 > maxLength
+        // Check maxLength
+        let max_len = buf.max_length(index) as usize;
+        if max_len > 0 && chars.len() >= max_len {
+            return;
+        }
 
         // Build new string
         let mut new_chars = chars;
@@ -89,19 +118,19 @@ impl TextEditor {
         let new_text: String = new_chars.into_iter().collect();
 
         // Write back to SharedBuffer
-        buf.write_text(index, &new_text);
-        buf.set_cursor_position(index, (cursor + 1) as i32);
-
-        buf.push_event(&Event::value_change(index as u16));
+        if buf.set_text(index, &new_text) {
+            buf.set_cursor_position(index, (cursor + 1) as i32);
+            push_value_change_event(buf, index as u16);
+        }
     }
 
     /// Delete character before cursor (Backspace).
     fn delete_backward(
         &self,
-        buf: &AoSBuffer,
+        buf: &SharedBuffer,
         index: usize,
     ) {
-        let content = buf.text_content(index).to_string();
+        let content = buf.text(index).to_string();
         let chars: Vec<char> = content.chars().collect();
         let cursor = (buf.cursor_position(index) as usize).min(chars.len());
 
@@ -113,19 +142,19 @@ impl TextEditor {
         new_chars.remove(cursor - 1);
         let new_text: String = new_chars.into_iter().collect();
 
-        buf.write_text(index, &new_text);
-        buf.set_cursor_position(index, (cursor - 1) as i32);
-
-        buf.push_event(&Event::value_change(index as u16));
+        if buf.set_text(index, &new_text) {
+            buf.set_cursor_position(index, (cursor - 1) as i32);
+            push_value_change_event(buf, index as u16);
+        }
     }
 
     /// Delete character after cursor (Delete key).
     fn delete_forward(
         &self,
-        buf: &AoSBuffer,
+        buf: &SharedBuffer,
         index: usize,
     ) {
-        let content = buf.text_content(index).to_string();
+        let content = buf.text(index).to_string();
         let chars: Vec<char> = content.chars().collect();
         let cursor = (buf.cursor_position(index) as usize).min(chars.len());
 
@@ -137,14 +166,14 @@ impl TextEditor {
         new_chars.remove(cursor);
         let new_text: String = new_chars.into_iter().collect();
 
-        buf.write_text(index, &new_text);
-        // Cursor stays at same position
-
-        buf.push_event(&Event::value_change(index as u16));
+        if buf.set_text(index, &new_text) {
+            // Cursor stays at same position
+            push_value_change_event(buf, index as u16);
+        }
     }
 
     /// Move cursor by delta (-1 for left, +1 for right).
-    fn move_cursor(&self, buf: &AoSBuffer, index: usize, delta: i32) {
+    fn move_cursor(&self, buf: &SharedBuffer, index: usize, delta: i32) {
         let len = self.char_count(buf, index) as i32;
         let current = buf.cursor_position(index);
         let new_pos = (current + delta).clamp(0, len);
@@ -152,8 +181,8 @@ impl TextEditor {
     }
 
     /// Get the character count of the text content.
-    fn char_count(&self, buf: &AoSBuffer, index: usize) -> usize {
-        buf.text_content(index).chars().count()
+    fn char_count(&self, buf: &SharedBuffer, index: usize) -> usize {
+        buf.text(index).chars().count()
     }
 }
 

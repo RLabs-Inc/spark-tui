@@ -3,7 +3,7 @@
 //! Handles keyboard scroll (arrows, page, home/end), mouse wheel,
 //! scroll-into-view, and scroll chaining (bubble to parent at boundary).
 
-use crate::shared_buffer_aos::AoSBuffer;
+use crate::shared_buffer::SharedBuffer;
 
 /// Scroll manager.
 pub struct ScrollManager;
@@ -14,13 +14,13 @@ impl ScrollManager {
     }
 
     /// Set absolute scroll offset, clamped to valid range.
-    pub fn scroll_to(&self, buf: &AoSBuffer, index: usize, x: i32, y: i32) {
-        if !buf.output_scrollable(index) {
+    pub fn scroll_to(&self, buf: &SharedBuffer, index: usize, x: i32, y: i32) {
+        if !buf.is_scrollable(index) {
             return;
         }
 
-        let max_x = buf.output_max_scroll_x(index) as i32;
-        let max_y = buf.output_max_scroll_y(index) as i32;
+        let max_x = buf.max_scroll_x(index) as i32;
+        let max_y = buf.max_scroll_y(index) as i32;
 
         let clamped_x = x.clamp(0, max_x.max(0));
         let clamped_y = y.clamp(0, max_y.max(0));
@@ -30,16 +30,16 @@ impl ScrollManager {
 
     /// Scroll by a delta, clamped to valid range.
     /// Returns true if scroll actually changed (false if at boundary).
-    pub fn scroll_by(&self, buf: &AoSBuffer, index: usize, dx: i32, dy: i32) -> bool {
-        if !buf.output_scrollable(index) {
+    pub fn scroll_by(&self, buf: &SharedBuffer, index: usize, dx: i32, dy: i32) -> bool {
+        if !buf.is_scrollable(index) {
             // Try scroll chaining: walk up to find scrollable parent
             return self.try_chain_scroll(buf, index, dx, dy);
         }
 
         let current_x = buf.scroll_x(index);
         let current_y = buf.scroll_y(index);
-        let max_x = buf.output_max_scroll_x(index) as i32;
-        let max_y = buf.output_max_scroll_y(index) as i32;
+        let max_x = buf.max_scroll_x(index) as i32;
+        let max_y = buf.max_scroll_y(index) as i32;
 
         let new_x = (current_x + dx).clamp(0, max_x.max(0));
         let new_y = (current_y + dy).clamp(0, max_y.max(0));
@@ -57,14 +57,14 @@ impl ScrollManager {
     }
 
     /// Walk up parent chain to find a scrollable parent and scroll it.
-    fn try_chain_scroll(&self, buf: &AoSBuffer, index: usize, dx: i32, dy: i32) -> bool {
+    fn try_chain_scroll(&self, buf: &SharedBuffer, index: usize, dx: i32, dy: i32) -> bool {
         let mut current = buf.parent_index(index);
         while let Some(parent_idx) = current {
-            if buf.output_scrollable(parent_idx) {
+            if buf.is_scrollable(parent_idx) {
                 let curr_x = buf.scroll_x(parent_idx);
                 let curr_y = buf.scroll_y(parent_idx);
-                let max_x = buf.output_max_scroll_x(parent_idx) as i32;
-                let max_y = buf.output_max_scroll_y(parent_idx) as i32;
+                let max_x = buf.max_scroll_x(parent_idx) as i32;
+                let max_y = buf.max_scroll_y(parent_idx) as i32;
 
                 let new_x = (curr_x + dx).clamp(0, max_x.max(0));
                 let new_y = (curr_y + dy).clamp(0, max_y.max(0));
@@ -80,14 +80,14 @@ impl ScrollManager {
     }
 
     /// Scroll to make a component visible within its scrollable parent.
-    pub fn scroll_into_view(&self, buf: &AoSBuffer, index: usize) {
+    pub fn scroll_into_view(&self, buf: &SharedBuffer, index: usize) {
         let mut current = buf.parent_index(index);
         while let Some(parent_idx) = current {
-            if buf.output_scrollable(parent_idx) {
-                let child_y = buf.output_y(index) as i32;
-                let child_h = buf.output_height(index) as i32;
-                let parent_y = buf.output_y(parent_idx) as i32;
-                let parent_h = buf.output_height(parent_idx) as i32;
+            if buf.is_scrollable(parent_idx) {
+                let child_y = buf.computed_y(index) as i32;
+                let child_h = buf.computed_height(index) as i32;
+                let parent_y = buf.computed_y(parent_idx) as i32;
+                let parent_h = buf.computed_height(parent_idx) as i32;
                 let scroll_y = buf.scroll_y(parent_idx);
 
                 let child_top = child_y - parent_y + scroll_y;
@@ -95,12 +95,12 @@ impl ScrollManager {
 
                 if child_top < scroll_y {
                     // Child is above viewport
-                    let max_y = buf.output_max_scroll_y(parent_idx) as i32;
+                    let max_y = buf.max_scroll_y(parent_idx) as i32;
                     buf.set_scroll(parent_idx, buf.scroll_x(parent_idx), child_top.clamp(0, max_y));
                 } else if child_bottom > scroll_y + parent_h {
                     // Child is below viewport
                     let new_y = child_bottom - parent_h;
-                    let max_y = buf.output_max_scroll_y(parent_idx) as i32;
+                    let max_y = buf.max_scroll_y(parent_idx) as i32;
                     buf.set_scroll(parent_idx, buf.scroll_x(parent_idx), new_y.clamp(0, max_y));
                 }
                 break;
