@@ -5,7 +5,7 @@
 //! - Tracking terminal state to avoid redundant escape codes
 //! - Only emitting changes (colors, attributes, cursor position)
 
-use crate::types::{Attr, Cell, Rgba};
+use crate::utils::{Attr, Cell, Rgba};
 use std::io::{self, Write};
 
 use super::ansi;

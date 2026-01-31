@@ -4,7 +4,7 @@
 //! (multiplies) down the tree.
 
 use crate::shared_buffer_aos::AoSBuffer;
-use crate::types::Rgba;
+use crate::utils::Rgba;
 
 /// Get effective foreground color, walking up the parent chain.
 /// Returns the first non-terminal-default fg, or TERMINAL_DEFAULT if none.

@@ -25,7 +25,7 @@ pub mod output;
 // Re-exports for convenience
 pub use append::AppendRenderer;
 pub use buffer::{char_width, string_width, BorderColors, BorderSides, FrameBuffer};
-pub use crate::types::ClipRect;
+pub use crate::utils::ClipRect;
 pub use diff::DiffRenderer;
 pub use inline::InlineRenderer;
 pub use output::{OutputBuffer, StatefulCellRenderer};

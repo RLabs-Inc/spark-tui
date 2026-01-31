@@ -24,12 +24,16 @@
 //! ```
 
 pub mod shared_buffer_aos;
-pub mod types;
+pub mod shared_buffer;
+pub mod utils;
 pub mod layout;
 pub mod renderer;
 pub mod framebuffer;
 pub mod input;
 pub mod pipeline;
+
+#[cfg(test)]
+mod bench_layout;
 
 use shared_buffer_aos::AoSBuffer;
 use std::sync::OnceLock;

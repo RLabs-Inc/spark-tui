@@ -121,8 +121,9 @@ SparkTUI/
 ├── rust/                # Active Rust cdylib engine
 │   └── src/
 │       ├── lib.rs           # FFI exports (spark_init, spark_compute_layout, spark_buffer_size)
-│       ├── shared_buffer.rs # Memory layout contract (MUST match TS)
-│       ├── types.rs         # Core types (Rgba, Dimension, ComponentType, etc.)
+│       ├── shared_buffer.rs # Memory layout contract + ALL enums (SSOT)
+│       ├── shared_buffer_aos.rs # Legacy AoS buffer (being migrated)
+│       ├── utils/           # Rendering infrastructure (Rgba, Cell, Attr, ClipRect)
 │       └── layout/
 │           ├── mod.rs           # Module root
 │           ├── layout_tree.rs   # Low-level Taffy trait API (LayoutTree struct)
@@ -169,6 +170,50 @@ SparkTUI/
 - **All behaviors overridable** - Sane defaults, full configuration surface for power users.
 - **Full spec, no shortcuts** - Never propose "acceptable limitations." If CSS flexbox supports it, we support it.
 - **Rewrite over patch** - If the implementation drifts, delete and rewrite. No workarounds.
+
+---
+
+## Rust Engine Rewrite Standards (January 2026)
+
+We are doing a ground-up rewrite of the Rust engine. These standards apply to every file we touch.
+
+### Core Principles
+
+1. **No Regressions** - Features only increase, never decrease. Add BorderStyle variants, never remove them. This applies to every enum, every capability, every file.
+
+2. **Single Source of Truth** - One definition, one place, period. No duplicated constants. No parallel enum definitions. If it exists in shared_buffer.rs, that's where it lives.
+
+3. **Now Is The Time** - We're rewriting from ground up. This is when we establish patterns. Not "we'll clean it up later." Now.
+
+### Coding Standards
+
+| Standard | Rule | Example |
+|----------|------|---------|
+| **Enums location** | All enums live in `shared_buffer.rs` only | No types.rs, no local constants |
+| **Enum naming** | Start/End/Center, not FlexStart/FlexEnd | `JustifyContent::Start` (context is clear) |
+| **Enum repr** | `#[repr(u8)]` for all enums | Zero-cost, matches buffer bytes |
+| **Enum conversion** | Every enum has `From<u8>` | Safe conversion from buffer values |
+| **Helper methods** | On enums when useful | `FlexDirection::is_row()`, `BorderStyle::chars()` |
+| **Offset constants** | H_*, F_*, U_*, C_*, I_* in shared_buffer.rs | These define the buffer layout contract |
+| **No magic numbers** | Use enums and named constants everywhere | Never `if value == 3`, always `if value == ComponentType::Input as u8` |
+| **i32 for coordinates** | ClipRect, scroll positions use i32 | Handles negative scroll, clamped at render |
+
+### File-by-File Approach
+
+For each file in the rewrite:
+1. **Read together** - Understand current implementation fully
+2. **Map features** - List every behavior, every edge case
+3. **Agree on spec** - What stays, what changes, what's added
+4. **Write tests** - Test the spec, not the implementation
+5. **Implement** - Clean, following these standards
+
+### Standards Log
+
+*Add new standards here as we discover them during the rewrite:*
+
+- **2026-01-30**: Deleted `types.rs` - all enums now live in `shared_buffer.rs` (SSOT achieved)
+- **2026-01-30**: `BorderStyle::chars()` returns `(char, char, char, char, char, char)` directly, not `&str`
+- **2026-01-30**: Added `SharedBuffer::border_chars(node)` for unified predefined/custom border handling
 
 ---
 

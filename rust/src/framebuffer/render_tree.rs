@@ -11,7 +11,8 @@
 
 use crate::renderer::{FrameBuffer, BorderSides, BorderColors};
 use crate::shared_buffer_aos::AoSBuffer;
-use crate::types::{Attr, BorderStyle, ClipRect, Rgba};
+use crate::shared_buffer::BorderStyle;
+use crate::utils::{Attr, ClipRect, Rgba};
 use crate::layout::{string_width, truncate_text, wrap_text_word};
 use super::inheritance::{get_inherited_fg, get_inherited_bg, get_effective_opacity, apply_opacity};
 

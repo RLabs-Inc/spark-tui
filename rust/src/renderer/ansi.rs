@@ -8,7 +8,7 @@
 //! - Mouse and keyboard protocol control
 //! - Synchronized output for flicker-free rendering
 
-use crate::types::{Attr, Rgba};
+use crate::utils::{Attr, Rgba};
 use std::io::Write;
 
 // =============================================================================

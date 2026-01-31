@@ -10,7 +10,8 @@
 //! - **Alpha blending**: Transparent backgrounds blend with existing cells.
 //! - **Wide characters**: Emoji and CJK characters use continuation markers.
 
-use crate::types::{Attr, BorderStyle, Cell, ClipRect, Rgba};
+use crate::shared_buffer::BorderStyle;
+use crate::utils::{Attr, Cell, ClipRect, Rgba};
 
 // =============================================================================
 // FrameBuffer
@@ -366,13 +367,13 @@ impl FrameBuffer {
         let y2 = y + height - 1;
 
         // Draw corners
-        self.draw_char(x, y, tl.chars().next().unwrap(), color, Some(bg), Attr::NONE, clip);
-        self.draw_char(x2, y, tr.chars().next().unwrap(), color, Some(bg), Attr::NONE, clip);
-        self.draw_char(x2, y2, br.chars().next().unwrap(), color, Some(bg), Attr::NONE, clip);
-        self.draw_char(x, y2, bl.chars().next().unwrap(), color, Some(bg), Attr::NONE, clip);
+        self.draw_char(x, y, tl, color, Some(bg), Attr::NONE, clip);
+        self.draw_char(x2, y, tr, color, Some(bg), Attr::NONE, clip);
+        self.draw_char(x2, y2, br, color, Some(bg), Attr::NONE, clip);
+        self.draw_char(x, y2, bl, color, Some(bg), Attr::NONE, clip);
 
-        let horiz_char = horiz.chars().next().unwrap();
-        let vert_char = vert.chars().next().unwrap();
+        let horiz_char = horiz;
+        let vert_char = vert;
 
         // Draw horizontal edges
         for col in (x + 1)..x2 {
@@ -415,7 +416,7 @@ impl FrameBuffer {
 
         // Draw top edge
         if styles.top != BorderStyle::None {
-            let horiz = top_chars.0.chars().next().unwrap();
+            let horiz = top_chars.0;
             for col in (x + 1)..x2 {
                 self.draw_char(col, y, horiz, colors.top, Some(bg), Attr::NONE, clip);
             }
@@ -423,7 +424,7 @@ impl FrameBuffer {
 
         // Draw bottom edge
         if styles.bottom != BorderStyle::None {
-            let horiz = bottom_chars.0.chars().next().unwrap();
+            let horiz = bottom_chars.0;
             for col in (x + 1)..x2 {
                 self.draw_char(col, y2, horiz, colors.bottom, Some(bg), Attr::NONE, clip);
             }
@@ -431,7 +432,7 @@ impl FrameBuffer {
 
         // Draw left edge
         if styles.left != BorderStyle::None {
-            let vert = left_chars.1.chars().next().unwrap();
+            let vert = left_chars.1;
             for row in (y + 1)..y2 {
                 self.draw_char(x, row, vert, colors.left, Some(bg), Attr::NONE, clip);
             }
@@ -439,7 +440,7 @@ impl FrameBuffer {
 
         // Draw right edge
         if styles.right != BorderStyle::None {
-            let vert = right_chars.1.chars().next().unwrap();
+            let vert = right_chars.1;
             for row in (y + 1)..y2 {
                 self.draw_char(x2, row, vert, colors.right, Some(bg), Attr::NONE, clip);
             }
@@ -458,16 +459,16 @@ impl FrameBuffer {
             let (_, _, tl, tr, br, bl) = corner_style.chars();
 
             if styles.top != BorderStyle::None || styles.left != BorderStyle::None {
-                self.draw_char(x, y, tl.chars().next().unwrap(), colors.top, Some(bg), Attr::NONE, clip);
+                self.draw_char(x, y, tl, colors.top, Some(bg), Attr::NONE, clip);
             }
             if styles.top != BorderStyle::None || styles.right != BorderStyle::None {
-                self.draw_char(x2, y, tr.chars().next().unwrap(), colors.top, Some(bg), Attr::NONE, clip);
+                self.draw_char(x2, y, tr, colors.top, Some(bg), Attr::NONE, clip);
             }
             if styles.bottom != BorderStyle::None || styles.right != BorderStyle::None {
-                self.draw_char(x2, y2, br.chars().next().unwrap(), colors.bottom, Some(bg), Attr::NONE, clip);
+                self.draw_char(x2, y2, br, colors.bottom, Some(bg), Attr::NONE, clip);
             }
             if styles.bottom != BorderStyle::None || styles.left != BorderStyle::None {
-                self.draw_char(x, y2, bl.chars().next().unwrap(), colors.bottom, Some(bg), Attr::NONE, clip);
+                self.draw_char(x, y2, bl, colors.bottom, Some(bg), Attr::NONE, clip);
             }
         }
     }

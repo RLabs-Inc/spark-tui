@@ -18,7 +18,7 @@ use std::io;
 use super::ansi;
 use super::buffer::FrameBuffer;
 use super::output::{OutputBuffer, StatefulCellRenderer};
-use crate::types::Cell;
+use crate::utils::Cell;
 
 /// Differential renderer for fullscreen mode.
 ///
@@ -190,7 +190,7 @@ fn cells_equal(a: &Cell, b: &Cell) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Attr, Rgba};
+    use crate::utils::{Attr, Rgba};
 
     #[test]
     fn test_diff_renderer_creation() {

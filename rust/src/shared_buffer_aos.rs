@@ -7,7 +7,7 @@ use std::ptr;
 
 use bitflags::bitflags;
 
-use crate::types::Rgba;
+use crate::utils::Rgba;
 
 // =============================================================================
 // CONSTANTS
