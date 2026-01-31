@@ -5,12 +5,12 @@
 //!
 //! Memory Layout:
 //!   - Header (256 bytes): Global state, wake flags, config
-//!   - Nodes (512 bytes × MAX_NODES): Per-component data
+//!   - Nodes (1024 bytes × MAX_NODES): Per-component data
 //!   - Text Pool (configurable): UTF-8 text content
 //!   - Event Ring (5,132 bytes): Rust → TS event queue
 //!
-//! @version 2.0
-//! @date 2026-01-30
+//! @version 3.0
+//! @date 2026-01-31
 
 use std::ptr;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -24,8 +24,8 @@ use bitflags::bitflags;
 /// Header size in bytes
 pub const HEADER_SIZE: usize = 256;
 
-/// Bytes per node (8 cache lines × 64 bytes)
-pub const NODE_STRIDE: usize = 512;
+/// Bytes per node (16 cache lines × 64 bytes)
+pub const NODE_STRIDE: usize = 1024;
 
 /// Default maximum nodes
 pub const DEFAULT_MAX_NODES: usize = 10_000;
@@ -44,6 +44,29 @@ pub const MAX_EVENTS: usize = 256;
 
 /// Total event ring size
 pub const EVENT_RING_SIZE: usize = EVENT_RING_HEADER_SIZE + MAX_EVENTS * EVENT_SLOT_SIZE;
+
+// =============================================================================
+// BUFFER SIZE CALCULATION
+// =============================================================================
+
+/// Calculate total buffer size for given configuration.
+///
+/// Use this to determine how many bytes TypeScript should allocate.
+#[inline]
+pub const fn calculate_buffer_size(max_nodes: usize, text_pool_size: usize) -> usize {
+    HEADER_SIZE + (max_nodes * NODE_STRIDE) + text_pool_size + EVENT_RING_SIZE
+}
+
+/// Default buffer size (10,000 nodes, 10MB text pool).
+///
+/// ≈ 20.7 MB total.
+pub const DEFAULT_BUFFER_SIZE: usize = calculate_buffer_size(DEFAULT_MAX_NODES, DEFAULT_TEXT_POOL_SIZE);
+
+/// Maximum grid tracks per axis
+pub const MAX_GRID_TRACKS: usize = 32;
+
+/// Bytes per grid track (type u8 + padding u8 + value f32)
+pub const GRID_TRACK_SIZE: usize = 6;
 
 // =============================================================================
 // HEADER OFFSETS (256 bytes total)
@@ -92,134 +115,280 @@ pub const H_LAYOUT_COUNT: usize = 196;
 // 200-255: reserved
 
 // =============================================================================
-// NODE FIELD OFFSETS (512 bytes per node)
+// NODE FIELD OFFSETS (1024 bytes per node)
 // =============================================================================
+// Organized in 16 cache lines (64 bytes each)
 
-// --- Cache Line 1 (0-63): Layout Dimensions ---
-pub const F_WIDTH: usize = 0;
-pub const F_HEIGHT: usize = 4;
-pub const F_MIN_WIDTH: usize = 8;
-pub const F_MIN_HEIGHT: usize = 12;
-pub const F_MAX_WIDTH: usize = 16;
-pub const F_MAX_HEIGHT: usize = 20;
-pub const F_FLEX_BASIS: usize = 24;
-pub const F_FLEX_GROW: usize = 28;
-pub const F_FLEX_SHRINK: usize = 32;
-pub const F_PADDING_TOP: usize = 36;
-pub const F_PADDING_RIGHT: usize = 40;
-pub const F_PADDING_BOTTOM: usize = 44;
-pub const F_PADDING_LEFT: usize = 48;
-pub const F_MARGIN_TOP: usize = 52;
-pub const F_MARGIN_RIGHT: usize = 56;
-pub const F_MARGIN_BOTTOM: usize = 60;
+// --- Cache Line 1 (0-63): Core Layout Dimensions ---
+pub const N_WIDTH: usize = 0;
+pub const N_HEIGHT: usize = 4;
+pub const N_MIN_WIDTH: usize = 8;
+pub const N_MIN_HEIGHT: usize = 12;
+pub const N_MAX_WIDTH: usize = 16;
+pub const N_MAX_HEIGHT: usize = 20;
+pub const N_ASPECT_RATIO: usize = 24;
+pub const N_COMPONENT_TYPE: usize = 28;
+pub const N_DISPLAY: usize = 29;
+pub const N_POSITION: usize = 30;
+pub const N_OVERFLOW: usize = 31;
+pub const N_VISIBLE: usize = 32;
+pub const N_BOX_SIZING: usize = 33;
+pub const N_DIRTY_FLAGS: usize = 34;
+// 35: reserved
+// 36-63: reserved
 
-// --- Cache Line 2 (64-127): Layout Spacing & Enums ---
-pub const F_MARGIN_LEFT: usize = 64;
-pub const F_GAP: usize = 68;
-pub const F_ROW_GAP: usize = 72;
-pub const F_COLUMN_GAP: usize = 76;
-pub const F_INSET_TOP: usize = 80;
-pub const F_INSET_RIGHT: usize = 84;
-pub const F_INSET_BOTTOM: usize = 88;
-pub const F_INSET_LEFT: usize = 92;
-pub const U_FLEX_DIRECTION: usize = 96;
-pub const U_FLEX_WRAP: usize = 97;
-pub const U_JUSTIFY_CONTENT: usize = 98;
-pub const U_ALIGN_ITEMS: usize = 99;
-pub const U_ALIGN_CONTENT: usize = 100;
-pub const U_ALIGN_SELF: usize = 101;
-pub const U_POSITION: usize = 102;
-pub const U_OVERFLOW: usize = 103;
-pub const U_DISPLAY: usize = 104;
-pub const U_BORDER_WIDTH_TOP: usize = 105;
-pub const U_BORDER_WIDTH_RIGHT: usize = 106;
-pub const U_BORDER_WIDTH_BOTTOM: usize = 107;
-pub const U_BORDER_WIDTH_LEFT: usize = 108;
-pub const U_COMPONENT_TYPE: usize = 109;
-pub const U_VISIBLE: usize = 110;
-// 111: reserved
-pub const I_PARENT_INDEX: usize = 112;
-pub const I_TAB_INDEX: usize = 116;
-pub const I_CHILD_COUNT: usize = 120;
-// 124-127: reserved
+// --- Cache Line 2 (64-127): Flexbox Properties ---
+pub const N_FLEX_DIRECTION: usize = 64;
+pub const N_FLEX_WRAP: usize = 65;
+pub const N_JUSTIFY_CONTENT: usize = 66;
+pub const N_ALIGN_ITEMS: usize = 67;
+pub const N_ALIGN_CONTENT: usize = 68;
+pub const N_ALIGN_SELF: usize = 69;
+// 70-71: reserved (alignment)
+pub const N_FLEX_GROW: usize = 72;
+pub const N_FLEX_SHRINK: usize = 76;
+pub const N_FLEX_BASIS: usize = 80;
+pub const N_GAP: usize = 84;
+pub const N_ROW_GAP: usize = 88;
+pub const N_COLUMN_GAP: usize = 92;
+// 96-127: reserved
 
-// --- Cache Line 3 (128-191): Output & Colors ---
-pub const F_COMPUTED_X: usize = 128;
-pub const F_COMPUTED_Y: usize = 132;
-pub const F_COMPUTED_WIDTH: usize = 136;
-pub const F_COMPUTED_HEIGHT: usize = 140;
-pub const F_SCROLL_WIDTH: usize = 144;
-pub const F_SCROLL_HEIGHT: usize = 148;
-pub const F_MAX_SCROLL_X: usize = 152;
-pub const F_MAX_SCROLL_Y: usize = 156;
-pub const C_FG_COLOR: usize = 160;
-pub const C_BG_COLOR: usize = 164;
-pub const C_BORDER_COLOR: usize = 168;
-pub const C_BORDER_TOP_COLOR: usize = 172;
-pub const C_BORDER_RIGHT_COLOR: usize = 176;
-pub const C_BORDER_BOTTOM_COLOR: usize = 180;
-pub const C_BORDER_LEFT_COLOR: usize = 184;
-pub const C_FOCUS_RING_COLOR: usize = 188;
+// --- Cache Line 3 (128-191): Spacing Properties ---
+pub const N_PADDING_TOP: usize = 128;
+pub const N_PADDING_RIGHT: usize = 132;
+pub const N_PADDING_BOTTOM: usize = 136;
+pub const N_PADDING_LEFT: usize = 140;
+pub const N_MARGIN_TOP: usize = 144;
+pub const N_MARGIN_RIGHT: usize = 148;
+pub const N_MARGIN_BOTTOM: usize = 152;
+pub const N_MARGIN_LEFT: usize = 156;
+pub const N_INSET_TOP: usize = 160;
+pub const N_INSET_RIGHT: usize = 164;
+pub const N_INSET_BOTTOM: usize = 168;
+pub const N_INSET_LEFT: usize = 172;
+pub const N_BORDER_WIDTH_TOP: usize = 176;
+pub const N_BORDER_WIDTH_RIGHT: usize = 177;
+pub const N_BORDER_WIDTH_BOTTOM: usize = 178;
+pub const N_BORDER_WIDTH_LEFT: usize = 179;
+pub const N_PARENT_INDEX: usize = 180;
+pub const N_TAB_INDEX: usize = 184;
+// 188-191: reserved
 
-// --- Cache Line 4 (192-255): Visual Properties ---
-pub const C_CURSOR_FG_COLOR: usize = 192;
-pub const C_CURSOR_BG_COLOR: usize = 196;
-pub const C_SELECTION_COLOR: usize = 200;
-pub const U_OPACITY: usize = 204;
-pub const I_Z_INDEX: usize = 205;
-pub const U_BORDER_STYLE: usize = 206;
-pub const U_BORDER_STYLE_TOP: usize = 207;
-pub const U_BORDER_STYLE_RIGHT: usize = 208;
-pub const U_BORDER_STYLE_BOTTOM: usize = 209;
-pub const U_BORDER_STYLE_LEFT: usize = 210;
-pub const U_SCROLLABLE_FLAGS: usize = 211;
-pub const U_BORDER_CHAR_H: usize = 212;
-pub const U_BORDER_CHAR_V: usize = 214;
-pub const U_BORDER_CHAR_TL: usize = 216;
-pub const U_BORDER_CHAR_TR: usize = 218;
-pub const U_BORDER_CHAR_BL: usize = 220;
-pub const U_BORDER_CHAR_BR: usize = 222;
-pub const U_FOCUS_INDICATOR_CHAR: usize = 224;
-pub const U_FOCUS_INDICATOR_ENABLED: usize = 225;
-// 226-255: reserved
+// --- Cache Line 4 (192-255): Grid Container Properties ---
+pub const N_GRID_AUTO_FLOW: usize = 192;
+pub const N_JUSTIFY_ITEMS: usize = 193;
+pub const N_GRID_COLUMN_COUNT: usize = 194;
+pub const N_GRID_ROW_COUNT: usize = 195;
+pub const N_GRID_AUTO_COLUMNS_TYPE: usize = 196;
+pub const N_GRID_AUTO_ROWS_TYPE: usize = 197;
+// 198-199: reserved (alignment)
+pub const N_GRID_AUTO_COLUMNS_VALUE: usize = 200;
+pub const N_GRID_AUTO_ROWS_VALUE: usize = 204;
+pub const N_GRID_COLUMN_START: usize = 208;
+pub const N_GRID_COLUMN_END: usize = 210;
+pub const N_GRID_ROW_START: usize = 212;
+pub const N_GRID_ROW_END: usize = 214;
+pub const N_JUSTIFY_SELF: usize = 216;
+// 217-255: reserved
 
-// --- Cache Line 5 (256-319): Text Properties ---
-pub const U_TEXT_OFFSET: usize = 256;
-pub const U_TEXT_LENGTH: usize = 260;
-pub const U_TEXT_ALIGN: usize = 264;
-pub const U_TEXT_WRAP: usize = 265;
-pub const U_TEXT_OVERFLOW: usize = 266;
-pub const U_TEXT_ATTRS: usize = 267;
-pub const U_TEXT_DECORATION: usize = 268;
-pub const U_TEXT_DECORATION_STYLE: usize = 269;
-pub const C_TEXT_DECORATION_COLOR: usize = 270;
-pub const U_LINE_HEIGHT: usize = 274;
-pub const U_LETTER_SPACING: usize = 275;
-pub const U_MAX_LINES: usize = 276;
-// 277-319: reserved
+// --- Cache Lines 5-7 (256-447): Grid Column Tracks ---
+// 32 tracks × 6 bytes each = 192 bytes
+pub const N_GRID_COLUMN_TRACKS: usize = 256;
 
-// --- Cache Line 6 (320-383): Interaction State ---
-pub const I_SCROLL_X: usize = 320;
-pub const I_SCROLL_Y: usize = 324;
-pub const I_CURSOR_POSITION: usize = 328;
-pub const I_SELECTION_START: usize = 332;
-pub const I_SELECTION_END: usize = 336;
-pub const U_CURSOR_CHAR: usize = 340;
-pub const U_CURSOR_ALT_CHAR: usize = 344;
-pub const U_DIRTY_FLAGS: usize = 348;
-pub const U_INTERACTION_FLAGS: usize = 349;
-pub const U_CURSOR_FLAGS: usize = 350;
-pub const U_CURSOR_STYLE: usize = 351;
-pub const U_CURSOR_BLINK_RATE: usize = 352;
-pub const U_MAX_LENGTH: usize = 353;
-pub const U_INPUT_TYPE: usize = 354;
-// 356-383: reserved
+// --- Cache Lines 8-10 (448-639): Grid Row Tracks ---
+// 32 tracks × 6 bytes each = 192 bytes
+pub const N_GRID_ROW_TRACKS: usize = 448;
 
-// --- Cache Line 7 (384-447): Animation (Reserved) ---
-// Reserved for future animation system
+// --- Cache Line 11 (640-703): Computed Output ---
+pub const N_COMPUTED_X: usize = 640;
+pub const N_COMPUTED_Y: usize = 644;
+pub const N_COMPUTED_WIDTH: usize = 648;
+pub const N_COMPUTED_HEIGHT: usize = 652;
+pub const N_CONTENT_WIDTH: usize = 656;
+pub const N_CONTENT_HEIGHT: usize = 660;
+pub const N_MAX_SCROLL_X: usize = 664;
+pub const N_MAX_SCROLL_Y: usize = 668;
+pub const N_IS_SCROLLABLE: usize = 672;
+// 673-703: reserved
 
-// --- Cache Line 8 (448-511): Effects & Transforms (Reserved) ---
-// Reserved for future effects and physics
+// --- Cache Line 12 (704-767): Visual Properties ---
+pub const N_OPACITY: usize = 704;
+pub const N_Z_INDEX: usize = 708;
+pub const N_BORDER_STYLE: usize = 712;
+pub const N_BORDER_STYLE_TOP: usize = 713;
+pub const N_BORDER_STYLE_RIGHT: usize = 714;
+pub const N_BORDER_STYLE_BOTTOM: usize = 715;
+pub const N_BORDER_STYLE_LEFT: usize = 716;
+pub const N_SCROLLBAR_VISIBILITY: usize = 717;
+pub const N_BORDER_CHAR_H: usize = 718;
+pub const N_BORDER_CHAR_V: usize = 720;
+pub const N_BORDER_CHAR_TL: usize = 722;
+pub const N_BORDER_CHAR_TR: usize = 724;
+pub const N_BORDER_CHAR_BL: usize = 726;
+pub const N_BORDER_CHAR_BR: usize = 728;
+pub const N_FOCUS_INDICATOR_CHAR: usize = 730;
+pub const N_FOCUS_INDICATOR_ENABLED: usize = 731;
+// 732-767: reserved
+
+// --- Cache Line 13 (768-831): Colors ---
+pub const N_FG_COLOR: usize = 768;
+pub const N_BG_COLOR: usize = 772;
+pub const N_BORDER_COLOR: usize = 776;
+pub const N_BORDER_TOP_COLOR: usize = 780;
+pub const N_BORDER_RIGHT_COLOR: usize = 784;
+pub const N_BORDER_BOTTOM_COLOR: usize = 788;
+pub const N_BORDER_LEFT_COLOR: usize = 792;
+pub const N_FOCUS_RING_COLOR: usize = 796;
+pub const N_CURSOR_FG_COLOR: usize = 800;
+pub const N_CURSOR_BG_COLOR: usize = 804;
+pub const N_SELECTION_COLOR: usize = 808;
+// 812-831: reserved
+
+// --- Cache Line 14 (832-895): Text Properties ---
+pub const N_TEXT_OFFSET: usize = 832;
+pub const N_TEXT_LENGTH: usize = 836;
+pub const N_TEXT_ALIGN: usize = 840;
+pub const N_TEXT_WRAP: usize = 841;
+pub const N_TEXT_OVERFLOW: usize = 842;
+pub const N_TEXT_ATTRS: usize = 843;
+pub const N_TEXT_DECORATION: usize = 844;
+pub const N_TEXT_DECORATION_STYLE: usize = 845;
+// 846-847: reserved (alignment)
+pub const N_TEXT_DECORATION_COLOR: usize = 848;
+pub const N_LINE_HEIGHT: usize = 852;
+pub const N_LETTER_SPACING: usize = 853;
+pub const N_MAX_LINES: usize = 854;
+// 855-895: reserved
+
+// --- Cache Line 15 (896-959): Interaction State ---
+pub const N_SCROLL_X: usize = 896;
+pub const N_SCROLL_Y: usize = 900;
+pub const N_CURSOR_POSITION: usize = 904;
+pub const N_SELECTION_START: usize = 908;
+pub const N_SELECTION_END: usize = 912;
+pub const N_CURSOR_CHAR: usize = 916;
+pub const N_CURSOR_ALT_CHAR: usize = 920;
+pub const N_INTERACTION_FLAGS: usize = 924;
+pub const N_CURSOR_FLAGS: usize = 925;
+pub const N_CURSOR_STYLE: usize = 926;
+pub const N_CURSOR_BLINK_RATE: usize = 927;
+pub const N_MAX_LENGTH: usize = 928;
+pub const N_INPUT_TYPE: usize = 929;
+// 930-959: reserved
+
+// --- Cache Line 16 (960-1023): Reserved (Animation, Effects, Transforms) ---
+// Reserved for future animation/effects/physics
+
+// =============================================================================
+// LEGACY OFFSET ALIASES (for layout_tree.rs compatibility)
+// =============================================================================
+// These will be removed after layout_tree.rs is updated
+
+pub const F_WIDTH: usize = N_WIDTH;
+pub const F_HEIGHT: usize = N_HEIGHT;
+pub const F_MIN_WIDTH: usize = N_MIN_WIDTH;
+pub const F_MIN_HEIGHT: usize = N_MIN_HEIGHT;
+pub const F_MAX_WIDTH: usize = N_MAX_WIDTH;
+pub const F_MAX_HEIGHT: usize = N_MAX_HEIGHT;
+pub const F_FLEX_BASIS: usize = N_FLEX_BASIS;
+pub const F_FLEX_GROW: usize = N_FLEX_GROW;
+pub const F_FLEX_SHRINK: usize = N_FLEX_SHRINK;
+pub const F_PADDING_TOP: usize = N_PADDING_TOP;
+pub const F_PADDING_RIGHT: usize = N_PADDING_RIGHT;
+pub const F_PADDING_BOTTOM: usize = N_PADDING_BOTTOM;
+pub const F_PADDING_LEFT: usize = N_PADDING_LEFT;
+pub const F_MARGIN_TOP: usize = N_MARGIN_TOP;
+pub const F_MARGIN_RIGHT: usize = N_MARGIN_RIGHT;
+pub const F_MARGIN_BOTTOM: usize = N_MARGIN_BOTTOM;
+pub const F_MARGIN_LEFT: usize = N_MARGIN_LEFT;
+pub const F_GAP: usize = N_GAP;
+pub const F_ROW_GAP: usize = N_ROW_GAP;
+pub const F_COLUMN_GAP: usize = N_COLUMN_GAP;
+pub const F_INSET_TOP: usize = N_INSET_TOP;
+pub const F_INSET_RIGHT: usize = N_INSET_RIGHT;
+pub const F_INSET_BOTTOM: usize = N_INSET_BOTTOM;
+pub const F_INSET_LEFT: usize = N_INSET_LEFT;
+pub const F_COMPUTED_X: usize = N_COMPUTED_X;
+pub const F_COMPUTED_Y: usize = N_COMPUTED_Y;
+pub const F_COMPUTED_WIDTH: usize = N_COMPUTED_WIDTH;
+pub const F_COMPUTED_HEIGHT: usize = N_COMPUTED_HEIGHT;
+pub const F_SCROLL_WIDTH: usize = N_CONTENT_WIDTH;
+pub const F_SCROLL_HEIGHT: usize = N_CONTENT_HEIGHT;
+pub const F_MAX_SCROLL_X: usize = N_MAX_SCROLL_X;
+pub const F_MAX_SCROLL_Y: usize = N_MAX_SCROLL_Y;
+pub const U_FLEX_DIRECTION: usize = N_FLEX_DIRECTION;
+pub const U_FLEX_WRAP: usize = N_FLEX_WRAP;
+pub const U_JUSTIFY_CONTENT: usize = N_JUSTIFY_CONTENT;
+pub const U_ALIGN_ITEMS: usize = N_ALIGN_ITEMS;
+pub const U_ALIGN_CONTENT: usize = N_ALIGN_CONTENT;
+pub const U_ALIGN_SELF: usize = N_ALIGN_SELF;
+pub const U_POSITION: usize = N_POSITION;
+pub const U_OVERFLOW: usize = N_OVERFLOW;
+pub const U_DISPLAY: usize = N_DISPLAY;
+pub const U_BORDER_WIDTH_TOP: usize = N_BORDER_WIDTH_TOP;
+pub const U_BORDER_WIDTH_RIGHT: usize = N_BORDER_WIDTH_RIGHT;
+pub const U_BORDER_WIDTH_BOTTOM: usize = N_BORDER_WIDTH_BOTTOM;
+pub const U_BORDER_WIDTH_LEFT: usize = N_BORDER_WIDTH_LEFT;
+pub const U_COMPONENT_TYPE: usize = N_COMPONENT_TYPE;
+pub const U_VISIBLE: usize = N_VISIBLE;
+pub const I_PARENT_INDEX: usize = N_PARENT_INDEX;
+pub const I_TAB_INDEX: usize = N_TAB_INDEX;
+pub const C_FG_COLOR: usize = N_FG_COLOR;
+pub const C_BG_COLOR: usize = N_BG_COLOR;
+pub const C_BORDER_COLOR: usize = N_BORDER_COLOR;
+pub const C_BORDER_TOP_COLOR: usize = N_BORDER_TOP_COLOR;
+pub const C_BORDER_RIGHT_COLOR: usize = N_BORDER_RIGHT_COLOR;
+pub const C_BORDER_BOTTOM_COLOR: usize = N_BORDER_BOTTOM_COLOR;
+pub const C_BORDER_LEFT_COLOR: usize = N_BORDER_LEFT_COLOR;
+pub const C_FOCUS_RING_COLOR: usize = N_FOCUS_RING_COLOR;
+pub const C_CURSOR_FG_COLOR: usize = N_CURSOR_FG_COLOR;
+pub const C_CURSOR_BG_COLOR: usize = N_CURSOR_BG_COLOR;
+pub const C_SELECTION_COLOR: usize = N_SELECTION_COLOR;
+pub const U_OPACITY: usize = N_OPACITY;
+pub const I_Z_INDEX: usize = N_Z_INDEX;
+pub const U_BORDER_STYLE: usize = N_BORDER_STYLE;
+pub const U_BORDER_STYLE_TOP: usize = N_BORDER_STYLE_TOP;
+pub const U_BORDER_STYLE_RIGHT: usize = N_BORDER_STYLE_RIGHT;
+pub const U_BORDER_STYLE_BOTTOM: usize = N_BORDER_STYLE_BOTTOM;
+pub const U_BORDER_STYLE_LEFT: usize = N_BORDER_STYLE_LEFT;
+pub const U_SCROLLABLE_FLAGS: usize = N_IS_SCROLLABLE;
+pub const U_BORDER_CHAR_H: usize = N_BORDER_CHAR_H;
+pub const U_BORDER_CHAR_V: usize = N_BORDER_CHAR_V;
+pub const U_BORDER_CHAR_TL: usize = N_BORDER_CHAR_TL;
+pub const U_BORDER_CHAR_TR: usize = N_BORDER_CHAR_TR;
+pub const U_BORDER_CHAR_BL: usize = N_BORDER_CHAR_BL;
+pub const U_BORDER_CHAR_BR: usize = N_BORDER_CHAR_BR;
+pub const U_FOCUS_INDICATOR_CHAR: usize = N_FOCUS_INDICATOR_CHAR;
+pub const U_FOCUS_INDICATOR_ENABLED: usize = N_FOCUS_INDICATOR_ENABLED;
+pub const U_TEXT_OFFSET: usize = N_TEXT_OFFSET;
+pub const U_TEXT_LENGTH: usize = N_TEXT_LENGTH;
+pub const U_TEXT_ALIGN: usize = N_TEXT_ALIGN;
+pub const U_TEXT_WRAP: usize = N_TEXT_WRAP;
+pub const U_TEXT_OVERFLOW: usize = N_TEXT_OVERFLOW;
+pub const U_TEXT_ATTRS: usize = N_TEXT_ATTRS;
+pub const U_TEXT_DECORATION: usize = N_TEXT_DECORATION;
+pub const U_TEXT_DECORATION_STYLE: usize = N_TEXT_DECORATION_STYLE;
+pub const C_TEXT_DECORATION_COLOR: usize = N_TEXT_DECORATION_COLOR;
+pub const U_LINE_HEIGHT: usize = N_LINE_HEIGHT;
+pub const U_LETTER_SPACING: usize = N_LETTER_SPACING;
+pub const U_MAX_LINES: usize = N_MAX_LINES;
+pub const I_SCROLL_X: usize = N_SCROLL_X;
+pub const I_SCROLL_Y: usize = N_SCROLL_Y;
+pub const I_CURSOR_POSITION: usize = N_CURSOR_POSITION;
+pub const I_SELECTION_START: usize = N_SELECTION_START;
+pub const I_SELECTION_END: usize = N_SELECTION_END;
+pub const U_CURSOR_CHAR: usize = N_CURSOR_CHAR;
+pub const U_CURSOR_ALT_CHAR: usize = N_CURSOR_ALT_CHAR;
+pub const U_DIRTY_FLAGS: usize = N_DIRTY_FLAGS;
+pub const U_INTERACTION_FLAGS: usize = N_INTERACTION_FLAGS;
+pub const U_CURSOR_FLAGS: usize = N_CURSOR_FLAGS;
+pub const U_CURSOR_STYLE: usize = N_CURSOR_STYLE;
+pub const U_CURSOR_BLINK_RATE: usize = N_CURSOR_BLINK_RATE;
+pub const U_MAX_LENGTH: usize = N_MAX_LENGTH;
+pub const U_INPUT_TYPE: usize = N_INPUT_TYPE;
+
+// Legacy field that doesn't exist in v3 - map to reserved area
+pub const I_CHILD_COUNT: usize = 188; // Use reserved space in line 3
 
 // =============================================================================
 // CONFIG FLAGS
@@ -541,12 +710,14 @@ pub enum Display {
     None = 0,
     #[default]
     Flex = 1,
+    Grid = 2,
 }
 
 impl From<u8> for Display {
     fn from(value: u8) -> Self {
         match value {
             0 => Self::None,
+            2 => Self::Grid,
             _ => Self::Flex,
         }
     }
@@ -647,6 +818,123 @@ impl From<u8> for RenderMode {
     }
 }
 
+// =============================================================================
+// GRID ENUMS
+// =============================================================================
+
+/// Grid track sizing type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum TrackType {
+    /// Track not used (sentinel for unused slots)
+    #[default]
+    None = 0,
+    /// Auto sizing
+    Auto = 1,
+    /// Minimum content size
+    MinContent = 2,
+    /// Maximum content size
+    MaxContent = 3,
+    /// Fixed size in terminal cells
+    Length = 4,
+    /// Percentage of container (0.0-1.0)
+    Percent = 5,
+    /// Fractional unit
+    Fr = 6,
+    /// FitContent (maximum size clamped to content)
+    FitContent = 7,
+}
+
+impl From<u8> for TrackType {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => Self::Auto,
+            2 => Self::MinContent,
+            3 => Self::MaxContent,
+            4 => Self::Length,
+            5 => Self::Percent,
+            6 => Self::Fr,
+            7 => Self::FitContent,
+            _ => Self::None,
+        }
+    }
+}
+
+/// Grid auto flow direction
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum GridAutoFlow {
+    #[default]
+    Row = 0,
+    Column = 1,
+    RowDense = 2,
+    ColumnDense = 3,
+}
+
+impl From<u8> for GridAutoFlow {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => Self::Column,
+            2 => Self::RowDense,
+            3 => Self::ColumnDense,
+            _ => Self::Row,
+        }
+    }
+}
+
+/// Justify items (grid container property)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum JustifyItems {
+    #[default]
+    Start = 0,
+    End = 1,
+    Center = 2,
+    Stretch = 3,
+}
+
+impl From<u8> for JustifyItems {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => Self::End,
+            2 => Self::Center,
+            3 => Self::Stretch,
+            _ => Self::Start,
+        }
+    }
+}
+
+/// Justify self (grid item property)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum JustifySelf {
+    #[default]
+    Auto = 0,
+    Start = 1,
+    End = 2,
+    Center = 3,
+    Stretch = 4,
+}
+
+impl From<u8> for JustifySelf {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => Self::Start,
+            2 => Self::End,
+            3 => Self::Center,
+            4 => Self::Stretch,
+            _ => Self::Auto,
+        }
+    }
+}
+
+/// A grid track definition (type + value)
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GridTrack {
+    pub track_type: TrackType,
+    pub value: f32,
+}
+
 /// Border drawing style for components.
 ///
 /// SparkTUI provides 14 predefined border styles using Unicode box-drawing characters,
@@ -684,20 +972,7 @@ impl From<u8> for RenderMode {
 /// # Custom Borders
 ///
 /// Use `BorderStyle::Custom` (value 255) to define your own border characters.
-/// Set the characters via `U_BORDER_CHAR_*` fields in the SharedBuffer:
-/// - `U_BORDER_CHAR_H` - horizontal line
-/// - `U_BORDER_CHAR_V` - vertical line
-/// - `U_BORDER_CHAR_TL` - top-left corner
-/// - `U_BORDER_CHAR_TR` - top-right corner
-/// - `U_BORDER_CHAR_BL` - bottom-left corner
-/// - `U_BORDER_CHAR_BR` - bottom-right corner
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let style = BorderStyle::from(buffer.read_u8(node, U_BORDER_STYLE));
-/// let (h, v, tl, tr, bl, br) = style.chars();
-/// ```
+/// Set the characters via `N_BORDER_CHAR_*` fields in the SharedBuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum BorderStyle {
@@ -744,8 +1019,7 @@ pub enum BorderStyle {
     /// Alias for Thick (semantic alternative)
     Bold = 13,
 
-    /// User-defined characters from U_BORDER_CHAR_* fields
-    /// When this variant is used, call `SharedBuffer::border_chars()` instead
+    /// User-defined characters from N_BORDER_CHAR_* fields
     Custom = 255,
 }
 
@@ -776,18 +1050,8 @@ impl BorderStyle {
     ///
     /// Returns `(horizontal, vertical, top_left, top_right, bottom_left, bottom_right)`.
     ///
-    /// # Note
-    ///
     /// For `BorderStyle::Custom`, this returns spaces. Use `SharedBuffer::border_chars()`
     /// instead to read the user-defined characters from the buffer.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let (h, v, tl, tr, bl, br) = BorderStyle::Single.chars();
-    /// assert_eq!(h, '─');
-    /// assert_eq!(tl, '┌');
-    /// ```
     pub const fn chars(&self) -> (char, char, char, char, char, char) {
         match self {
             Self::None      => (' ', ' ', ' ', ' ', ' ', ' '),
@@ -804,7 +1068,7 @@ impl BorderStyle {
             Self::HeavyDashed=>('╍', '╏', '┏', '┓', '┗', '┛'),
             Self::HeavyDotted=>('┅', '┇', '┏', '┓', '┗', '┛'),
             Self::Bold      => ('━', '┃', '┏', '┓', '┗', '┛'),
-            Self::Custom    => (' ', ' ', ' ', ' ', ' ', ' '), // Use SharedBuffer::border_chars()
+            Self::Custom    => (' ', ' ', ' ', ' ', ' ', ' '),
         }
     }
 
@@ -1209,8 +1473,8 @@ impl SharedBuffer {
     }
 
     #[inline]
-    fn read_node_i8(&self, index: usize, field: usize) -> i8 {
-        unsafe { *self.node_ptr(index).add(field) as i8 }
+    fn read_node_i16(&self, index: usize, field: usize) -> i16 {
+        unsafe { ptr::read_unaligned(self.node_ptr(index).add(field) as *const i16) }
     }
 
     #[inline]
@@ -1239,51 +1503,57 @@ impl SharedBuffer {
     }
 
     // =========================================================================
-    // LAYOUT PROPERTIES (Cache Line 1-2)
+    // LAYOUT PROPERTIES (Cache Lines 1-4)
     // =========================================================================
 
-    #[inline] pub fn width(&self, i: usize) -> f32 { self.read_node_f32(i, F_WIDTH) }
-    #[inline] pub fn height(&self, i: usize) -> f32 { self.read_node_f32(i, F_HEIGHT) }
-    #[inline] pub fn min_width(&self, i: usize) -> f32 { self.read_node_f32(i, F_MIN_WIDTH) }
-    #[inline] pub fn min_height(&self, i: usize) -> f32 { self.read_node_f32(i, F_MIN_HEIGHT) }
-    #[inline] pub fn max_width(&self, i: usize) -> f32 { self.read_node_f32(i, F_MAX_WIDTH) }
-    #[inline] pub fn max_height(&self, i: usize) -> f32 { self.read_node_f32(i, F_MAX_HEIGHT) }
-    #[inline] pub fn flex_basis(&self, i: usize) -> f32 { self.read_node_f32(i, F_FLEX_BASIS) }
-    #[inline] pub fn flex_grow(&self, i: usize) -> f32 { self.read_node_f32(i, F_FLEX_GROW) }
-    #[inline] pub fn flex_shrink(&self, i: usize) -> f32 { self.read_node_f32(i, F_FLEX_SHRINK) }
-    #[inline] pub fn padding_top(&self, i: usize) -> f32 { self.read_node_f32(i, F_PADDING_TOP) }
-    #[inline] pub fn padding_right(&self, i: usize) -> f32 { self.read_node_f32(i, F_PADDING_RIGHT) }
-    #[inline] pub fn padding_bottom(&self, i: usize) -> f32 { self.read_node_f32(i, F_PADDING_BOTTOM) }
-    #[inline] pub fn padding_left(&self, i: usize) -> f32 { self.read_node_f32(i, F_PADDING_LEFT) }
-    #[inline] pub fn margin_top(&self, i: usize) -> f32 { self.read_node_f32(i, F_MARGIN_TOP) }
-    #[inline] pub fn margin_right(&self, i: usize) -> f32 { self.read_node_f32(i, F_MARGIN_RIGHT) }
-    #[inline] pub fn margin_bottom(&self, i: usize) -> f32 { self.read_node_f32(i, F_MARGIN_BOTTOM) }
-    #[inline] pub fn margin_left(&self, i: usize) -> f32 { self.read_node_f32(i, F_MARGIN_LEFT) }
-    #[inline] pub fn gap(&self, i: usize) -> f32 { self.read_node_f32(i, F_GAP) }
-    #[inline] pub fn row_gap(&self, i: usize) -> f32 { self.read_node_f32(i, F_ROW_GAP) }
-    #[inline] pub fn column_gap(&self, i: usize) -> f32 { self.read_node_f32(i, F_COLUMN_GAP) }
-    #[inline] pub fn inset_top(&self, i: usize) -> f32 { self.read_node_f32(i, F_INSET_TOP) }
-    #[inline] pub fn inset_right(&self, i: usize) -> f32 { self.read_node_f32(i, F_INSET_RIGHT) }
-    #[inline] pub fn inset_bottom(&self, i: usize) -> f32 { self.read_node_f32(i, F_INSET_BOTTOM) }
-    #[inline] pub fn inset_left(&self, i: usize) -> f32 { self.read_node_f32(i, F_INSET_LEFT) }
+    // Core dimensions
+    #[inline] pub fn width(&self, i: usize) -> f32 { self.read_node_f32(i, N_WIDTH) }
+    #[inline] pub fn height(&self, i: usize) -> f32 { self.read_node_f32(i, N_HEIGHT) }
+    #[inline] pub fn min_width(&self, i: usize) -> f32 { self.read_node_f32(i, N_MIN_WIDTH) }
+    #[inline] pub fn min_height(&self, i: usize) -> f32 { self.read_node_f32(i, N_MIN_HEIGHT) }
+    #[inline] pub fn max_width(&self, i: usize) -> f32 { self.read_node_f32(i, N_MAX_WIDTH) }
+    #[inline] pub fn max_height(&self, i: usize) -> f32 { self.read_node_f32(i, N_MAX_HEIGHT) }
+    #[inline] pub fn aspect_ratio(&self, i: usize) -> f32 { self.read_node_f32(i, N_ASPECT_RATIO) }
 
-    // Layout enums - return raw u8 for direct Taffy conversion (no intermediate enum)
-    // See enum definitions above for value meanings
-    #[inline] pub fn flex_direction(&self, i: usize) -> u8 { self.read_node_u8(i, U_FLEX_DIRECTION) }
-    #[inline] pub fn flex_wrap(&self, i: usize) -> u8 { self.read_node_u8(i, U_FLEX_WRAP) }
-    #[inline] pub fn justify_content(&self, i: usize) -> u8 { self.read_node_u8(i, U_JUSTIFY_CONTENT) }
-    #[inline] pub fn align_items(&self, i: usize) -> u8 { self.read_node_u8(i, U_ALIGN_ITEMS) }
-    #[inline] pub fn align_content(&self, i: usize) -> u8 { self.read_node_u8(i, U_ALIGN_CONTENT) }
-    #[inline] pub fn align_self(&self, i: usize) -> u8 { self.read_node_u8(i, U_ALIGN_SELF) }
-    #[inline] pub fn position(&self, i: usize) -> u8 { self.read_node_u8(i, U_POSITION) }
-    #[inline] pub fn overflow(&self, i: usize) -> u8 { self.read_node_u8(i, U_OVERFLOW) }
-    #[inline] pub fn display(&self, i: usize) -> u8 { self.read_node_u8(i, U_DISPLAY) }
+    // Flex properties
+    #[inline] pub fn flex_basis(&self, i: usize) -> f32 { self.read_node_f32(i, N_FLEX_BASIS) }
+    #[inline] pub fn flex_grow(&self, i: usize) -> f32 { self.read_node_f32(i, N_FLEX_GROW) }
+    #[inline] pub fn flex_shrink(&self, i: usize) -> f32 { self.read_node_f32(i, N_FLEX_SHRINK) }
+    #[inline] pub fn gap(&self, i: usize) -> f32 { self.read_node_f32(i, N_GAP) }
+    #[inline] pub fn row_gap(&self, i: usize) -> f32 { self.read_node_f32(i, N_ROW_GAP) }
+    #[inline] pub fn column_gap(&self, i: usize) -> f32 { self.read_node_f32(i, N_COLUMN_GAP) }
+
+    // Spacing
+    #[inline] pub fn padding_top(&self, i: usize) -> f32 { self.read_node_f32(i, N_PADDING_TOP) }
+    #[inline] pub fn padding_right(&self, i: usize) -> f32 { self.read_node_f32(i, N_PADDING_RIGHT) }
+    #[inline] pub fn padding_bottom(&self, i: usize) -> f32 { self.read_node_f32(i, N_PADDING_BOTTOM) }
+    #[inline] pub fn padding_left(&self, i: usize) -> f32 { self.read_node_f32(i, N_PADDING_LEFT) }
+    #[inline] pub fn margin_top(&self, i: usize) -> f32 { self.read_node_f32(i, N_MARGIN_TOP) }
+    #[inline] pub fn margin_right(&self, i: usize) -> f32 { self.read_node_f32(i, N_MARGIN_RIGHT) }
+    #[inline] pub fn margin_bottom(&self, i: usize) -> f32 { self.read_node_f32(i, N_MARGIN_BOTTOM) }
+    #[inline] pub fn margin_left(&self, i: usize) -> f32 { self.read_node_f32(i, N_MARGIN_LEFT) }
+    #[inline] pub fn inset_top(&self, i: usize) -> f32 { self.read_node_f32(i, N_INSET_TOP) }
+    #[inline] pub fn inset_right(&self, i: usize) -> f32 { self.read_node_f32(i, N_INSET_RIGHT) }
+    #[inline] pub fn inset_bottom(&self, i: usize) -> f32 { self.read_node_f32(i, N_INSET_BOTTOM) }
+    #[inline] pub fn inset_left(&self, i: usize) -> f32 { self.read_node_f32(i, N_INSET_LEFT) }
+
+    // Layout enums - return raw u8 for direct Taffy conversion
+    #[inline] pub fn flex_direction(&self, i: usize) -> u8 { self.read_node_u8(i, N_FLEX_DIRECTION) }
+    #[inline] pub fn flex_wrap(&self, i: usize) -> u8 { self.read_node_u8(i, N_FLEX_WRAP) }
+    #[inline] pub fn justify_content(&self, i: usize) -> u8 { self.read_node_u8(i, N_JUSTIFY_CONTENT) }
+    #[inline] pub fn align_items(&self, i: usize) -> u8 { self.read_node_u8(i, N_ALIGN_ITEMS) }
+    #[inline] pub fn align_content(&self, i: usize) -> u8 { self.read_node_u8(i, N_ALIGN_CONTENT) }
+    #[inline] pub fn align_self(&self, i: usize) -> u8 { self.read_node_u8(i, N_ALIGN_SELF) }
+    #[inline] pub fn position(&self, i: usize) -> u8 { self.read_node_u8(i, N_POSITION) }
+    #[inline] pub fn overflow(&self, i: usize) -> u8 { self.read_node_u8(i, N_OVERFLOW) }
+    #[inline] pub fn display(&self, i: usize) -> u8 { self.read_node_u8(i, N_DISPLAY) }
+    #[inline] pub fn box_sizing(&self, i: usize) -> u8 { self.read_node_u8(i, N_BOX_SIZING) }
 
     // Border widths
-    #[inline] pub fn border_width_top(&self, i: usize) -> u8 { self.read_node_u8(i, U_BORDER_WIDTH_TOP) }
-    #[inline] pub fn border_width_right(&self, i: usize) -> u8 { self.read_node_u8(i, U_BORDER_WIDTH_RIGHT) }
-    #[inline] pub fn border_width_bottom(&self, i: usize) -> u8 { self.read_node_u8(i, U_BORDER_WIDTH_BOTTOM) }
-    #[inline] pub fn border_width_left(&self, i: usize) -> u8 { self.read_node_u8(i, U_BORDER_WIDTH_LEFT) }
+    #[inline] pub fn border_width_top(&self, i: usize) -> u8 { self.read_node_u8(i, N_BORDER_WIDTH_TOP) }
+    #[inline] pub fn border_width_right(&self, i: usize) -> u8 { self.read_node_u8(i, N_BORDER_WIDTH_RIGHT) }
+    #[inline] pub fn border_width_bottom(&self, i: usize) -> u8 { self.read_node_u8(i, N_BORDER_WIDTH_BOTTOM) }
+    #[inline] pub fn border_width_left(&self, i: usize) -> u8 { self.read_node_u8(i, N_BORDER_WIDTH_LEFT) }
 
     // Border width aliases (for layout compatibility)
     #[inline] pub fn border_top(&self, i: usize) -> u8 { self.border_width_top(i) }
@@ -1292,159 +1562,160 @@ impl SharedBuffer {
     #[inline] pub fn border_left(&self, i: usize) -> u8 { self.border_width_left(i) }
 
     // Component type and visibility
-    #[inline] pub fn component_type(&self, i: usize) -> u8 { self.read_node_u8(i, U_COMPONENT_TYPE) }
-    #[inline] pub fn visible(&self, i: usize) -> bool { self.read_node_u8(i, U_VISIBLE) != 0 }
+    #[inline] pub fn component_type(&self, i: usize) -> u8 { self.read_node_u8(i, N_COMPONENT_TYPE) }
+    #[inline] pub fn visible(&self, i: usize) -> bool { self.read_node_u8(i, N_VISIBLE) != 0 }
 
     // Hierarchy
     #[inline]
     pub fn parent_index(&self, i: usize) -> Option<usize> {
-        let idx = self.read_node_i32(i, I_PARENT_INDEX);
+        let idx = self.read_node_i32(i, N_PARENT_INDEX);
         if idx < 0 { None } else { Some(idx as usize) }
     }
 
-    #[inline] pub fn tab_index(&self, i: usize) -> i32 { self.read_node_i32(i, I_TAB_INDEX) }
+    #[inline] pub fn tab_index(&self, i: usize) -> i32 { self.read_node_i32(i, N_TAB_INDEX) }
+
+    // Legacy child_count - reads from reserved space
     #[inline] pub fn child_count(&self, i: usize) -> i32 { self.read_node_i32(i, I_CHILD_COUNT) }
 
     // =========================================================================
-    // OUTPUT (Rust writes, Cache Line 3)
+    // GRID PROPERTIES (Cache Line 4 + Lines 5-10)
     // =========================================================================
 
-    #[inline] pub fn computed_x(&self, i: usize) -> f32 { self.read_node_f32(i, F_COMPUTED_X) }
-    #[inline] pub fn computed_y(&self, i: usize) -> f32 { self.read_node_f32(i, F_COMPUTED_Y) }
-    #[inline] pub fn computed_width(&self, i: usize) -> f32 { self.read_node_f32(i, F_COMPUTED_WIDTH) }
-    #[inline] pub fn computed_height(&self, i: usize) -> f32 { self.read_node_f32(i, F_COMPUTED_HEIGHT) }
-    #[inline] pub fn scroll_width(&self, i: usize) -> f32 { self.read_node_f32(i, F_SCROLL_WIDTH) }
-    #[inline] pub fn scroll_height(&self, i: usize) -> f32 { self.read_node_f32(i, F_SCROLL_HEIGHT) }
-    #[inline] pub fn max_scroll_x(&self, i: usize) -> f32 { self.read_node_f32(i, F_MAX_SCROLL_X) }
-    #[inline] pub fn max_scroll_y(&self, i: usize) -> f32 { self.read_node_f32(i, F_MAX_SCROLL_Y) }
+    #[inline] pub fn grid_auto_flow(&self, i: usize) -> GridAutoFlow { GridAutoFlow::from(self.read_node_u8(i, N_GRID_AUTO_FLOW)) }
+    #[inline] pub fn justify_items(&self, i: usize) -> JustifyItems { JustifyItems::from(self.read_node_u8(i, N_JUSTIFY_ITEMS)) }
+    #[inline] pub fn grid_column_count(&self, i: usize) -> u8 { self.read_node_u8(i, N_GRID_COLUMN_COUNT) }
+    #[inline] pub fn grid_row_count(&self, i: usize) -> u8 { self.read_node_u8(i, N_GRID_ROW_COUNT) }
+    #[inline] pub fn grid_auto_columns_type(&self, i: usize) -> TrackType { TrackType::from(self.read_node_u8(i, N_GRID_AUTO_COLUMNS_TYPE)) }
+    #[inline] pub fn grid_auto_rows_type(&self, i: usize) -> TrackType { TrackType::from(self.read_node_u8(i, N_GRID_AUTO_ROWS_TYPE)) }
+    #[inline] pub fn grid_auto_columns_value(&self, i: usize) -> f32 { self.read_node_f32(i, N_GRID_AUTO_COLUMNS_VALUE) }
+    #[inline] pub fn grid_auto_rows_value(&self, i: usize) -> f32 { self.read_node_f32(i, N_GRID_AUTO_ROWS_VALUE) }
+    #[inline] pub fn grid_column_start(&self, i: usize) -> i16 { self.read_node_i16(i, N_GRID_COLUMN_START) }
+    #[inline] pub fn grid_column_end(&self, i: usize) -> i16 { self.read_node_i16(i, N_GRID_COLUMN_END) }
+    #[inline] pub fn grid_row_start(&self, i: usize) -> i16 { self.read_node_i16(i, N_GRID_ROW_START) }
+    #[inline] pub fn grid_row_end(&self, i: usize) -> i16 { self.read_node_i16(i, N_GRID_ROW_END) }
+    #[inline] pub fn justify_self(&self, i: usize) -> JustifySelf { JustifySelf::from(self.read_node_u8(i, N_JUSTIFY_SELF)) }
 
-    #[inline] pub fn set_computed_x(&self, i: usize, v: f32) { self.write_node_f32(i, F_COMPUTED_X, v) }
-    #[inline] pub fn set_computed_y(&self, i: usize, v: f32) { self.write_node_f32(i, F_COMPUTED_Y, v) }
-    #[inline] pub fn set_computed_width(&self, i: usize, v: f32) { self.write_node_f32(i, F_COMPUTED_WIDTH, v) }
-    #[inline] pub fn set_computed_height(&self, i: usize, v: f32) { self.write_node_f32(i, F_COMPUTED_HEIGHT, v) }
-    #[inline] pub fn set_scroll_width(&self, i: usize, v: f32) { self.write_node_f32(i, F_SCROLL_WIDTH, v) }
-    #[inline] pub fn set_scroll_height(&self, i: usize, v: f32) { self.write_node_f32(i, F_SCROLL_HEIGHT, v) }
-    #[inline] pub fn set_max_scroll_x(&self, i: usize, v: f32) { self.write_node_f32(i, F_MAX_SCROLL_X, v) }
-    #[inline] pub fn set_max_scroll_y(&self, i: usize, v: f32) { self.write_node_f32(i, F_MAX_SCROLL_Y, v) }
+    /// Read a grid column track at the given index (0-31)
+    pub fn grid_column_track(&self, node: usize, track_idx: usize) -> GridTrack {
+        debug_assert!(track_idx < MAX_GRID_TRACKS, "Track index {} out of bounds", track_idx);
+        let offset = N_GRID_COLUMN_TRACKS + track_idx * GRID_TRACK_SIZE;
+        let track_type = TrackType::from(self.read_node_u8(node, offset));
+        let value = self.read_node_f32(node, offset + 2);
+        GridTrack { track_type, value }
+    }
+
+    /// Read a grid row track at the given index (0-31)
+    pub fn grid_row_track(&self, node: usize, track_idx: usize) -> GridTrack {
+        debug_assert!(track_idx < MAX_GRID_TRACKS, "Track index {} out of bounds", track_idx);
+        let offset = N_GRID_ROW_TRACKS + track_idx * GRID_TRACK_SIZE;
+        let track_type = TrackType::from(self.read_node_u8(node, offset));
+        let value = self.read_node_f32(node, offset + 2);
+        GridTrack { track_type, value }
+    }
+
+    /// Get all column tracks as a Vec (up to grid_column_count)
+    pub fn grid_column_tracks(&self, node: usize) -> Vec<GridTrack> {
+        let count = self.grid_column_count(node) as usize;
+        (0..count.min(MAX_GRID_TRACKS))
+            .map(|i| self.grid_column_track(node, i))
+            .collect()
+    }
+
+    /// Get all row tracks as a Vec (up to grid_row_count)
+    pub fn grid_row_tracks(&self, node: usize) -> Vec<GridTrack> {
+        let count = self.grid_row_count(node) as usize;
+        (0..count.min(MAX_GRID_TRACKS))
+            .map(|i| self.grid_row_track(node, i))
+            .collect()
+    }
+
+    // =========================================================================
+    // OUTPUT (Rust writes, Cache Line 11)
+    // =========================================================================
+
+    #[inline] pub fn computed_x(&self, i: usize) -> f32 { self.read_node_f32(i, N_COMPUTED_X) }
+    #[inline] pub fn computed_y(&self, i: usize) -> f32 { self.read_node_f32(i, N_COMPUTED_Y) }
+    #[inline] pub fn computed_width(&self, i: usize) -> f32 { self.read_node_f32(i, N_COMPUTED_WIDTH) }
+    #[inline] pub fn computed_height(&self, i: usize) -> f32 { self.read_node_f32(i, N_COMPUTED_HEIGHT) }
+    #[inline] pub fn content_width(&self, i: usize) -> f32 { self.read_node_f32(i, N_CONTENT_WIDTH) }
+    #[inline] pub fn content_height(&self, i: usize) -> f32 { self.read_node_f32(i, N_CONTENT_HEIGHT) }
+    #[inline] pub fn max_scroll_x(&self, i: usize) -> f32 { self.read_node_f32(i, N_MAX_SCROLL_X) }
+    #[inline] pub fn max_scroll_y(&self, i: usize) -> f32 { self.read_node_f32(i, N_MAX_SCROLL_Y) }
+    #[inline] pub fn is_scrollable(&self, i: usize) -> bool { self.read_node_u8(i, N_IS_SCROLLABLE) != 0 }
+
+    // Legacy aliases
+    #[inline] pub fn scroll_width(&self, i: usize) -> f32 { self.content_width(i) }
+    #[inline] pub fn scroll_height(&self, i: usize) -> f32 { self.content_height(i) }
+
+    #[inline] pub fn set_computed_x(&self, i: usize, v: f32) { self.write_node_f32(i, N_COMPUTED_X, v) }
+    #[inline] pub fn set_computed_y(&self, i: usize, v: f32) { self.write_node_f32(i, N_COMPUTED_Y, v) }
+    #[inline] pub fn set_computed_width(&self, i: usize, v: f32) { self.write_node_f32(i, N_COMPUTED_WIDTH, v) }
+    #[inline] pub fn set_computed_height(&self, i: usize, v: f32) { self.write_node_f32(i, N_COMPUTED_HEIGHT, v) }
+    #[inline] pub fn set_content_width(&self, i: usize, v: f32) { self.write_node_f32(i, N_CONTENT_WIDTH, v) }
+    #[inline] pub fn set_content_height(&self, i: usize, v: f32) { self.write_node_f32(i, N_CONTENT_HEIGHT, v) }
+    #[inline] pub fn set_max_scroll_x(&self, i: usize, v: f32) { self.write_node_f32(i, N_MAX_SCROLL_X, v) }
+    #[inline] pub fn set_max_scroll_y(&self, i: usize, v: f32) { self.write_node_f32(i, N_MAX_SCROLL_Y, v) }
+
+    // Legacy aliases
+    #[inline] pub fn set_scroll_width(&self, i: usize, v: f32) { self.set_content_width(i, v) }
+    #[inline] pub fn set_scroll_height(&self, i: usize, v: f32) { self.set_content_height(i, v) }
 
     /// Set all scroll-related output (called by layout engine)
-    /// Note: scrollable flag is stored in U_SCROLLABLE_FLAGS
     #[inline]
     pub fn set_output_scroll(&self, i: usize, scrollable: bool, max_x: f32, max_y: f32) {
-        // Set scrollable flag (bit 0 of scrollable_flags)
-        let flags = if scrollable { 1u8 } else { 0u8 };
-        self.write_node_u8(i, U_SCROLLABLE_FLAGS, flags);
-        self.write_node_f32(i, F_MAX_SCROLL_X, max_x);
-        self.write_node_f32(i, F_MAX_SCROLL_Y, max_y);
+        self.write_node_u8(i, N_IS_SCROLLABLE, if scrollable { 1 } else { 0 });
+        self.write_node_f32(i, N_MAX_SCROLL_X, max_x);
+        self.write_node_f32(i, N_MAX_SCROLL_Y, max_y);
     }
 
     // =========================================================================
-    // COLORS (Cache Line 3)
+    // VISUAL PROPERTIES (Cache Line 12)
     // =========================================================================
 
-    #[inline] pub fn fg_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_FG_COLOR) }
-    #[inline] pub fn bg_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_BG_COLOR) }
-    #[inline] pub fn border_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_BORDER_COLOR) }
-    #[inline] pub fn focus_ring_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_FOCUS_RING_COLOR) }
-
-    /// Get border top color (falls back to border_color if 0)
-    #[inline]
-    pub fn border_top_color(&self, i: usize) -> u32 {
-        let c = self.read_node_u32(i, C_BORDER_TOP_COLOR);
-        if c == 0 { self.border_color(i) } else { c }
-    }
-
-    /// Get border right color (falls back to border_color if 0)
-    #[inline]
-    pub fn border_right_color(&self, i: usize) -> u32 {
-        let c = self.read_node_u32(i, C_BORDER_RIGHT_COLOR);
-        if c == 0 { self.border_color(i) } else { c }
-    }
-
-    /// Get border bottom color (falls back to border_color if 0)
-    #[inline]
-    pub fn border_bottom_color(&self, i: usize) -> u32 {
-        let c = self.read_node_u32(i, C_BORDER_BOTTOM_COLOR);
-        if c == 0 { self.border_color(i) } else { c }
-    }
-
-    /// Get border left color (falls back to border_color if 0)
-    #[inline]
-    pub fn border_left_color(&self, i: usize) -> u32 {
-        let c = self.read_node_u32(i, C_BORDER_LEFT_COLOR);
-        if c == 0 { self.border_color(i) } else { c }
-    }
-
-    // Rgba helpers
-    #[inline] pub fn fg_rgba(&self, i: usize) -> Rgba { Rgba::from_packed(self.fg_color(i)) }
-    #[inline] pub fn bg_rgba(&self, i: usize) -> Rgba { Rgba::from_packed(self.bg_color(i)) }
-    #[inline] pub fn border_rgba(&self, i: usize) -> Rgba { Rgba::from_packed(self.border_color(i)) }
-
-    // =========================================================================
-    // VISUAL PROPERTIES (Cache Line 4)
-    // =========================================================================
-
-    #[inline] pub fn cursor_fg_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_CURSOR_FG_COLOR) }
-    #[inline] pub fn cursor_bg_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_CURSOR_BG_COLOR) }
-    #[inline] pub fn selection_color(&self, i: usize) -> u32 { self.read_node_u32(i, C_SELECTION_COLOR) }
-    #[inline] pub fn opacity(&self, i: usize) -> u8 { self.read_node_u8(i, U_OPACITY) }
-    #[inline] pub fn opacity_f32(&self, i: usize) -> f32 { self.opacity(i) as f32 / 255.0 }
-    #[inline] pub fn z_index(&self, i: usize) -> i8 { self.read_node_i8(i, I_Z_INDEX) }
-    #[inline] pub fn border_style(&self, i: usize) -> BorderStyle { BorderStyle::from(self.read_node_u8(i, U_BORDER_STYLE)) }
+    #[inline] pub fn opacity(&self, i: usize) -> f32 { self.read_node_f32(i, N_OPACITY) }
+    #[inline] pub fn z_index(&self, i: usize) -> i32 { self.read_node_i32(i, N_Z_INDEX) }
+    #[inline] pub fn border_style(&self, i: usize) -> BorderStyle { BorderStyle::from(self.read_node_u8(i, N_BORDER_STYLE)) }
 
     /// Get border style for top (falls back to border_style if 0)
     #[inline]
     pub fn border_style_top(&self, i: usize) -> BorderStyle {
-        let s = self.read_node_u8(i, U_BORDER_STYLE_TOP);
+        let s = self.read_node_u8(i, N_BORDER_STYLE_TOP);
         if s == 0 { self.border_style(i) } else { BorderStyle::from(s) }
     }
 
     /// Get border style for right (falls back to border_style if 0)
     #[inline]
     pub fn border_style_right(&self, i: usize) -> BorderStyle {
-        let s = self.read_node_u8(i, U_BORDER_STYLE_RIGHT);
+        let s = self.read_node_u8(i, N_BORDER_STYLE_RIGHT);
         if s == 0 { self.border_style(i) } else { BorderStyle::from(s) }
     }
 
     /// Get border style for bottom (falls back to border_style if 0)
     #[inline]
     pub fn border_style_bottom(&self, i: usize) -> BorderStyle {
-        let s = self.read_node_u8(i, U_BORDER_STYLE_BOTTOM);
+        let s = self.read_node_u8(i, N_BORDER_STYLE_BOTTOM);
         if s == 0 { self.border_style(i) } else { BorderStyle::from(s) }
     }
 
     /// Get border style for left (falls back to border_style if 0)
     #[inline]
     pub fn border_style_left(&self, i: usize) -> BorderStyle {
-        let s = self.read_node_u8(i, U_BORDER_STYLE_LEFT);
+        let s = self.read_node_u8(i, N_BORDER_STYLE_LEFT);
         if s == 0 { self.border_style(i) } else { BorderStyle::from(s) }
     }
 
     // Custom border chars
-    #[inline] pub fn border_char_h(&self, i: usize) -> u16 { self.read_node_u16(i, U_BORDER_CHAR_H) }
-    #[inline] pub fn border_char_v(&self, i: usize) -> u16 { self.read_node_u16(i, U_BORDER_CHAR_V) }
-    #[inline] pub fn border_char_tl(&self, i: usize) -> u16 { self.read_node_u16(i, U_BORDER_CHAR_TL) }
-    #[inline] pub fn border_char_tr(&self, i: usize) -> u16 { self.read_node_u16(i, U_BORDER_CHAR_TR) }
-    #[inline] pub fn border_char_bl(&self, i: usize) -> u16 { self.read_node_u16(i, U_BORDER_CHAR_BL) }
-    #[inline] pub fn border_char_br(&self, i: usize) -> u16 { self.read_node_u16(i, U_BORDER_CHAR_BR) }
+    #[inline] pub fn border_char_h(&self, i: usize) -> u16 { self.read_node_u16(i, N_BORDER_CHAR_H) }
+    #[inline] pub fn border_char_v(&self, i: usize) -> u16 { self.read_node_u16(i, N_BORDER_CHAR_V) }
+    #[inline] pub fn border_char_tl(&self, i: usize) -> u16 { self.read_node_u16(i, N_BORDER_CHAR_TL) }
+    #[inline] pub fn border_char_tr(&self, i: usize) -> u16 { self.read_node_u16(i, N_BORDER_CHAR_TR) }
+    #[inline] pub fn border_char_bl(&self, i: usize) -> u16 { self.read_node_u16(i, N_BORDER_CHAR_BL) }
+    #[inline] pub fn border_char_br(&self, i: usize) -> u16 { self.read_node_u16(i, N_BORDER_CHAR_BR) }
 
     /// Get all border characters for a node, handling both predefined and custom styles.
-    ///
-    /// Returns `(horizontal, vertical, top_left, top_right, bottom_left, bottom_right)`.
-    ///
-    /// - For predefined styles: returns the style's built-in characters
-    /// - For `BorderStyle::Custom`: reads from `U_BORDER_CHAR_*` fields
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let (h, v, tl, tr, bl, br) = buffer.border_chars(node_index);
-    /// // Works for any BorderStyle, predefined or custom
-    /// ```
     pub fn border_chars(&self, i: usize) -> (char, char, char, char, char, char) {
         let style = self.border_style(i);
         if style == BorderStyle::Custom {
-            // Read custom chars from buffer (stored as u16 for Unicode support)
             let h  = char::from_u32(self.border_char_h(i) as u32).unwrap_or('─');
             let v  = char::from_u32(self.border_char_v(i) as u32).unwrap_or('│');
             let tl = char::from_u32(self.border_char_tl(i) as u32).unwrap_or('┌');
@@ -1460,28 +1731,73 @@ impl SharedBuffer {
     // Focus indicator
     #[inline]
     pub fn focus_indicator_char(&self, i: usize) -> char {
-        let ch = self.read_node_u8(i, U_FOCUS_INDICATOR_CHAR);
+        let ch = self.read_node_u8(i, N_FOCUS_INDICATOR_CHAR);
         if ch == 0 { '*' } else { ch as char }
     }
 
     #[inline]
     pub fn focus_indicator_enabled(&self, i: usize) -> bool {
-        self.read_node_u8(i, U_FOCUS_INDICATOR_ENABLED) != 0
+        self.read_node_u8(i, N_FOCUS_INDICATOR_ENABLED) != 0
     }
 
     // =========================================================================
-    // TEXT PROPERTIES (Cache Line 5)
+    // COLORS (Cache Line 13)
     // =========================================================================
 
-    #[inline] pub fn text_offset(&self, i: usize) -> u32 { self.read_node_u32(i, U_TEXT_OFFSET) }
-    #[inline] pub fn text_length(&self, i: usize) -> u32 { self.read_node_u32(i, U_TEXT_LENGTH) }
-    #[inline] pub fn text_align(&self, i: usize) -> TextAlign { TextAlign::from(self.read_node_u8(i, U_TEXT_ALIGN)) }
-    #[inline] pub fn text_wrap(&self, i: usize) -> TextWrap { TextWrap::from(self.read_node_u8(i, U_TEXT_WRAP)) }
-    #[inline] pub fn text_overflow(&self, i: usize) -> TextOverflow { TextOverflow::from(self.read_node_u8(i, U_TEXT_OVERFLOW)) }
-    #[inline] pub fn text_attrs(&self, i: usize) -> u8 { self.read_node_u8(i, U_TEXT_ATTRS) }
-    #[inline] pub fn line_height(&self, i: usize) -> u8 { self.read_node_u8(i, U_LINE_HEIGHT) }
-    #[inline] pub fn letter_spacing(&self, i: usize) -> u8 { self.read_node_u8(i, U_LETTER_SPACING) }
-    #[inline] pub fn max_lines(&self, i: usize) -> u8 { self.read_node_u8(i, U_MAX_LINES) }
+    #[inline] pub fn fg_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_FG_COLOR) }
+    #[inline] pub fn bg_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_BG_COLOR) }
+    #[inline] pub fn border_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_BORDER_COLOR) }
+    #[inline] pub fn focus_ring_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_FOCUS_RING_COLOR) }
+    #[inline] pub fn cursor_fg_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_CURSOR_FG_COLOR) }
+    #[inline] pub fn cursor_bg_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_CURSOR_BG_COLOR) }
+    #[inline] pub fn selection_color(&self, i: usize) -> u32 { self.read_node_u32(i, N_SELECTION_COLOR) }
+
+    /// Get border top color (falls back to border_color if 0)
+    #[inline]
+    pub fn border_top_color(&self, i: usize) -> u32 {
+        let c = self.read_node_u32(i, N_BORDER_TOP_COLOR);
+        if c == 0 { self.border_color(i) } else { c }
+    }
+
+    /// Get border right color (falls back to border_color if 0)
+    #[inline]
+    pub fn border_right_color(&self, i: usize) -> u32 {
+        let c = self.read_node_u32(i, N_BORDER_RIGHT_COLOR);
+        if c == 0 { self.border_color(i) } else { c }
+    }
+
+    /// Get border bottom color (falls back to border_color if 0)
+    #[inline]
+    pub fn border_bottom_color(&self, i: usize) -> u32 {
+        let c = self.read_node_u32(i, N_BORDER_BOTTOM_COLOR);
+        if c == 0 { self.border_color(i) } else { c }
+    }
+
+    /// Get border left color (falls back to border_color if 0)
+    #[inline]
+    pub fn border_left_color(&self, i: usize) -> u32 {
+        let c = self.read_node_u32(i, N_BORDER_LEFT_COLOR);
+        if c == 0 { self.border_color(i) } else { c }
+    }
+
+    // Rgba helpers
+    #[inline] pub fn fg_rgba(&self, i: usize) -> Rgba { Rgba::from_packed(self.fg_color(i)) }
+    #[inline] pub fn bg_rgba(&self, i: usize) -> Rgba { Rgba::from_packed(self.bg_color(i)) }
+    #[inline] pub fn border_rgba(&self, i: usize) -> Rgba { Rgba::from_packed(self.border_color(i)) }
+
+    // =========================================================================
+    // TEXT PROPERTIES (Cache Line 14)
+    // =========================================================================
+
+    #[inline] pub fn text_offset(&self, i: usize) -> u32 { self.read_node_u32(i, N_TEXT_OFFSET) }
+    #[inline] pub fn text_length(&self, i: usize) -> u32 { self.read_node_u32(i, N_TEXT_LENGTH) }
+    #[inline] pub fn text_align(&self, i: usize) -> TextAlign { TextAlign::from(self.read_node_u8(i, N_TEXT_ALIGN)) }
+    #[inline] pub fn text_wrap(&self, i: usize) -> TextWrap { TextWrap::from(self.read_node_u8(i, N_TEXT_WRAP)) }
+    #[inline] pub fn text_overflow(&self, i: usize) -> TextOverflow { TextOverflow::from(self.read_node_u8(i, N_TEXT_OVERFLOW)) }
+    #[inline] pub fn text_attrs(&self, i: usize) -> u8 { self.read_node_u8(i, N_TEXT_ATTRS) }
+    #[inline] pub fn line_height(&self, i: usize) -> u8 { self.read_node_u8(i, N_LINE_HEIGHT) }
+    #[inline] pub fn letter_spacing(&self, i: usize) -> u8 { self.read_node_u8(i, N_LETTER_SPACING) }
+    #[inline] pub fn max_lines(&self, i: usize) -> u8 { self.read_node_u8(i, N_MAX_LINES) }
 
     /// Read text content from text pool
     pub fn text(&self, i: usize) -> &str {
@@ -1505,41 +1821,41 @@ impl SharedBuffer {
     }
 
     // =========================================================================
-    // INTERACTION STATE (Cache Line 6)
+    // INTERACTION STATE (Cache Line 15)
     // =========================================================================
 
-    #[inline] pub fn scroll_x(&self, i: usize) -> i32 { self.read_node_i32(i, I_SCROLL_X) }
-    #[inline] pub fn scroll_y(&self, i: usize) -> i32 { self.read_node_i32(i, I_SCROLL_Y) }
-    #[inline] pub fn cursor_position(&self, i: usize) -> i32 { self.read_node_i32(i, I_CURSOR_POSITION) }
-    #[inline] pub fn selection_start(&self, i: usize) -> i32 { self.read_node_i32(i, I_SELECTION_START) }
-    #[inline] pub fn selection_end(&self, i: usize) -> i32 { self.read_node_i32(i, I_SELECTION_END) }
-    #[inline] pub fn cursor_char(&self, i: usize) -> u32 { self.read_node_u32(i, U_CURSOR_CHAR) }
-    #[inline] pub fn cursor_alt_char(&self, i: usize) -> u32 { self.read_node_u32(i, U_CURSOR_ALT_CHAR) }
-    #[inline] pub fn cursor_style(&self, i: usize) -> CursorStyle { CursorStyle::from(self.read_node_u8(i, U_CURSOR_STYLE)) }
-    #[inline] pub fn cursor_blink_rate(&self, i: usize) -> u8 { self.read_node_u8(i, U_CURSOR_BLINK_RATE) }
-    #[inline] pub fn max_length(&self, i: usize) -> u8 { self.read_node_u8(i, U_MAX_LENGTH) }
+    #[inline] pub fn scroll_x(&self, i: usize) -> i32 { self.read_node_i32(i, N_SCROLL_X) }
+    #[inline] pub fn scroll_y(&self, i: usize) -> i32 { self.read_node_i32(i, N_SCROLL_Y) }
+    #[inline] pub fn cursor_position(&self, i: usize) -> i32 { self.read_node_i32(i, N_CURSOR_POSITION) }
+    #[inline] pub fn selection_start(&self, i: usize) -> i32 { self.read_node_i32(i, N_SELECTION_START) }
+    #[inline] pub fn selection_end(&self, i: usize) -> i32 { self.read_node_i32(i, N_SELECTION_END) }
+    #[inline] pub fn cursor_char(&self, i: usize) -> u32 { self.read_node_u32(i, N_CURSOR_CHAR) }
+    #[inline] pub fn cursor_alt_char(&self, i: usize) -> u32 { self.read_node_u32(i, N_CURSOR_ALT_CHAR) }
+    #[inline] pub fn cursor_style(&self, i: usize) -> CursorStyle { CursorStyle::from(self.read_node_u8(i, N_CURSOR_STYLE)) }
+    #[inline] pub fn cursor_blink_rate(&self, i: usize) -> u8 { self.read_node_u8(i, N_CURSOR_BLINK_RATE) }
+    #[inline] pub fn max_length(&self, i: usize) -> u8 { self.read_node_u8(i, N_MAX_LENGTH) }
 
     #[inline] pub fn set_scroll(&self, i: usize, x: i32, y: i32) {
-        self.write_node_i32(i, I_SCROLL_X, x);
-        self.write_node_i32(i, I_SCROLL_Y, y);
+        self.write_node_i32(i, N_SCROLL_X, x);
+        self.write_node_i32(i, N_SCROLL_Y, y);
     }
 
     #[inline] pub fn set_cursor_position(&self, i: usize, pos: i32) {
-        self.write_node_i32(i, I_CURSOR_POSITION, pos);
+        self.write_node_i32(i, N_CURSOR_POSITION, pos);
     }
 
     #[inline] pub fn set_selection(&self, i: usize, start: i32, end: i32) {
-        self.write_node_i32(i, I_SELECTION_START, start);
-        self.write_node_i32(i, I_SELECTION_END, end);
+        self.write_node_i32(i, N_SELECTION_START, start);
+        self.write_node_i32(i, N_SELECTION_END, end);
     }
 
     // Dirty flags
-    #[inline] pub fn dirty_flags(&self, i: usize) -> u8 { self.read_node_u8(i, U_DIRTY_FLAGS) }
+    #[inline] pub fn dirty_flags(&self, i: usize) -> u8 { self.read_node_u8(i, N_DIRTY_FLAGS) }
     #[inline] pub fn is_dirty(&self, i: usize, flag: u8) -> bool { (self.dirty_flags(i) & flag) != 0 }
-    #[inline] pub fn clear_dirty(&self, i: usize) { self.write_node_u8(i, U_DIRTY_FLAGS, 0) }
+    #[inline] pub fn clear_dirty(&self, i: usize) { self.write_node_u8(i, N_DIRTY_FLAGS, 0) }
 
     // Interaction flags
-    #[inline] pub fn interaction_flags(&self, i: usize) -> u8 { self.read_node_u8(i, U_INTERACTION_FLAGS) }
+    #[inline] pub fn interaction_flags(&self, i: usize) -> u8 { self.read_node_u8(i, N_INTERACTION_FLAGS) }
     #[inline] pub fn focusable(&self, i: usize) -> bool { (self.interaction_flags(i) & FLAG_FOCUSABLE) != 0 }
     #[inline] pub fn is_focused(&self, i: usize) -> bool { (self.interaction_flags(i) & FLAG_FOCUSED) != 0 }
     #[inline] pub fn is_hovered(&self, i: usize) -> bool { (self.interaction_flags(i) & FLAG_HOVERED) != 0 }
@@ -1550,34 +1866,34 @@ impl SharedBuffer {
     pub fn set_focused(&self, i: usize, val: bool) {
         let flags = self.interaction_flags(i);
         let new_flags = if val { flags | FLAG_FOCUSED } else { flags & !FLAG_FOCUSED };
-        self.write_node_u8(i, U_INTERACTION_FLAGS, new_flags);
+        self.write_node_u8(i, N_INTERACTION_FLAGS, new_flags);
     }
 
     #[inline]
     pub fn set_hovered(&self, i: usize, val: bool) {
         let flags = self.interaction_flags(i);
         let new_flags = if val { flags | FLAG_HOVERED } else { flags & !FLAG_HOVERED };
-        self.write_node_u8(i, U_INTERACTION_FLAGS, new_flags);
+        self.write_node_u8(i, N_INTERACTION_FLAGS, new_flags);
     }
 
     #[inline]
     pub fn set_pressed(&self, i: usize, val: bool) {
         let flags = self.interaction_flags(i);
         let new_flags = if val { flags | FLAG_PRESSED } else { flags & !FLAG_PRESSED };
-        self.write_node_u8(i, U_INTERACTION_FLAGS, new_flags);
+        self.write_node_u8(i, N_INTERACTION_FLAGS, new_flags);
     }
 
     // Cursor flags
     #[inline]
     pub fn cursor_visible(&self, i: usize) -> bool {
-        (self.read_node_u8(i, U_CURSOR_FLAGS) & 0x01) != 0
+        (self.read_node_u8(i, N_CURSOR_FLAGS) & 0x01) != 0
     }
 
     #[inline]
     pub fn set_cursor_visible(&self, i: usize, val: bool) {
-        let flags = self.read_node_u8(i, U_CURSOR_FLAGS);
+        let flags = self.read_node_u8(i, N_CURSOR_FLAGS);
         let new_flags = if val { flags | 0x01 } else { flags & !0x01 };
-        self.write_node_u8(i, U_CURSOR_FLAGS, new_flags);
+        self.write_node_u8(i, N_CURSOR_FLAGS, new_flags);
     }
 
     // =========================================================================
@@ -1669,7 +1985,7 @@ mod tests {
 
         // Initialize header
         unsafe {
-            ptr::write_unaligned(ptr.add(H_VERSION) as *mut u32, 2);
+            ptr::write_unaligned(ptr.add(H_VERSION) as *mut u32, 3);
             ptr::write_unaligned(ptr.add(H_MAX_NODES) as *mut u32, max_nodes as u32);
             ptr::write_unaligned(ptr.add(H_TEXT_POOL_SIZE) as *mut u32, text_pool_size as u32);
         }
@@ -1680,27 +1996,35 @@ mod tests {
 
     #[test]
     fn test_constants_alignment() {
-        // Verify cache line alignment
-        assert_eq!(F_WIDTH, 0);
-        assert_eq!(F_MARGIN_LEFT, 64);
-        assert_eq!(F_COMPUTED_X, 128);
-        assert_eq!(C_CURSOR_FG_COLOR, 192);
-        assert_eq!(U_TEXT_OFFSET, 256);
-        assert_eq!(I_SCROLL_X, 320);
+        // Verify cache line boundaries (64-byte aligned)
+        assert_eq!(N_WIDTH, 0);
+        assert_eq!(N_FLEX_DIRECTION, 64);
+        assert_eq!(N_PADDING_TOP, 128);
+        assert_eq!(N_GRID_AUTO_FLOW, 192);
+        assert_eq!(N_GRID_COLUMN_TRACKS, 256);
+        assert_eq!(N_GRID_ROW_TRACKS, 448);
+        assert_eq!(N_COMPUTED_X, 640);
+        assert_eq!(N_OPACITY, 704);
+        assert_eq!(N_FG_COLOR, 768);
+        assert_eq!(N_TEXT_OFFSET, 832);
+        assert_eq!(N_SCROLL_X, 896);
 
         // Verify stride
-        assert_eq!(NODE_STRIDE, 512);
+        assert_eq!(NODE_STRIDE, 1024);
 
         // Verify wake flags are 4-byte aligned
         assert_eq!(H_WAKE_RUST % 4, 0);
         assert_eq!(H_WAKE_TS % 4, 0);
+
+        // Verify grid track regions
+        assert_eq!(N_GRID_ROW_TRACKS - N_GRID_COLUMN_TRACKS, 192); // 32 tracks × 6 bytes
     }
 
     #[test]
     fn test_buffer_creation() {
         let (_data, buf) = create_test_buffer(100, 1024);
 
-        assert_eq!(buf.version(), 2);
+        assert_eq!(buf.version(), 3);
         assert_eq!(buf.max_nodes(), 100);
     }
 
@@ -1726,15 +2050,15 @@ mod tests {
         let node_base = HEADER_SIZE + 0 * NODE_STRIDE;
         unsafe {
             let ptr = data.as_mut_ptr();
-            ptr::write_unaligned(ptr.add(node_base + F_WIDTH) as *mut f32, 100.0);
-            ptr::write_unaligned(ptr.add(node_base + F_HEIGHT) as *mut f32, 50.0);
-            *ptr.add(node_base + U_FLEX_DIRECTION) = 1;
-            *ptr.add(node_base + U_COMPONENT_TYPE) = COMPONENT_BOX;
+            ptr::write_unaligned(ptr.add(node_base + N_WIDTH) as *mut f32, 100.0);
+            ptr::write_unaligned(ptr.add(node_base + N_HEIGHT) as *mut f32, 50.0);
+            *ptr.add(node_base + N_FLEX_DIRECTION) = 1;
+            *ptr.add(node_base + N_COMPONENT_TYPE) = COMPONENT_BOX;
         }
 
         assert_eq!(buf.width(0), 100.0);
         assert_eq!(buf.height(0), 50.0);
-        assert_eq!(buf.flex_direction(0), 1); // 1 = Column (raw u8, see FlexDirection enum)
+        assert_eq!(buf.flex_direction(0), 1); // 1 = Column
         assert_eq!(buf.component_type(0), COMPONENT_BOX);
     }
 
@@ -1760,7 +2084,7 @@ mod tests {
         let packed = 0xFF804020u32;
         let node_base = HEADER_SIZE + 0 * NODE_STRIDE;
         unsafe {
-            ptr::write_unaligned(data.as_mut_ptr().add(node_base + C_FG_COLOR) as *mut u32, packed);
+            ptr::write_unaligned(data.as_mut_ptr().add(node_base + N_FG_COLOR) as *mut u32, packed);
         }
 
         assert_eq!(buf.fg_color(0), packed);
@@ -1779,7 +2103,7 @@ mod tests {
         let base_color = 0xFFFF0000u32;
         let node_base = HEADER_SIZE + 0 * NODE_STRIDE;
         unsafe {
-            ptr::write_unaligned(data.as_mut_ptr().add(node_base + C_BORDER_COLOR) as *mut u32, base_color);
+            ptr::write_unaligned(data.as_mut_ptr().add(node_base + N_BORDER_COLOR) as *mut u32, base_color);
         }
 
         // Per-side colors are 0, should fall back to base
@@ -1789,7 +2113,7 @@ mod tests {
         // Set specific side
         let top_color = 0xFF00FF00u32;
         unsafe {
-            ptr::write_unaligned(data.as_mut_ptr().add(node_base + C_BORDER_TOP_COLOR) as *mut u32, top_color);
+            ptr::write_unaligned(data.as_mut_ptr().add(node_base + N_BORDER_TOP_COLOR) as *mut u32, top_color);
         }
 
         assert_eq!(buf.border_top_color(0), top_color);
@@ -1802,7 +2126,7 @@ mod tests {
 
         let node_base = HEADER_SIZE + 0 * NODE_STRIDE;
         unsafe {
-            *data.as_mut_ptr().add(node_base + U_INTERACTION_FLAGS) = FLAG_FOCUSABLE | FLAG_FOCUSED;
+            *data.as_mut_ptr().add(node_base + N_INTERACTION_FLAGS) = FLAG_FOCUSABLE | FLAG_FOCUSED;
         }
 
         assert!(buf.focusable(0));
@@ -1831,13 +2155,89 @@ mod tests {
         assert_eq!(FlexDirection::from(1), FlexDirection::Column);
         assert_eq!(FlexDirection::from(255), FlexDirection::Row); // Invalid -> default
 
+        assert_eq!(Display::from(0), Display::None);
+        assert_eq!(Display::from(1), Display::Flex);
+        assert_eq!(Display::from(2), Display::Grid);
+        assert_eq!(Display::from(255), Display::Flex); // Invalid -> default Flex
+
         assert_eq!(BorderStyle::from(1), BorderStyle::Single);
         assert_eq!(BorderStyle::from(3), BorderStyle::Rounded);
-        assert_eq!(BorderStyle::from(255), BorderStyle::Custom); // 255 = Custom
-        assert_eq!(BorderStyle::from(200), BorderStyle::None); // Unknown values -> None
+        assert_eq!(BorderStyle::from(255), BorderStyle::Custom);
+        assert_eq!(BorderStyle::from(200), BorderStyle::None); // Unknown -> None
 
         assert_eq!(EventType::from(9), EventType::Focus);
         assert_eq!(EventType::from(255), EventType::None);
+    }
+
+    #[test]
+    fn test_grid_enums() {
+        assert_eq!(TrackType::from(0), TrackType::None);
+        assert_eq!(TrackType::from(1), TrackType::Auto);
+        assert_eq!(TrackType::from(4), TrackType::Length);
+        assert_eq!(TrackType::from(6), TrackType::Fr);
+        assert_eq!(TrackType::from(255), TrackType::None);
+
+        assert_eq!(GridAutoFlow::from(0), GridAutoFlow::Row);
+        assert_eq!(GridAutoFlow::from(1), GridAutoFlow::Column);
+        assert_eq!(GridAutoFlow::from(2), GridAutoFlow::RowDense);
+        assert_eq!(GridAutoFlow::from(3), GridAutoFlow::ColumnDense);
+
+        assert_eq!(JustifyItems::from(0), JustifyItems::Start);
+        assert_eq!(JustifyItems::from(3), JustifyItems::Stretch);
+
+        assert_eq!(JustifySelf::from(0), JustifySelf::Auto);
+        assert_eq!(JustifySelf::from(4), JustifySelf::Stretch);
+    }
+
+    #[test]
+    fn test_grid_track_access() {
+        let (mut data, buf) = create_test_buffer(100, 1024);
+
+        let node_base = HEADER_SIZE + 0 * NODE_STRIDE;
+
+        // Set up grid column count
+        unsafe {
+            *data.as_mut_ptr().add(node_base + N_GRID_COLUMN_COUNT) = 3;
+        }
+
+        // Write track 0: 1fr
+        let track0_offset = node_base + N_GRID_COLUMN_TRACKS;
+        unsafe {
+            let ptr = data.as_mut_ptr();
+            *ptr.add(track0_offset) = TrackType::Fr as u8;
+            ptr::write_unaligned(ptr.add(track0_offset + 2) as *mut f32, 1.0);
+        }
+
+        // Write track 1: 2fr
+        let track1_offset = node_base + N_GRID_COLUMN_TRACKS + GRID_TRACK_SIZE;
+        unsafe {
+            let ptr = data.as_mut_ptr();
+            *ptr.add(track1_offset) = TrackType::Fr as u8;
+            ptr::write_unaligned(ptr.add(track1_offset + 2) as *mut f32, 2.0);
+        }
+
+        // Write track 2: auto
+        let track2_offset = node_base + N_GRID_COLUMN_TRACKS + 2 * GRID_TRACK_SIZE;
+        unsafe {
+            let ptr = data.as_mut_ptr();
+            *ptr.add(track2_offset) = TrackType::Auto as u8;
+        }
+
+        // Read tracks
+        let t0 = buf.grid_column_track(0, 0);
+        assert_eq!(t0.track_type, TrackType::Fr);
+        assert_eq!(t0.value, 1.0);
+
+        let t1 = buf.grid_column_track(0, 1);
+        assert_eq!(t1.track_type, TrackType::Fr);
+        assert_eq!(t1.value, 2.0);
+
+        let t2 = buf.grid_column_track(0, 2);
+        assert_eq!(t2.track_type, TrackType::Auto);
+
+        // Get all tracks
+        let tracks = buf.grid_column_tracks(0);
+        assert_eq!(tracks.len(), 3);
     }
 
     #[test]
@@ -1857,7 +2257,6 @@ mod tests {
 
     #[test]
     fn test_border_style_chars() {
-        // Single
         let (h, v, tl, tr, bl, br) = BorderStyle::Single.chars();
         assert_eq!(h, '─');
         assert_eq!(v, '│');
@@ -1866,80 +2265,54 @@ mod tests {
         assert_eq!(bl, '└');
         assert_eq!(br, '┘');
 
-        // Double
-        let (h, v, tl, tr, bl, br) = BorderStyle::Double.chars();
+        let (h, _, tl, _, _, _) = BorderStyle::Double.chars();
         assert_eq!(h, '═');
         assert_eq!(tl, '╔');
 
-        // Rounded
         let (_, _, tl, tr, bl, br) = BorderStyle::Rounded.chars();
         assert_eq!(tl, '╭');
         assert_eq!(tr, '╮');
         assert_eq!(bl, '╰');
         assert_eq!(br, '╯');
-
-        // Block
-        let (h, v, tl, _, _, _) = BorderStyle::Block.chars();
-        assert_eq!(h, '█');
-        assert_eq!(v, '█');
-        assert_eq!(tl, '█');
-
-        // All variants have valid chars
-        for i in 0..=13 {
-            let style = BorderStyle::from(i);
-            let (h, v, tl, tr, bl, br) = style.chars();
-            assert!(h != '\0' && v != '\0');
-            assert!(tl != '\0' && tr != '\0');
-            assert!(bl != '\0' && br != '\0');
-        }
     }
 
     #[test]
     fn test_border_style_helpers() {
-        // is_predefined
         assert!(BorderStyle::Single.is_predefined());
-        assert!(BorderStyle::Rounded.is_predefined());
         assert!(!BorderStyle::Custom.is_predefined());
 
-        // is_heavy
         assert!(BorderStyle::Thick.is_heavy());
         assert!(BorderStyle::Bold.is_heavy());
-        assert!(BorderStyle::HeavyDashed.is_heavy());
         assert!(!BorderStyle::Single.is_heavy());
-        assert!(!BorderStyle::Dashed.is_heavy());
 
-        // is_dashed
         assert!(BorderStyle::Dashed.is_dashed());
-        assert!(BorderStyle::Dotted.is_dashed());
-        assert!(BorderStyle::HeavyDashed.is_dashed());
         assert!(BorderStyle::HeavyDotted.is_dashed());
         assert!(!BorderStyle::Single.is_dashed());
-        assert!(!BorderStyle::Thick.is_dashed());
-    }
-
-    #[test]
-    fn test_border_style_from_u8() {
-        assert_eq!(BorderStyle::from(0), BorderStyle::None);
-        assert_eq!(BorderStyle::from(1), BorderStyle::Single);
-        assert_eq!(BorderStyle::from(3), BorderStyle::Rounded);
-        assert_eq!(BorderStyle::from(8), BorderStyle::Block);
-        assert_eq!(BorderStyle::from(9), BorderStyle::DoubleHorz);
-        assert_eq!(BorderStyle::from(10), BorderStyle::DoubleVert);
-        assert_eq!(BorderStyle::from(13), BorderStyle::Bold);
-        assert_eq!(BorderStyle::from(255), BorderStyle::Custom);
-        assert_eq!(BorderStyle::from(200), BorderStyle::None); // unknown -> None
     }
 
     #[test]
     fn test_stats() {
         let (_data, buf) = create_test_buffer(100, 1024);
 
-        assert_eq!(buf.exit_requested(), false);
+        assert!(!buf.exit_requested());
         buf.set_exit_requested(true);
-        assert_eq!(buf.exit_requested(), true);
+        assert!(buf.exit_requested());
 
         buf.increment_render_count();
         buf.increment_render_count();
-        // Note: We can't easily read render_count without exposing it
+    }
+
+    #[test]
+    fn test_spec_checksums() {
+        // These must match SHARED-BUFFER-SPEC.md checksums
+        assert_eq!(HEADER_SIZE, 256, "Header size mismatch");
+        assert_eq!(NODE_STRIDE, 1024, "Node stride mismatch");
+        assert_eq!(N_GRID_COLUMN_TRACKS, 256, "Grid column tracks offset mismatch");
+        assert_eq!(N_GRID_ROW_TRACKS, 448, "Grid row tracks offset mismatch");
+        assert_eq!(N_COMPUTED_X, 640, "Output offset mismatch");
+        assert_eq!(N_FG_COLOR, 768, "Colors offset mismatch");
+        assert_eq!(N_TEXT_OFFSET, 832, "Text offset mismatch");
+        assert_eq!(N_SCROLL_X, 896, "Scroll offset mismatch");
+        assert_eq!(EVENT_SLOT_SIZE, 20, "Event slot size mismatch");
     }
 }

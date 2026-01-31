@@ -1,23 +1,13 @@
 //! TUI Framework - Layout Module
 //!
-//! Flexbox layout computation for terminal UI using Taffy.
+//! Flexbox and Grid layout computation for terminal UI using Taffy 0.9.
 //!
 //! Contains:
-//! - `layout_tree`: Taffy trait API on SharedBuffer (512-byte nodes, cache-aligned)
-//! - `layout_tree_aos`: Legacy AoS buffer (256-byte nodes) for comparison
+//! - `layout_tree`: Taffy 0.9 trait API directly on SharedBuffer (1024-byte nodes)
 //! - `text_measure`: Unicode-aware text measurement for terminal rendering
-//! - `types`: Layout-related type definitions
 
-mod types;
-pub mod text_measure;
-pub mod layout_tree_aos;
 pub mod layout_tree;
+pub mod text_measure;
 
-pub use types::*;
-pub use text_measure::*;
-
-// Old AoS buffer layout (256 bytes/node)
-pub use layout_tree_aos::compute_layout_aos;
-
-// New cache-aligned layout (512 bytes/node)
 pub use layout_tree::compute_layout;
+pub use text_measure::*;

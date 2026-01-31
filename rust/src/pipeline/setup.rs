@@ -6,13 +6,13 @@
 //! generation signal (incremented on TS wake or stdin input)
 //!   │
 //!   ├─→ layout_derived (spark-signals derived)
-//!   │     reads generation → reads AoSBuffer dirty flags
+//!   │     reads generation → reads SharedBuffer dirty flags
 //!   │     IF layout-dirty: run Taffy → write positions to output section
 //!   │     IF visual-only-dirty: SKIP layout (smart skip)
 //!   │
 //!   ├─→ framebuffer_derived (spark-signals derived)
 //!   │     depends on: layout_derived
-//!   │     Read output + visual + text + interaction from AoSBuffer
+//!   │     Read output + visual + text + interaction from SharedBuffer
 //!   │     Build 2D Cell grid + collect hit regions
 //!   │
 //!   └─→ render_effect (spark-signals effect)
@@ -26,7 +26,7 @@
 //! Three threads feed a unified mpsc channel:
 //!
 //! - **stdin reader**: blocks on stdin.read(), sends Data messages
-//! - **wake watcher**: adaptive spin on AoSBuffer wake flag, sends Wake messages
+//! - **wake watcher**: adaptive spin on SharedBuffer wake flag, sends Wake messages
 //! - **engine thread**: blocks on channel.recv(), processes both immediately
 //!
 //! No polling. No fixed timeout. Pure event-driven reactive propagation.
@@ -41,7 +41,7 @@ use std::sync::mpsc;
 
 use spark_signals::{signal, derived, effect, Signal};
 
-use crate::shared_buffer_aos::{AoSBuffer, DIRTY_LAYOUT, DIRTY_TEXT, DIRTY_HIERARCHY};
+use crate::shared_buffer::{SharedBuffer, RenderMode, DIRTY_LAYOUT, DIRTY_TEXT, DIRTY_HIERARCHY};
 use crate::layout;
 use crate::framebuffer::{self, HitRegion};
 use crate::renderer::{FrameBuffer, DiffRenderer, InlineRenderer};
@@ -90,7 +90,7 @@ impl Engine {
     /// 4. Blocks on channel events — increments generation on input or wake
     ///
     /// Returns an Engine handle for shutdown.
-    pub fn start(buf: &'static AoSBuffer) -> io::Result<Self> {
+    pub fn start(buf: &'static SharedBuffer) -> io::Result<Self> {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
 
@@ -127,11 +127,11 @@ impl Drop for Engine {
 // =============================================================================
 
 /// Main engine function. Runs on the engine thread.
-fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<()> {
-    // 1. Setup terminal based on render mode (0=fullscreen, 1=inline, 2=append)
+fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Result<()> {
+    // 1. Setup terminal based on render mode
     let render_mode = buf.render_mode();
     let mut terminal = TerminalSetup::new();
-    let is_fullscreen = render_mode == 0;
+    let is_fullscreen = render_mode == RenderMode::Diff;
 
     if is_fullscreen {
         terminal.enter_fullscreen()?;
@@ -145,7 +145,7 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
     // 3. Start stdin reader (sends Data/Closed messages)
     let stdin_reader = StdinReader::spawn(tx.clone())?;
 
-    // 4. Start wake watcher (sends Wake messages when TS writes to AoSBuffer)
+    // 4. Start wake watcher (sends Wake messages when TS writes to SharedBuffer)
     let _wake_watcher = WakeWatcher::spawn(buf, tx, running.clone());
 
     // 5. Initialize input system state
@@ -154,7 +154,10 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
     let mut editor = TextEditor::new();
     let mut scroll = ScrollManager::new();
     let mut blink = BlinkManager::new();
-    let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(buf.terminal_width() as u16, buf.terminal_height() as u16)));
+    let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(
+        buf.terminal_width() as u16,
+        buf.terminal_height() as u16,
+    )));
 
     // =========================================================================
     // 6. Create the reactive graph
@@ -168,31 +171,31 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
     let gen_for_layout = generation.clone();
     let layout_derived = derived(move || {
         // Read generation (creates reactive dependency)
-        let _gen = gen_for_layout.get();
+        let generation_value = gen_for_layout.get();
 
         // Check dirty flags for smart skip
         let node_count = buf.node_count();
 
         // Always run layout on first two renders (effect creation + initial set)
         // After that, only run if dirty flags are set
-        let mut needs_layout = _gen <= 1;
+        let mut needs_layout = generation_value <= 1;
 
         for i in 0..node_count {
             let flags = buf.dirty_flags(i);
             if flags & (DIRTY_LAYOUT | DIRTY_TEXT | DIRTY_HIERARCHY) != 0 {
                 needs_layout = true;
             }
-            buf.clear_all_dirty(i);
+            buf.clear_dirty(i);
         }
 
         // Layout computation
         if needs_layout && node_count > 0 {
-            layout::compute_layout_aos(buf);
+            layout::compute_layout(buf);
         }
 
         // Return generation as the "result" — downstream deriveds
         // depend on this, so they re-run when generation changes
-        _gen
+        generation_value
     });
 
     // Framebuffer derived: depends on layout, builds 2D cell grid.
@@ -203,10 +206,10 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
 
         // Framebuffer dimensions come from root element's computed layout.
         // Layout already accounts for render mode (fullscreen vs inline).
-        let tw = buf.output_width(0).max(1.0) as u16;
-        let th = buf.output_height(0).max(1.0) as u16;
+        let tw = buf.computed_width(0).max(1.0) as u16;
+        let th = buf.computed_height(0).max(1.0) as u16;
 
-        // Build framebuffer from AoSBuffer
+        // Build framebuffer from SharedBuffer
         let (buffer, hit_regions) = framebuffer::compute_framebuffer(buf, tw, th);
 
         FrameBufferResult {
@@ -237,12 +240,11 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
             mouse.hit_grid.fill_rect(hr.x, hr.y, hr.width, hr.height, hr.component_index);
         }
 
-        // Render based on mode (0=fullscreen/diff, 1=inline, 2=append)
-        let mode = buf.render_mode();
-        match mode {
-            1 => { let _ = inline_renderer.render(&result.buffer); }
-            // TODO: 2 => append_renderer
-            _ => { let _ = diff_renderer.render(&result.buffer); }
+        // Render based on mode
+        match buf.render_mode() {
+            RenderMode::Inline => { let _ = inline_renderer.render(&result.buffer); }
+            RenderMode::Append => { /* TODO: append_renderer */ }
+            RenderMode::Diff => { let _ = diff_renderer.render(&result.buffer); }
         }
 
         // Increment render counter so TS can track FPS
@@ -307,7 +309,7 @@ fn run_engine(buf: &'static AoSBuffer, running: Arc<AtomicBool>) -> io::Result<(
                 generation.set(generation.get() + 1);
             }
             Ok(StdinMessage::Wake) => {
-                // TS wrote props to AoSBuffer → increment generation → reactive propagation
+                // TS wrote props to SharedBuffer → increment generation → reactive propagation
                 generation.set(generation.get() + 1);
             }
             Ok(StdinMessage::Closed) => break,
