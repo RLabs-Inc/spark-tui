@@ -41,7 +41,7 @@
 import { signal, repeat } from '@rlabs-inc/signals'
 import type { WritableSignal, ReadableSignal } from '@rlabs-inc/signals'
 import { pulse } from '../primitives/animation'
-import { getAoSArrays } from '../bridge'
+import { getArrays } from '../bridge'
 
 // =============================================================================
 // TYPES
@@ -162,7 +162,7 @@ function unwrap<T>(value: T | ReadableSignal<T> | (() => T)): T {
  * ```
  */
 export function createCursor(index: number, config: CursorConfig = {}): CursorHandle {
-  const arrays = getAoSArrays()
+  const arrays = getArrays()
   const disposals: (() => void)[] = []
 
   // Position signal (internal) - allows programmatic control
@@ -239,12 +239,12 @@ export function createCursor(index: number, config: CursorConfig = {}): CursorHa
   if (config.fg !== undefined) {
     if (typeof config.fg === 'number') {
       // Static color
-      arrays.cursorFg.set(index, config.fg)
+      arrays.cursorFgColor.set(index, config.fg)
     } else {
       // Reactive color (can be animated with cycle()!)
       disposals.push(repeat(
         () => unwrap(config.fg!),
-        arrays.cursorFg,
+        arrays.cursorFgColor,
         index
       ))
     }
@@ -256,12 +256,12 @@ export function createCursor(index: number, config: CursorConfig = {}): CursorHa
   if (config.bg !== undefined) {
     if (typeof config.bg === 'number') {
       // Static color
-      arrays.cursorBg.set(index, config.bg)
+      arrays.cursorBgColor.set(index, config.bg)
     } else {
       // Reactive color (can be animated with cycle()!)
       disposals.push(repeat(
         () => unwrap(config.bg!),
-        arrays.cursorBg,
+        arrays.cursorBgColor,
         index
       ))
     }

@@ -9,7 +9,7 @@
  */
 
 import { signal, derived } from '@rlabs-inc/signals'
-import { isInitializedAoS, getAoSBuffer } from '../bridge'
+import { isInitialized, getBuffer } from '../bridge'
 import type { FocusEvent } from '../engine/events'
 import { EventType, registerFocusHandler } from '../engine/events'
 

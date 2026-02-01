@@ -1,5 +1,5 @@
 /**
- * SparkTUI Mount API
+ * SparkTUI Mount API (v3 Buffer)
  *
  * The main entry point for SparkTUI applications.
  * Handles bridge initialization, event listener, render mode, and cleanup.
@@ -8,7 +8,7 @@
  * The event listener uses Atomics.waitAsync - it SUSPENDS until Rust notifies.
  */
 
-import { initBridgeAoS, resetBridge } from '../bridge'
+import { initBridge, resetBridge, getBuffer } from '../bridge'
 import {
   startEventListener,
   stopEventListener,
@@ -17,15 +17,16 @@ import {
 } from './events'
 import { scoped } from '../primitives/scope'
 import {
-  setConfigFlags,
+  type SharedBuffer,
   setTerminalSize,
+  setConfigFlags,
+  setRenderMode,
+  RenderMode,
   CONFIG_DEFAULT,
   CONFIG_EXIT_ON_CTRL_C,
   CONFIG_TAB_NAVIGATION,
   CONFIG_MOUSE_ENABLED,
-  H_RENDER_MODE,
-  type AoSBuffer,
-} from '../bridge/shared-buffer-aos'
+} from '../bridge/shared-buffer'
 import type { Cleanup } from '../primitives/types'
 
 // =============================================================================
@@ -39,11 +40,11 @@ import type { Cleanup } from '../primitives/types'
  * - `inline`: Renders within terminal flow, respects scroll
  * - `append`: Appends output without clearing
  */
-export type RenderMode = 'fullscreen' | 'inline' | 'append'
+export type MountRenderMode = 'fullscreen' | 'inline' | 'append'
 
 export interface MountOptions {
   /** Render mode: fullscreen (default), inline, or append */
-  mode?: RenderMode
+  mode?: MountRenderMode
 
   /** Terminal width (auto-detected if not specified) */
   width?: number
@@ -71,14 +72,14 @@ export interface MountHandle {
   /** Unmount the app and clean up */
   unmount(): void
 
-  /** Get the AoS buffer for direct access */
-  buffer: AoSBuffer
+  /** Get the shared buffer for direct access */
+  buffer: SharedBuffer
 
   /** Switch render mode at runtime */
-  setMode(mode: RenderMode): void
+  setMode(mode: MountRenderMode): void
 
   /** Get current render mode */
-  getMode(): RenderMode
+  getMode(): MountRenderMode
 }
 
 // =============================================================================
@@ -86,7 +87,7 @@ export interface MountHandle {
 // =============================================================================
 
 let currentCleanup: Cleanup | null = null
-let currentMode: RenderMode = 'fullscreen'
+let currentMode: MountRenderMode = 'fullscreen'
 let mounted = false
 let exitUnsubscribe: Cleanup | null = null
 
@@ -94,21 +95,17 @@ let exitUnsubscribe: Cleanup | null = null
 // RENDER MODE
 // =============================================================================
 
-function renderModeToNum(mode: RenderMode): number {
+function renderModeToEnum(mode: MountRenderMode): RenderMode {
   switch (mode) {
-    case 'fullscreen':
-      return 0
-    case 'inline':
-      return 1
-    case 'append':
-      return 2
-    default:
-      return 0
+    case 'fullscreen': return RenderMode.Diff
+    case 'inline': return RenderMode.Inline
+    case 'append': return RenderMode.Append
+    default: return RenderMode.Diff
   }
 }
 
-function applyRenderMode(buffer: AoSBuffer, mode: RenderMode): void {
-  buffer.view.setUint32(H_RENDER_MODE, renderModeToNum(mode), true)
+function applyRenderMode(buffer: SharedBuffer, mode: MountRenderMode): void {
+  setRenderMode(buffer, renderModeToEnum(mode))
   currentMode = mode
 }
 
@@ -117,14 +114,12 @@ function applyRenderMode(buffer: AoSBuffer, mode: RenderMode): void {
 // =============================================================================
 
 function getTerminalSize(): { width: number; height: number } {
-  // Node.js environment
   if (typeof process !== 'undefined' && process.stdout) {
     return {
       width: process.stdout.columns ?? 80,
       height: process.stdout.rows ?? 24,
     }
   }
-  // Fallback
   return { width: 80, height: 24 }
 }
 
@@ -153,8 +148,6 @@ function getTerminalSize(): { width: number; height: number } {
  *     text({ content: 'Hello, SparkTUI!' })
  *   }})
  * })
- *
- * // Later: unmount()
  * ```
  *
  * @example Inline mode (renders within terminal flow)
@@ -164,25 +157,6 @@ function getTerminalSize(): { width: number; height: number } {
  *     text({ content: 'Inline content' })
  *   }})
  * }, { mode: 'inline', height: 10 })
- * ```
- *
- * @example With custom config
- * ```ts
- * mount(() => {
- *   // ... app UI
- * }, {
- *   mode: 'fullscreen',
- *   disableCtrlC: false,
- *   disableMouse: false,
- *   onUnmount: () => console.log('App unmounted'),
- * })
- * ```
- *
- * @example Testing without Rust
- * ```ts
- * mount(() => {
- *   // ... app UI
- * }, { noopNotifier: true })
  * ```
  */
 export function mount(app: () => void, options: MountOptions = {}): MountHandle {
@@ -202,7 +176,7 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
   } = options
 
   // Initialize bridge (SharedArrayBuffer + reactive arrays + notifier)
-  const { buffer, arrays, notifier } = initBridgeAoS({ noopNotifier })
+  const { buffer } = initBridge({ noopNotifier })
 
   // Set terminal size
   const termSize = getTerminalSize()
@@ -225,47 +199,39 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
   setConfigFlags(buffer, flags)
 
   // Start event listener (Atomics.waitAsync - REACTIVE, NOT POLLING)
-  // This SUSPENDS until Rust notifies via Atomics.notify
   if (!noopNotifier) {
     startEventListener(buffer)
   }
 
-  // Create the mount handle first so exitHandler can reference it
+  // Create the mount handle
   const handle: MountHandle = {
     unmount() {
       if (!mounted) return
 
-      // Unsubscribe exit handler
       if (exitUnsubscribe) {
         exitUnsubscribe()
         exitUnsubscribe = null
       }
 
-      // Stop event listener
       stopEventListener()
-
-      // Clean up all event handlers
       cleanupAllHandlers()
 
-      // Dispose scope (cleans up all primitives and effects)
       if (currentCleanup) {
         currentCleanup()
         currentCleanup = null
       }
 
-      // Reset bridge state (allows re-mounting)
       resetBridge()
 
       mounted = false
       currentMode = 'fullscreen'
 
-      // Call user callback
       onUnmount?.()
     },
 
     buffer,
 
-    setMode(newMode: RenderMode) {
+    setMode(newMode: MountRenderMode) {
       applyRenderMode(buffer, newMode)
     },
 
@@ -283,7 +249,6 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
   }
 
   // Run app in scoped context
-  // scoped() tracks all effects and cleanups, returns a master cleanup function
   currentCleanup = scoped(() => {
     app()
   })
@@ -303,7 +268,7 @@ export function isMounted(): boolean {
 }
 
 /** Get the current render mode */
-export function getRenderMode(): RenderMode {
+export function getRenderMode(): MountRenderMode {
   return currentMode
 }
 

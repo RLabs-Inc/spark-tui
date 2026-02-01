@@ -1,13 +1,12 @@
 /**
- * TUI Framework - Text Primitive (AoS)
+ * TUI Framework - Text Primitive (v3 Buffer)
  *
  * Display text with styling, alignment, and wrapping.
- * Uses AoS SharedBuffer for cache-friendly Rust reads.
+ * Uses v3 SharedBuffer (1024-byte stride) with Grid support.
  *
- * REACTIVITY: All props flow through repeat() → AoSSlotBuffer → SharedArrayBuffer.
+ * REACTIVITY: All props flow through repeat() → SharedSlotBuffer → SharedArrayBuffer.
  * Text content uses a SINGLE repeater — the readFn encodes UTF-8 bytes into the
- * text pool and returns the offset. No effects. No TS-side measurement.
- * Rust handles text measurement via Taffy content_size.
+ * text pool and marks the node dirty. Rust handles text measurement via Taffy.
  *
  * Usage:
  * ```ts
@@ -20,7 +19,12 @@
 import { repeat } from '@rlabs-inc/signals'
 import { ComponentType } from '../types'
 import type { RGBA } from '../types'
-import { allocateIndex, releaseIndex, getCurrentParentIndex } from '../engine/registry'
+import {
+  allocateIndex,
+  releaseIndex,
+  getCurrentParentIndex,
+  registerParent,
+} from '../engine/registry'
 import {
   pushCurrentComponent,
   popCurrentComponent,
@@ -30,30 +34,22 @@ import { cleanupIndex as cleanupKeyboardListeners } from '../state/keyboard'
 import { onComponent as onMouseComponent } from '../state/mouse'
 import { getVariantStyle } from '../state/theme'
 import { getActiveScope } from './scope'
-import { getAoSArrays, getAoSBuffer } from '../bridge'
+import { getArrays, getBuffer } from '../bridge'
 import {
   packColor,
-  setNodeText,
-  H_TEXT_POOL_WRITE_PTR,
-  TEXT_POOL_SIZE,
-  HEADER_SIZE,
-  MAX_NODES,
-  STRIDE,
-  U_TEXT_OFFSET,
-  U_TEXT_LENGTH,
-  U_DIRTY_FLAGS,
+  setText,
+  getTextPoolWritePtr,
   DIRTY_TEXT,
-  type AoSBuffer,
-} from '../bridge/shared-buffer-aos'
-import type { TextProps, Cleanup } from './types'
+  markDirty,
+  type SharedBuffer,
+} from '../bridge/shared-buffer'
+import type { TextProps, Cleanup, GridLine } from './types'
 
 // =============================================================================
-// CONVERSION HELPERS — same pattern as box.ts
+// CONVERSION HELPERS
 // =============================================================================
 
-/** Dimension → Taffy float: NaN = auto, negative = percentage, positive = pixels
- *  Rust convention: -100.0 = 100%, -50.0 = 50%, 40.0 = 40px
- */
+/** Dimension → Taffy float: NaN = auto, negative = percentage, positive = pixels */
 function toDim(dim: number | string | undefined | null): number {
   if (dim === undefined || dim === null || dim === 0) return NaN
   if (typeof dim === 'string') {
@@ -103,7 +99,6 @@ function numInput(prop: unknown, defaultVal = 0): number | (() => number) | { re
   return prop as any
 }
 
-// Boolean → number: converts boolean props (like visible) to 0/1
 function boolInput(prop: unknown, defaultVal = 1): number | (() => number) {
   if (prop === undefined) return defaultVal
   if (typeof prop === 'boolean') return prop ? 1 : 0
@@ -122,13 +117,13 @@ function alignSelfToNum(a: string | undefined): number {
     case 'flex-start': return 1
     case 'flex-end': return 2
     case 'center': return 3
-    case 'stretch': return 4
-    case 'baseline': return 5
+    case 'baseline': return 4
+    case 'stretch': return 5
     default: return 0 // auto
   }
 }
 
-function alignToNum(align: string | undefined): number {
+function textAlignToNum(align: string | undefined): number {
   switch (align) {
     case 'center': return 1
     case 'right': return 2
@@ -136,7 +131,7 @@ function alignToNum(align: string | undefined): number {
   }
 }
 
-function wrapToNum(wrap: string | undefined): number {
+function textWrapToNum(wrap: string | undefined): number {
   switch (wrap) {
     case 'nowrap': return 0
     case 'truncate': return 2
@@ -144,50 +139,48 @@ function wrapToNum(wrap: string | undefined): number {
   }
 }
 
-// =============================================================================
-// TEXT POOL WRITER — encodes UTF-8, writes to pool, returns offset
-// =============================================================================
+function justifySelfToNum(j: string | undefined): number {
+  switch (j) {
+    case 'start': return 1
+    case 'end': return 2
+    case 'center': return 3
+    case 'stretch': return 4
+    default: return 0 // auto
+  }
+}
 
-const textEncoder = new TextEncoder()
+/** Parse grid line position to i16 value */
+function parseGridLine(line: GridLine | undefined): number {
+  if (line === undefined || line === 'auto') return 0
+  if (typeof line === 'number') return line
+  if (typeof line === 'string' && line.startsWith('span ')) {
+    return -parseInt(line.slice(5), 10) // negative = span
+  }
+  return 0
+}
+
+// =============================================================================
+// TEXT POOL WRITER
+// =============================================================================
 
 /**
- * Write text bytes to the AoS text pool. Returns the byte offset.
- * Sets textLength via direct write. Returns offset for repeater.
+ * Write text to the text pool via setText() helper.
+ * Returns the text offset for the repeater (same value setText writes).
  */
-function writeTextToPoolAoS(
-  buf: AoSBuffer,
-  index: number,
-  text: string
-): number {
-  const encoded = textEncoder.encode(text)
-  let writePtr = buf.header[H_TEXT_POOL_WRITE_PTR / 4]
+function writeTextToPool(buf: SharedBuffer, index: number, text: string): number {
+  // Get writePtr BEFORE setText (this is where the text will be written)
+  const writePtr = getTextPoolWritePtr(buf)
 
-  // Check capacity
-  if (writePtr + encoded.length > buf.textPoolSize) {
-    const sizeMB = (buf.textPoolSize / 1024 / 1024).toFixed(0)
+  const success = setText(buf, index, text)
+  if (!success) {
     throw new Error(
-      `Text pool overflow: pool is ${buf.textPoolSize} bytes (${sizeMB}MB), writePtr is at ${writePtr}, ` +
-      `trying to write ${encoded.length} bytes. This usually means text content is being ` +
-      `appended without reusing slots. Consider: 1) Reusing text slots for dynamic content, ` +
-      `2) Implementing text compaction, or 3) Increasing textPoolSize in createAoSBuffer({ textPoolSize: ... }).`
+      `Text pool overflow when writing to node ${index}. ` +
+      `Consider: 1) Reusing text slots for dynamic content, ` +
+      `2) Implementing text compaction, or 3) Increasing textPoolSize.`
     )
   }
 
-  // Write to pool
-  buf.textPool.set(encoded, writePtr)
-
-  // Set offset and length in AoS node
-  const base = HEADER_SIZE + index * STRIDE
-  buf.view.setUint32(base + U_TEXT_OFFSET, writePtr, true)
-  buf.view.setUint32(base + U_TEXT_LENGTH, encoded.length, true)
-
-  // Mark dirty so layout recalculates text measurement
-  const current = buf.view.getUint8(base + U_DIRTY_FLAGS)
-  buf.view.setUint8(base + U_DIRTY_FLAGS, current | DIRTY_TEXT)
-
-  // Advance write pointer
-  buf.header[H_TEXT_POOL_WRITE_PTR / 4] = writePtr + encoded.length
-
+  // Return the actual offset - repeat() will write this same value
   return writePtr
 }
 
@@ -196,10 +189,11 @@ function writeTextToPoolAoS(
 // =============================================================================
 
 export function text(props: TextProps): Cleanup {
-  const arrays = getAoSArrays()
-  const buffer = getAoSBuffer()
+  const buf = getBuffer()
+  const arrays = getArrays()
   const index = allocateIndex(props.id)
   const disposals: (() => void)[] = []
+  const parentIdx = getCurrentParentIndex()
 
   pushCurrentComponent(index)
 
@@ -207,7 +201,10 @@ export function text(props: TextProps): Cleanup {
   // CORE
   // --------------------------------------------------------------------------
   arrays.componentType.set(index, ComponentType.TEXT)
-  disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
+
+  // Set parent index and register in O(1) linked list
+  arrays.parentIndex.set(index, parentIdx)
+  registerParent(index, parentIdx)
 
   // Visibility (default: visible)
   disposals.push(repeat(boolInput(props.visible, 1), arrays.visible, index))
@@ -217,29 +214,29 @@ export function text(props: TextProps): Cleanup {
   // --------------------------------------------------------------------------
   if (isReactive(props.content)) {
     disposals.push(repeat(
-      () => writeTextToPoolAoS(buffer, index, String(unwrap(props.content))),
+      () => writeTextToPool(buf, index, String(unwrap(props.content))),
       arrays.textOffset,
       index
     ))
   } else {
     // Static text — write once, no repeater needed
-    setNodeText(buffer, index, String(props.content))
+    setText(buf, index, String(props.content))
   }
 
   // --------------------------------------------------------------------------
-  // LAYOUT — dimensions, flex item (Rust measures text for auto-sizing)
+  // LAYOUT — dimensions, flex item
   // --------------------------------------------------------------------------
-  if (props.width !== undefined)     disposals.push(repeat(dimInput(props.width), arrays.width, index))
-  if (props.height !== undefined)    disposals.push(repeat(dimInput(props.height), arrays.height, index))
-  if (props.minWidth !== undefined)  disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
-  if (props.maxWidth !== undefined)  disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
+  if (props.width !== undefined) disposals.push(repeat(dimInput(props.width), arrays.width, index))
+  if (props.height !== undefined) disposals.push(repeat(dimInput(props.height), arrays.height, index))
+  if (props.minWidth !== undefined) disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
+  if (props.maxWidth !== undefined) disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
   if (props.minHeight !== undefined) disposals.push(repeat(dimInput(props.minHeight), arrays.minHeight, index))
   if (props.maxHeight !== undefined) disposals.push(repeat(dimInput(props.maxHeight), arrays.maxHeight, index))
 
   // Flex item
-  if (props.grow !== undefined)      disposals.push(repeat(numInput(props.grow), arrays.grow, index))
-  if (props.shrink !== undefined)    disposals.push(repeat(numInput(props.shrink), arrays.shrink, index))
-  if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.basis, index))
+  if (props.grow !== undefined) disposals.push(repeat(numInput(props.grow), arrays.flexGrow, index))
+  if (props.shrink !== undefined) disposals.push(repeat(numInput(props.shrink), arrays.flexShrink, index))
+  if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.flexBasis, index))
   if (props.alignSelf !== undefined) disposals.push(repeat(enumInput(props.alignSelf, alignSelfToNum), arrays.alignSelf, index))
 
   // Padding
@@ -249,15 +246,71 @@ export function text(props: TextProps): Cleanup {
     disposals.push(repeat(numInput(props.paddingBottom ?? props.padding), arrays.paddingBottom, index))
     disposals.push(repeat(numInput(props.paddingLeft ?? props.padding), arrays.paddingLeft, index))
   } else {
-    if (props.paddingTop !== undefined)    disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
-    if (props.paddingRight !== undefined)  disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
+    if (props.paddingTop !== undefined) disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
+    if (props.paddingRight !== undefined) disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
     if (props.paddingBottom !== undefined) disposals.push(repeat(numInput(props.paddingBottom), arrays.paddingBottom, index))
-    if (props.paddingLeft !== undefined)   disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
+    if (props.paddingLeft !== undefined) disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
   }
 
+  // Margin
+  if (props.margin !== undefined) {
+    disposals.push(repeat(numInput(props.marginTop ?? props.margin), arrays.marginTop, index))
+    disposals.push(repeat(numInput(props.marginRight ?? props.margin), arrays.marginRight, index))
+    disposals.push(repeat(numInput(props.marginBottom ?? props.margin), arrays.marginBottom, index))
+    disposals.push(repeat(numInput(props.marginLeft ?? props.margin), arrays.marginLeft, index))
+  } else {
+    if (props.marginTop !== undefined) disposals.push(repeat(numInput(props.marginTop), arrays.marginTop, index))
+    if (props.marginRight !== undefined) disposals.push(repeat(numInput(props.marginRight), arrays.marginRight, index))
+    if (props.marginBottom !== undefined) disposals.push(repeat(numInput(props.marginBottom), arrays.marginBottom, index))
+    if (props.marginLeft !== undefined) disposals.push(repeat(numInput(props.marginLeft), arrays.marginLeft, index))
+  }
+
+  // Gap
+  if (props.gap !== undefined) disposals.push(repeat(numInput(props.gap), arrays.gap, index))
+  if (props.rowGap !== undefined) disposals.push(repeat(numInput(props.rowGap), arrays.rowGap, index))
+  if (props.columnGap !== undefined) disposals.push(repeat(numInput(props.columnGap), arrays.columnGap, index))
+
+  // Z-index
+  if (props.zIndex !== undefined) disposals.push(repeat(numInput(props.zIndex), arrays.zIndex, index))
+
   // Text styling
-  if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, alignToNum), arrays.textAlign, index))
-  if (props.wrap !== undefined)  disposals.push(repeat(enumInput(props.wrap, wrapToNum), arrays.textWrap, index))
+  if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, textAlignToNum), arrays.textAlign, index))
+  if (props.wrap !== undefined) disposals.push(repeat(enumInput(props.wrap, textWrapToNum), arrays.textWrap, index))
+
+  // --------------------------------------------------------------------------
+  // GRID ITEM PROPERTIES
+  // --------------------------------------------------------------------------
+  if (props.gridColumnStart !== undefined) {
+    if (isReactive(props.gridColumnStart)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridColumnStart)), arrays.gridColumnStart, index))
+    } else {
+      arrays.gridColumnStart.set(index, parseGridLine(props.gridColumnStart as GridLine))
+    }
+  }
+  if (props.gridColumnEnd !== undefined) {
+    if (isReactive(props.gridColumnEnd)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridColumnEnd)), arrays.gridColumnEnd, index))
+    } else {
+      arrays.gridColumnEnd.set(index, parseGridLine(props.gridColumnEnd as GridLine))
+    }
+  }
+  if (props.gridRowStart !== undefined) {
+    if (isReactive(props.gridRowStart)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridRowStart)), arrays.gridRowStart, index))
+    } else {
+      arrays.gridRowStart.set(index, parseGridLine(props.gridRowStart as GridLine))
+    }
+  }
+  if (props.gridRowEnd !== undefined) {
+    if (isReactive(props.gridRowEnd)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridRowEnd)), arrays.gridRowEnd, index))
+    } else {
+      arrays.gridRowEnd.set(index, parseGridLine(props.gridRowEnd as GridLine))
+    }
+  }
+  if (props.justifySelf !== undefined) {
+    disposals.push(repeat(enumInput(props.justifySelf, justifySelfToNum), arrays.justifySelf, index))
+  }
 
   // --------------------------------------------------------------------------
   // VISUAL — colors with variant support

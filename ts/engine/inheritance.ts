@@ -7,8 +7,8 @@
 
 import type { RGBA } from '../types'
 import { TERMINAL_DEFAULT } from '../types/color'
-import { getAoSArrays, isInitialized } from '../bridge'
-import { unpackColor } from '../bridge/shared-buffer-aos'
+import { getArrays, isInitialized } from '../bridge'
+import { unpackColor } from '../bridge/shared-buffer'
 
 /**
  * Get inherited foreground color by walking up the parent tree.
@@ -17,7 +17,7 @@ import { unpackColor } from '../bridge/shared-buffer-aos'
 export function getInheritedFg(index: number): RGBA {
   if (!isInitialized()) return TERMINAL_DEFAULT
 
-  const arrays = getAoSArrays()
+  const arrays = getArrays()
   let current: number = index
 
   while (current >= 0) {
@@ -38,7 +38,7 @@ export function getInheritedFg(index: number): RGBA {
 export function getInheritedBg(index: number): RGBA {
   if (!isInitialized()) return TERMINAL_DEFAULT
 
-  const arrays = getAoSArrays()
+  const arrays = getArrays()
   let current: number = index
 
   while (current >= 0) {
@@ -55,12 +55,11 @@ export function getInheritedBg(index: number): RGBA {
 /**
  * Get inherited border color.
  * Falls back to unified border color, then foreground color.
- * Note: Per-side border colors not yet in AoS layout.
  */
 export function getInheritedBorderColor(index: number, _side: 'top' | 'right' | 'bottom' | 'left'): RGBA {
   if (!isInitialized()) return TERMINAL_DEFAULT
 
-  const arrays = getAoSArrays()
+  const arrays = getArrays()
 
   // Try unified border color
   const borderPacked = arrays.borderColor.get(index)
@@ -85,16 +84,22 @@ export function getBorderColors(index: number): {
     return { top: fg, right: fg, bottom: fg, left: fg }
   }
 
-  const arrays = getAoSArrays()
-  const borderPacked = arrays.borderColor.get(index)
-  const fallback = borderPacked !== 0 ? unpackColor(borderPacked) : fg
+  const arrays = getArrays()
 
-  // Note: Per-side border colors not yet in AoS layout, use unified
+  // Check per-side colors first, fall back to unified
+  const unifiedPacked = arrays.borderColor.get(index)
+  const unified = unifiedPacked !== 0 ? unpackColor(unifiedPacked) : fg
+
+  const topPacked = arrays.borderTopColor.get(index)
+  const rightPacked = arrays.borderRightColor.get(index)
+  const bottomPacked = arrays.borderBottomColor.get(index)
+  const leftPacked = arrays.borderLeftColor.get(index)
+
   return {
-    top: fallback,
-    right: fallback,
-    bottom: fallback,
-    left: fallback,
+    top: topPacked !== 0 ? unpackColor(topPacked) : unified,
+    right: rightPacked !== 0 ? unpackColor(rightPacked) : unified,
+    bottom: bottomPacked !== 0 ? unpackColor(bottomPacked) : unified,
+    left: leftPacked !== 0 ? unpackColor(leftPacked) : unified,
   }
 }
 
@@ -112,13 +117,13 @@ export function getBorderStyles(index: number): {
     return { top: 0, right: 0, bottom: 0, left: 0 }
   }
 
-  const arrays = getAoSArrays()
+  const arrays = getArrays()
 
   return {
-    top: arrays.borderTopWidth.get(index),
-    right: arrays.borderRightWidth.get(index),
-    bottom: arrays.borderBottomWidth.get(index),
-    left: arrays.borderLeftWidth.get(index),
+    top: arrays.borderWidthTop.get(index),
+    right: arrays.borderWidthRight.get(index),
+    bottom: arrays.borderWidthBottom.get(index),
+    left: arrays.borderWidthLeft.get(index),
   }
 }
 
@@ -136,15 +141,15 @@ export function hasBorder(index: number): boolean {
 export function getEffectiveOpacity(index: number): number {
   if (!isInitialized()) return 1
 
-  const arrays = getAoSArrays()
+  const arrays = getArrays()
   let opacity = 1
   let current: number = index
 
   while (current >= 0) {
     const nodeOpacity = arrays.opacity.get(current)
-    if (nodeOpacity !== 0 && nodeOpacity !== 255) {
-      // opacity is stored as u8 (0-255), convert to 0-1
-      opacity *= nodeOpacity / 255
+    // opacity is stored as f32 (0.0-1.0), default is 1.0
+    if (nodeOpacity > 0 && nodeOpacity < 1) {
+      opacity *= nodeOpacity
     }
     current = arrays.parentIndex.get(current)
   }

@@ -1,8 +1,8 @@
 /**
- * TUI Framework - Input Primitive (AoS)
+ * TUI Framework - Input Primitive (v3 Buffer)
  *
  * Single-line text input with full reactivity.
- * Uses AoS SharedBuffer for cache-friendly Rust reads.
+ * Uses v3 SharedBuffer (1024-byte stride) with Grid support.
  *
  * Features:
  * - Two-way value binding via slot arrays
@@ -12,9 +12,6 @@
  * - Placeholder text
  * - Theme variants
  * - Cursor configuration (style, blink, color)
- *
- * REACTIVITY: Props are passed directly to repeat() which preserves reactive links.
- * repeat() handles signals, getters, deriveds, and static values natively.
  *
  * Usage:
  * ```ts
@@ -30,7 +27,12 @@
 import { signal, repeat } from '@rlabs-inc/signals'
 import { ComponentType } from '../types'
 import type { RGBA } from '../types'
-import { allocateIndex, releaseIndex, getCurrentParentIndex } from '../engine/registry'
+import {
+  allocateIndex,
+  releaseIndex,
+  getCurrentParentIndex,
+  registerParent,
+} from '../engine/registry'
 import {
   pushCurrentComponent,
   popCurrentComponent,
@@ -44,81 +46,78 @@ import { getVariantStyle, t } from '../state/theme'
 import { focus as focusComponent, registerFocusCallbacks } from '../state/focus'
 import { getActiveScope } from './scope'
 import { pulse } from './animation'
-import { getAoSArrays, getAoSBuffer } from '../bridge'
+import { getArrays, getBuffer } from '../bridge'
 import {
   packColor,
-  setNodeText,
-  HEADER_SIZE,
-  STRIDE,
-  H_TEXT_POOL_WRITE_PTR,
-  U_TEXT_OFFSET,
-  U_TEXT_LENGTH,
-  U_CURSOR_FLAGS,
-  U_CURSOR_STYLE,
-  U_CURSOR_FPS,
-  U_CURSOR_CHAR,
-  U_MAX_LENGTH,
-  C_CURSOR_FG,
-  C_CURSOR_BG,
+  setText,
+  setU8,
+  setU32,
   FLAG_FOCUSABLE,
-  type AoSBuffer,
-} from '../bridge/shared-buffer-aos'
-import type { InputProps, Cleanup, BlinkConfig } from './types'
+  N_CURSOR_FLAGS,
+  N_CURSOR_STYLE,
+  N_CURSOR_BLINK_RATE,
+  N_CURSOR_CHAR,
+  N_MAX_LENGTH,
+  N_CURSOR_FG_COLOR,
+  N_CURSOR_BG_COLOR,
+  type SharedBuffer,
+} from '../bridge/shared-buffer'
+import type { InputProps, Cleanup, BlinkConfig, GridLine } from './types'
 
 // =============================================================================
-// CONVERSION HELPERS — same pattern as box.ts
+// CONVERSION HELPERS
 // =============================================================================
 
-/** Dimension → Taffy float: NaN = auto, 0-1 = percentage, >1 = absolute */
+/** Dimension → Taffy float: NaN = auto, negative = percentage, positive = pixels */
 function toDim(dim: number | string | undefined | null): number {
   if (dim === undefined || dim === null || dim === 0) return NaN
   if (typeof dim === 'string') {
-    if (dim.endsWith('%')) return parseFloat(dim) / 100
+    if (dim.endsWith('%')) return -parseFloat(dim) // '100%' → -100.0
     return parseFloat(dim) || NaN
   }
   return dim
 }
 
-/** Unwrap any prop shape to its current value */
 function unwrap<T>(prop: T | (() => T) | { readonly value: T }): T {
   if (typeof prop === 'function') return (prop as () => T)()
   if (prop !== null && typeof prop === 'object' && 'value' in prop) return (prop as { value: T }).value
   return prop
 }
 
-/** Is this prop reactive (not a static value)? */
 function isReactive(prop: unknown): boolean {
   return typeof prop === 'function' || (prop !== null && typeof prop === 'object' && 'value' in (prop as any))
 }
 
-/** Pack RGBA or number to u32 */
 function toPackedColor(c: RGBA | number | null | undefined): number {
   if (c === null || c === undefined) return 0
   if (typeof c === 'number') return c
   return packColor(c.r, c.g, c.b, c.a ?? 255)
 }
 
-// Dimension: wrap prop for repeat() — returns number (static) or () => number (reactive)
 function dimInput(prop: InputProps['width']): number | (() => number) {
   if (prop === undefined) return NaN
   if (typeof prop === 'number' || typeof prop === 'string') return toDim(prop)
   return () => toDim(unwrap(prop))
 }
 
-// Color: wrap prop for repeat()
+function enumInput(prop: unknown, converter: (v: any) => number): number | (() => number) {
+  if (prop === undefined) return converter(undefined)
+  if (typeof prop === 'string') return converter(prop)
+  if (isReactive(prop)) return () => converter(unwrap(prop))
+  return converter(prop as string)
+}
+
 function colorInput(prop: InputProps['fg']): number | (() => number) {
   if (prop === undefined) return 0
   if (!isReactive(prop)) return toPackedColor(prop as RGBA | number | null)
   return () => toPackedColor(unwrap(prop as any))
 }
 
-// Numeric: wrap prop for repeat() — pass-through, repeat() handles natively
 function numInput(prop: unknown, defaultVal = 0): number | (() => number) | { readonly value: number } {
   if (prop === undefined) return defaultVal
-  return prop as any // repeat() handles number | signal | getter natively
+  return prop as any
 }
 
-// Boolean → number: converts boolean props (like visible) to 0/1
 function boolInput(prop: unknown, defaultVal = 1): number | (() => number) {
   if (prop === undefined) return defaultVal
   if (typeof prop === 'boolean') return prop ? 1 : 0
@@ -128,58 +127,55 @@ function boolInput(prop: unknown, defaultVal = 1): number | (() => number) {
 }
 
 // =============================================================================
-// DIRECT BUFFER WRITES (for cursor fields not in reactive arrays)
+// ENUM CONVERSIONS
 // =============================================================================
 
-function setU8Direct(buf: AoSBuffer, nodeIndex: number, field: number, value: number): void {
-  buf.view.setUint8(HEADER_SIZE + nodeIndex * STRIDE + field, value)
-}
-
-function setU32Direct(buf: AoSBuffer, nodeIndex: number, field: number, value: number): void {
-  buf.view.setUint32(HEADER_SIZE + nodeIndex * STRIDE + field, value, true)
-}
-
-// =============================================================================
-// TEXT POOL WRITER — encodes UTF-8, writes to pool, returns offset
-// =============================================================================
-
-const textEncoder = new TextEncoder()
-
-/**
- * Write text bytes to the AoS text pool. Returns the byte offset.
- * Sets textLength via direct write. Returns offset for repeater.
- */
-function writeTextToPoolAoS(
-  buf: AoSBuffer,
-  index: number,
-  text: string
-): number {
-  const encoded = textEncoder.encode(text)
-  let writePtr = buf.header[H_TEXT_POOL_WRITE_PTR / 4]
-
-  // Check capacity
-  if (writePtr + encoded.length > buf.textPoolSize) {
-    const sizeMB = (buf.textPoolSize / 1024 / 1024).toFixed(0)
-    throw new Error(
-      `Text pool overflow: pool is ${buf.textPoolSize} bytes (${sizeMB}MB), writePtr is at ${writePtr}, ` +
-      `trying to write ${encoded.length} bytes. This usually means text content is being ` +
-      `appended without reusing slots. Consider: 1) Reusing text slots for dynamic content, ` +
-      `2) Implementing text compaction, or 3) Increasing textPoolSize in createAoSBuffer({ textPoolSize: ... }).`
-    )
+function alignSelfToNum(a: string | undefined): number {
+  switch (a) {
+    case 'auto': return 0
+    case 'flex-start': return 1
+    case 'flex-end': return 2
+    case 'center': return 3
+    case 'baseline': return 4
+    case 'stretch': return 5
+    default: return 0 // auto
   }
+}
 
-  // Write to pool
-  buf.textPool.set(encoded, writePtr)
+function textAlignToNum(align: string | undefined): number {
+  switch (align) {
+    case 'center': return 1
+    case 'right': return 2
+    default: return 0 // left
+  }
+}
 
-  // Set offset and length in AoS node
-  const base = HEADER_SIZE + index * STRIDE
-  buf.view.setUint32(base + U_TEXT_OFFSET, writePtr, true)
-  buf.view.setUint32(base + U_TEXT_LENGTH, encoded.length, true)
+function cursorStyleToNum(style: string | undefined): number {
+  switch (style) {
+    case 'bar': return 1
+    case 'underline': return 2
+    default: return 0 // block
+  }
+}
 
-  // Advance write pointer
-  buf.header[H_TEXT_POOL_WRITE_PTR / 4] = writePtr + encoded.length
+function justifySelfToNum(j: string | undefined): number {
+  switch (j) {
+    case 'start': return 1
+    case 'end': return 2
+    case 'center': return 3
+    case 'stretch': return 4
+    default: return 0 // auto
+  }
+}
 
-  return writePtr
+/** Parse grid line position to i16 value */
+function parseGridLine(line: GridLine | undefined): number {
+  if (line === undefined || line === 'auto') return 0
+  if (typeof line === 'number') return line
+  if (typeof line === 'string' && line.startsWith('span ')) {
+    return -parseInt(line.slice(5), 10) // negative = span
+  }
+  return 0
 }
 
 // =============================================================================
@@ -188,7 +184,6 @@ function writeTextToPoolAoS(
 
 /** Convert keycode to character string if printable */
 function keycodeToChar(keycode: number): string | null {
-  // Single byte printable characters
   if (keycode >= 32 && keycode <= 126) {
     return String.fromCharCode(keycode)
   }
@@ -217,59 +212,31 @@ function getSpecialKeyName(keycode: number): string | null {
 }
 
 // =============================================================================
-// CURSOR STYLE CONVERSION
+// TEXT POOL WRITER
 // =============================================================================
 
-function alignSelfToNum(a: string | undefined): number {
-  switch (a) {
-    case 'auto': return 0
-    case 'flex-start': return 1
-    case 'flex-end': return 2
-    case 'center': return 3
-    case 'stretch': return 4
-    case 'baseline': return 5
-    default: return 0 // auto
+function writeTextToPool(buf: SharedBuffer, index: number, text: string): number {
+  const success = setText(buf, index, text)
+  if (!success) {
+    throw new Error(
+      `Text pool overflow when writing to node ${index}. ` +
+      `Consider: 1) Reusing text slots, 2) Text compaction, or 3) Larger textPoolSize.`
+    )
   }
-}
-
-function alignToNum(align: string | undefined): number {
-  switch (align) {
-    case 'center': return 1
-    case 'right': return 2
-    default: return 0 // left
-  }
-}
-
-function cursorStyleToNum(style: string | undefined): number {
-  switch (style) {
-    case 'bar': return 1
-    case 'underline': return 2
-    default: return 0 // block
-  }
+  return 1
 }
 
 // =============================================================================
 // INPUT COMPONENT
 // =============================================================================
 
-/**
- * Create a single-line text input component.
- *
- * Pass a WritableSignal or Binding for two-way value binding.
- * The component handles keyboard input when focused.
- *
- * Supports theme variants for consistent styling:
- * - Core: default, primary, secondary, tertiary, accent
- * - Status: success, warning, error, info
- * - Surface: muted, surface, elevated, ghost, outline
- */
 export function input(props: InputProps): Cleanup {
-  const arrays = getAoSArrays()
-  const buffer = getAoSBuffer()
+  const buf = getBuffer()
+  const arrays = getArrays()
   const index = allocateIndex(props.id)
   const disposals: (() => void)[] = []
+  const parentIdx = getCurrentParentIndex()
 
-  // Track current component for lifecycle hooks
   pushCurrentComponent(index)
 
   // ==========================================================================
@@ -287,11 +254,14 @@ export function input(props: InputProps): Cleanup {
   const maskChar = props.maskChar ?? '•'
 
   // ==========================================================================
-  // CORE — static writes
+  // CORE
   // ==========================================================================
 
   arrays.componentType.set(index, ComponentType.INPUT)
-  disposals.push(repeat(getCurrentParentIndex(), arrays.parentIndex, index))
+
+  // Set parent index and register in O(1) linked list
+  arrays.parentIndex.set(index, parentIdx)
+  registerParent(index, parentIdx)
 
   // Visibility (default: visible)
   disposals.push(repeat(boolInput(props.visible, 1), arrays.visible, index))
@@ -300,21 +270,21 @@ export function input(props: InputProps): Cleanup {
   // LAYOUT — dimensions
   // ==========================================================================
 
-  if (props.width !== undefined)     disposals.push(repeat(dimInput(props.width), arrays.width, index))
-  if (props.height !== undefined)    disposals.push(repeat(dimInput(props.height), arrays.height, index))
-  if (props.minWidth !== undefined)  disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
-  if (props.maxWidth !== undefined)  disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
+  if (props.width !== undefined) disposals.push(repeat(dimInput(props.width), arrays.width, index))
+  if (props.height !== undefined) disposals.push(repeat(dimInput(props.height), arrays.height, index))
+  if (props.minWidth !== undefined) disposals.push(repeat(dimInput(props.minWidth), arrays.minWidth, index))
+  if (props.maxWidth !== undefined) disposals.push(repeat(dimInput(props.maxWidth), arrays.maxWidth, index))
   if (props.minHeight !== undefined) disposals.push(repeat(dimInput(props.minHeight), arrays.minHeight, index))
   if (props.maxHeight !== undefined) disposals.push(repeat(dimInput(props.maxHeight), arrays.maxHeight, index))
 
   // Flex item
-  if (props.grow !== undefined)      disposals.push(repeat(numInput(props.grow), arrays.grow, index))
-  if (props.shrink !== undefined)    disposals.push(repeat(numInput(props.shrink), arrays.shrink, index))
-  if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.basis, index))
+  if (props.grow !== undefined) disposals.push(repeat(numInput(props.grow), arrays.flexGrow, index))
+  if (props.shrink !== undefined) disposals.push(repeat(numInput(props.shrink), arrays.flexShrink, index))
+  if (props.flexBasis !== undefined) disposals.push(repeat(dimInput(props.flexBasis), arrays.flexBasis, index))
   if (props.alignSelf !== undefined) disposals.push(repeat(enumInput(props.alignSelf, alignSelfToNum), arrays.alignSelf, index))
 
   // Text alignment
-  if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, alignToNum), arrays.textAlign, index))
+  if (props.align !== undefined) disposals.push(repeat(enumInput(props.align, textAlignToNum), arrays.textAlign, index))
 
   // Padding
   if (props.padding !== undefined) {
@@ -323,10 +293,10 @@ export function input(props: InputProps): Cleanup {
     disposals.push(repeat(numInput(props.paddingBottom ?? props.padding), arrays.paddingBottom, index))
     disposals.push(repeat(numInput(props.paddingLeft ?? props.padding), arrays.paddingLeft, index))
   } else {
-    if (props.paddingTop !== undefined)    disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
-    if (props.paddingRight !== undefined)  disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
+    if (props.paddingTop !== undefined) disposals.push(repeat(numInput(props.paddingTop), arrays.paddingTop, index))
+    if (props.paddingRight !== undefined) disposals.push(repeat(numInput(props.paddingRight), arrays.paddingRight, index))
     if (props.paddingBottom !== undefined) disposals.push(repeat(numInput(props.paddingBottom), arrays.paddingBottom, index))
-    if (props.paddingLeft !== undefined)   disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
+    if (props.paddingLeft !== undefined) disposals.push(repeat(numInput(props.paddingLeft), arrays.paddingLeft, index))
   }
 
   // Margin
@@ -336,35 +306,78 @@ export function input(props: InputProps): Cleanup {
     disposals.push(repeat(numInput(props.marginBottom ?? props.margin), arrays.marginBottom, index))
     disposals.push(repeat(numInput(props.marginLeft ?? props.margin), arrays.marginLeft, index))
   } else {
-    if (props.marginTop !== undefined)    disposals.push(repeat(numInput(props.marginTop), arrays.marginTop, index))
-    if (props.marginRight !== undefined)  disposals.push(repeat(numInput(props.marginRight), arrays.marginRight, index))
+    if (props.marginTop !== undefined) disposals.push(repeat(numInput(props.marginTop), arrays.marginTop, index))
+    if (props.marginRight !== undefined) disposals.push(repeat(numInput(props.marginRight), arrays.marginRight, index))
     if (props.marginBottom !== undefined) disposals.push(repeat(numInput(props.marginBottom), arrays.marginBottom, index))
-    if (props.marginLeft !== undefined)   disposals.push(repeat(numInput(props.marginLeft), arrays.marginLeft, index))
+    if (props.marginLeft !== undefined) disposals.push(repeat(numInput(props.marginLeft), arrays.marginLeft, index))
   }
+
+  // Gap
+  if (props.gap !== undefined) disposals.push(repeat(numInput(props.gap), arrays.gap, index))
+  if (props.rowGap !== undefined) disposals.push(repeat(numInput(props.rowGap), arrays.rowGap, index))
+  if (props.columnGap !== undefined) disposals.push(repeat(numInput(props.columnGap), arrays.columnGap, index))
+
+  // Z-index
+  if (props.zIndex !== undefined) disposals.push(repeat(numInput(props.zIndex), arrays.zIndex, index))
 
   // Border widths (layout spacing: 0 or 1)
   if (props.border !== undefined) {
     const bw = isReactive(props.border) ? (() => unwrap(props.border!) > 0 ? 1 : 0) : (unwrap(props.border) > 0 ? 1 : 0)
-    disposals.push(repeat(bw, arrays.borderTopWidth, index))
-    disposals.push(repeat(bw, arrays.borderRightWidth, index))
-    disposals.push(repeat(bw, arrays.borderBottomWidth, index))
-    disposals.push(repeat(bw, arrays.borderLeftWidth, index))
+    disposals.push(repeat(bw, arrays.borderWidthTop, index))
+    disposals.push(repeat(bw, arrays.borderWidthRight, index))
+    disposals.push(repeat(bw, arrays.borderWidthBottom, index))
+    disposals.push(repeat(bw, arrays.borderWidthLeft, index))
   }
   if (props.borderTop !== undefined) {
     const bw = isReactive(props.borderTop) ? (() => unwrap(props.borderTop!) > 0 ? 1 : 0) : (unwrap(props.borderTop) > 0 ? 1 : 0)
-    disposals.push(repeat(bw, arrays.borderTopWidth, index))
+    disposals.push(repeat(bw, arrays.borderWidthTop, index))
   }
   if (props.borderRight !== undefined) {
     const bw = isReactive(props.borderRight) ? (() => unwrap(props.borderRight!) > 0 ? 1 : 0) : (unwrap(props.borderRight) > 0 ? 1 : 0)
-    disposals.push(repeat(bw, arrays.borderRightWidth, index))
+    disposals.push(repeat(bw, arrays.borderWidthRight, index))
   }
   if (props.borderBottom !== undefined) {
     const bw = isReactive(props.borderBottom) ? (() => unwrap(props.borderBottom!) > 0 ? 1 : 0) : (unwrap(props.borderBottom) > 0 ? 1 : 0)
-    disposals.push(repeat(bw, arrays.borderBottomWidth, index))
+    disposals.push(repeat(bw, arrays.borderWidthBottom, index))
   }
   if (props.borderLeft !== undefined) {
     const bw = isReactive(props.borderLeft) ? (() => unwrap(props.borderLeft!) > 0 ? 1 : 0) : (unwrap(props.borderLeft) > 0 ? 1 : 0)
-    disposals.push(repeat(bw, arrays.borderLeftWidth, index))
+    disposals.push(repeat(bw, arrays.borderWidthLeft, index))
+  }
+
+  // ==========================================================================
+  // GRID ITEM PROPERTIES
+  // ==========================================================================
+  if (props.gridColumnStart !== undefined) {
+    if (isReactive(props.gridColumnStart)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridColumnStart)), arrays.gridColumnStart, index))
+    } else {
+      arrays.gridColumnStart.set(index, parseGridLine(props.gridColumnStart as GridLine))
+    }
+  }
+  if (props.gridColumnEnd !== undefined) {
+    if (isReactive(props.gridColumnEnd)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridColumnEnd)), arrays.gridColumnEnd, index))
+    } else {
+      arrays.gridColumnEnd.set(index, parseGridLine(props.gridColumnEnd as GridLine))
+    }
+  }
+  if (props.gridRowStart !== undefined) {
+    if (isReactive(props.gridRowStart)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridRowStart)), arrays.gridRowStart, index))
+    } else {
+      arrays.gridRowStart.set(index, parseGridLine(props.gridRowStart as GridLine))
+    }
+  }
+  if (props.gridRowEnd !== undefined) {
+    if (isReactive(props.gridRowEnd)) {
+      disposals.push(repeat(() => parseGridLine(unwrap(props.gridRowEnd)), arrays.gridRowEnd, index))
+    } else {
+      arrays.gridRowEnd.set(index, parseGridLine(props.gridRowEnd as GridLine))
+    }
+  }
+  if (props.justifySelf !== undefined) {
+    disposals.push(repeat(enumInput(props.justifySelf, justifySelfToNum), arrays.justifySelf, index))
   }
 
   // ==========================================================================
@@ -381,7 +394,7 @@ export function input(props: InputProps): Cleanup {
 
   // Text content is reactive since getValue() reads from a signal
   disposals.push(repeat(
-    () => writeTextToPoolAoS(buffer, index, getDisplayText()),
+    () => writeTextToPool(buf, index, getDisplayText()),
     arrays.textOffset,
     index
   ))
@@ -408,42 +421,37 @@ export function input(props: InputProps): Cleanup {
   if (blinkEnabled) {
     const blinkSignal = pulse({ fps: blinkFps })
     disposals.push(repeat(() => blinkSignal.value ? 1 : 0, arrays.cursorPosition, index))
-    // Also track blink state directly for cursor flags
-    disposals.push(() => {
-      // Cleanup happens when scope is destroyed - pulse handles its own cleanup
-    })
     // Set cursor flags to indicate cursor should blink
-    setU8Direct(buffer, index, U_CURSOR_FLAGS, 1) // visible
-    setU8Direct(buffer, index, U_CURSOR_FPS, blinkFps)
+    setU8(buf, index, N_CURSOR_FLAGS, 1) // visible
+    setU8(buf, index, N_CURSOR_BLINK_RATE, blinkFps)
   } else {
     // Static cursor - always visible
-    setU8Direct(buffer, index, U_CURSOR_FLAGS, 1)
-    setU8Direct(buffer, index, U_CURSOR_FPS, 0) // 0 = no blink
+    setU8(buf, index, N_CURSOR_FLAGS, 1)
+    setU8(buf, index, N_CURSOR_BLINK_RATE, 0) // 0 = no blink
   }
 
   // Cursor style
-  setU8Direct(buffer, index, U_CURSOR_STYLE, cursorStyleToNum(cursorConfig.style))
+  setU8(buf, index, N_CURSOR_STYLE, cursorStyleToNum(cursorConfig.style))
 
   // Custom cursor character
   if (cursorConfig.char) {
     const charCode = cursorConfig.char.codePointAt(0) ?? 0
-    setU32Direct(buffer, index, U_CURSOR_CHAR, charCode)
+    setU32(buf, index, N_CURSOR_CHAR, charCode)
   }
 
   // Cursor colors
   if (cursorConfig.fg !== undefined) {
     if (isReactive(cursorConfig.fg)) {
-      disposals.push(repeat(() => toPackedColor(unwrap(cursorConfig.fg!)), arrays.cursorFg, index))
+      disposals.push(repeat(() => toPackedColor(unwrap(cursorConfig.fg!)), arrays.cursorFgColor, index))
     } else {
-      setU32Direct(buffer, index, C_CURSOR_FG, toPackedColor(cursorConfig.fg as RGBA))
+      setU32(buf, index, N_CURSOR_FG_COLOR, toPackedColor(cursorConfig.fg as RGBA))
     }
   }
   if (cursorConfig.bg !== undefined) {
     if (isReactive(cursorConfig.bg)) {
-      // We'd need a cursorBgColor array - for now use direct write
-      setU32Direct(buffer, index, C_CURSOR_BG, toPackedColor(unwrap(cursorConfig.bg)))
+      disposals.push(repeat(() => toPackedColor(unwrap(cursorConfig.bg!)), arrays.cursorBgColor, index))
     } else {
-      setU32Direct(buffer, index, C_CURSOR_BG, toPackedColor(cursorConfig.bg as RGBA))
+      setU32(buf, index, N_CURSOR_BG_COLOR, toPackedColor(cursorConfig.bg as RGBA))
     }
   }
 
@@ -456,7 +464,7 @@ export function input(props: InputProps): Cleanup {
 
   // Max length
   if (props.maxLength !== undefined) {
-    setU8Direct(buffer, index, U_MAX_LENGTH, props.maxLength)
+    setU8(buf, index, N_MAX_LENGTH, props.maxLength)
   }
 
   // ==========================================================================
@@ -489,6 +497,13 @@ export function input(props: InputProps): Cleanup {
     if (props.borderColor !== undefined) disposals.push(repeat(colorInput(props.borderColor), arrays.borderColor, index))
   }
   if (props.opacity !== undefined) disposals.push(repeat(numInput(props.opacity), arrays.opacity, index))
+
+  // Border style for rendering
+  if (props.border !== undefined) disposals.push(repeat(numInput(props.border), arrays.borderStyle, index))
+  if (props.borderTop !== undefined) disposals.push(repeat(numInput(props.borderTop), arrays.borderStyleTop, index))
+  if (props.borderRight !== undefined) disposals.push(repeat(numInput(props.borderRight), arrays.borderStyleRight, index))
+  if (props.borderBottom !== undefined) disposals.push(repeat(numInput(props.borderBottom), arrays.borderStyleBottom, index))
+  if (props.borderLeft !== undefined) disposals.push(repeat(numInput(props.borderLeft), arrays.borderStyleLeft, index))
 
   // ==========================================================================
   // INTERACTION — inputs are always focusable
@@ -618,11 +633,8 @@ export function input(props: InputProps): Cleanup {
   // ==========================================================================
 
   const cleanup = () => {
-    // Dispose all repeaters
     for (const dispose of disposals) dispose()
     disposals.length = 0
-
-    // Unsub event handlers
     unsubFocusCallbacks()
     unsubMouse()
     unsubKeyboard()

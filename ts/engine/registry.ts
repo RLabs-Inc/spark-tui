@@ -8,12 +8,19 @@
  * - ID ↔ Index bidirectional mapping
  * - Free index pool for O(1) reuse
  * - ReactiveSet for allocatedIndices (deriveds react to add/remove)
+ * - O(1) parent-child hierarchy via doubly-linked sibling list
  */
 
 import { ReactiveSet } from '@rlabs-inc/signals'
 import { runDestroyCallbacks, resetLifecycle } from './lifecycle'
-import { isInitializedAoS, getAoSBuffer, getAoSArrays } from '../bridge'
-import { setNodeCount, COMPONENT_NONE } from '../bridge/shared-buffer-aos'
+import { getBuffer, getArrays, isInitialized } from '../bridge'
+import {
+  setNodeCount,
+  getChildren,
+  linkChild,
+  unlinkChild,
+  COMPONENT_NONE,
+} from '../bridge/shared-buffer'
 
 // =============================================================================
 // Registry State
@@ -95,8 +102,8 @@ export function allocateIndex(id?: string): number {
   allocatedIndices.add(index)
 
   // Update node count in shared buffer header
-  if (isInitializedAoS()) {
-    const buf = getAoSBuffer()
+  if (isInitialized()) {
+    const buf = getBuffer()
     const count = allocatedIndices.size
     setNodeCount(buf, count > nextIndex ? count : nextIndex)
   }
@@ -105,8 +112,26 @@ export function allocateIndex(id?: string): number {
 }
 
 /**
+ * Register a parent-child relationship using the O(1) linked list.
+ * Call this after setting parentIndex in the arrays.
+ *
+ * @param childIndex - The child component index
+ * @param parentIndex - The parent component index (-1 for root)
+ */
+export function registerParent(childIndex: number, parentIndex: number): void {
+  if (!isInitialized()) return
+
+  const buf = getBuffer()
+
+  // Only link if parent is valid (>= 0)
+  if (parentIndex >= 0) {
+    linkChild(buf, childIndex, parentIndex)
+  }
+}
+
+/**
  * Release an index back to the pool.
- * Also recursively releases all children!
+ * Also recursively releases all children using O(1) linked list traversal!
  *
  * @param index - The index to release.
  */
@@ -114,18 +139,24 @@ export function releaseIndex(index: number): void {
   const id = indexToId.get(index)
   if (id === undefined) return
 
-  // FIRST: Find and release all children (recursive!)
-  const arrays = isInitializedAoS() ? getAoSArrays() : null
-  const children: number[] = []
-  for (const childIndex of allocatedIndices) {
-    const parentIdx = arrays ? arrays.parentIndex.get(childIndex) : -1
-    if (parentIdx === index) {
-      children.push(childIndex)
+  // FIRST: Find and release all children using O(1) linked list (not O(N) scan!)
+  if (isInitialized()) {
+    const buf = getBuffer()
+    const arrays = getArrays()
+
+    // Get children via linked list - O(children) not O(N)!
+    const children = getChildren(buf, index)
+
+    // Release children recursively
+    for (const childIndex of children) {
+      releaseIndex(childIndex)
     }
-  }
-  // Release children recursively
-  for (const childIndex of children) {
-    releaseIndex(childIndex)
+
+    // Unlink this node from its parent's sibling list
+    unlinkChild(buf, index)
+
+    // Mark node as unused in SharedBuffer (Rust skips NONE component type)
+    arrays.componentType.set(index, COMPONENT_NONE)
   }
 
   // Run destroy callbacks before cleanup
@@ -136,12 +167,6 @@ export function releaseIndex(index: number): void {
   indexToId.delete(index)
   allocatedIndices.delete(index)
 
-  // Mark node as unused in SharedBuffer (Rust skips NONE component type)
-  if (arrays) {
-    arrays.componentType.set(index, COMPONENT_NONE)
-    arrays.parentIndex.set(index, -1)
-  }
-
   // Return to pool for reuse
   freeIndices.push(index)
 
@@ -149,8 +174,8 @@ export function releaseIndex(index: number): void {
   if (allocatedIndices.size === 0) {
     freeIndices.length = 0
     nextIndex = 0
-    if (isInitializedAoS()) {
-      setNodeCount(getAoSBuffer(), 0)
+    if (isInitialized()) {
+      setNodeCount(getBuffer(), 0)
     }
   }
 }
@@ -203,7 +228,7 @@ export function resetRegistry(): void {
   idCounter = 0
   parentStack.length = 0
   resetLifecycle()
-  if (isInitializedAoS()) {
-    setNodeCount(getAoSBuffer(), 0)
+  if (isInitialized()) {
+    setNodeCount(getBuffer(), 0)
   }
 }

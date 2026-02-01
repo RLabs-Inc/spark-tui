@@ -231,7 +231,7 @@ fn render_component(
     let content_h = (h as i32 - total_top - total_bottom).max(0) as u16;
 
     if content_w == 0 || content_h == 0 {
-        render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, content_x, content_y);
+        render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, screen_x, screen_y);
         return;
     }
 
@@ -239,7 +239,7 @@ fn render_component(
     let content_clip = match content_bounds.intersect(&effective_clip) {
         Some(clip) => clip,
         None => {
-            render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, content_x, content_y);
+            render_children(buffer, buf, index, child_map, hit_regions, &effective_clip, screen_x, screen_y);
             return;
         }
     };
@@ -265,8 +265,10 @@ fn render_component(
         _ => {}
     }
 
-    // Render children (pass content area as their parent screen position)
-    render_children(buffer, buf, index, child_map, hit_regions, &content_clip, content_x, content_y);
+    // Render children - pass screen position (NOT content position)
+    // Taffy positions children relative to parent's border box origin,
+    // so child.location already includes border+padding offset
+    render_children(buffer, buf, index, child_map, hit_regions, &content_clip, screen_x, screen_y);
 
     // Focus indicator
     render_focus_indicator(buffer, buf, index, screen_x, screen_y, w, comp_type, &effective_clip, effective_fg);

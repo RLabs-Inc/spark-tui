@@ -14,7 +14,7 @@ export {
   getRenderMode,
   type MountOptions,
   type MountHandle,
-  type RenderMode,
+  type MountRenderMode,
 } from './mount'
 
 // Registry

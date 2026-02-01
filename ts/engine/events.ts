@@ -1,54 +1,50 @@
 /**
- * SparkTUI Event System
+ * SparkTUI Event System (v3 Buffer)
  *
- * Reads events from the SharedBuffer event ring buffer and dispatches to handlers.
+ * Reads events from the SharedBuffer event ring and dispatches to handlers.
  *
  * PURELY REACTIVE: Uses Atomics.waitAsync for instant wake, NO polling.
  *
  * Event flow:
  *   Rust writes event -> Atomics.notify(wake_ts) -> TS wakes -> reads ring -> dispatches
- *
- * Latency target: < 50 microseconds
  */
 
-// Type declaration for Atomics.waitAsync (ES2024+)
-// Node.js 16+ and modern browsers support this
-declare global {
-  interface Atomics {
-    waitAsync(
-      typedArray: Int32Array,
-      index: number,
-      value: number,
-      timeout?: number
-    ): { async: false; value: 'not-equal' | 'timed-out' } | { async: true; value: Promise<'ok' | 'timed-out'> }
-  }
-}
-
 import {
-  type AoSBuffer,
-  EventType,
-  EVENT_RING_OFFSET,
+  type SharedBuffer,
+  H_WAKE_TS,
+  H_EVENT_WRITE_IDX,
+  H_EVENT_READ_IDX,
   EVENT_RING_HEADER_SIZE,
   EVENT_SLOT_SIZE,
   MAX_EVENTS,
-  H_WAKE_TS,
-  getEventWriteIdx,
-  getEventReadIdx,
-  setEventReadIdx,
   getParentIndex,
-} from '../bridge/shared-buffer-aos'
+} from '../bridge/shared-buffer'
 
 // =============================================================================
-// RE-EXPORT EventType
+// EVENT TYPES
 // =============================================================================
 
-export { EventType }
+/** Event type enum - must match Rust */
+export const enum EventType {
+  None = 0,
+  Key = 1,
+  MouseDown = 2,
+  MouseUp = 3,
+  Click = 4,
+  MouseEnter = 5,
+  MouseLeave = 6,
+  MouseMove = 7,
+  Scroll = 8,
+  Focus = 9,
+  Blur = 10,
+  ValueChange = 11,
+  Submit = 12,
+  Cancel = 13,
+  Exit = 14,
+  Resize = 15,
+}
 
-// =============================================================================
-// EVENT TYPES (matching Rust ring buffer layout)
-// =============================================================================
-
-/** Keyboard event - key press, repeat, or release */
+/** Keyboard event */
 export interface KeyEvent {
   type: EventType.Key
   componentIndex: number
@@ -86,7 +82,7 @@ export interface FocusEvent {
   componentIndex: number
 }
 
-/** Input value events - change, submit, cancel */
+/** Input value events */
 export interface ValueEvent {
   type: EventType.ValueChange | EventType.Submit | EventType.Cancel
   componentIndex: number
@@ -153,15 +149,29 @@ export type ExitHandler = (event: ExitEvent) => void
 export type ScrollHandler = (event: ScrollEvent) => void
 
 // =============================================================================
-// EVENT PARSER
+// EVENT RING READER
 // =============================================================================
+
+/** Get event write index from header */
+function getEventWriteIdx(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_EVENT_WRITE_IDX, true)
+}
+
+/** Get event read index from header */
+function getEventReadIdx(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_EVENT_READ_IDX, true)
+}
+
+/** Set event read index in header */
+function setEventReadIdx(buf: SharedBuffer, idx: number): void {
+  buf.view.setUint32(H_EVENT_READ_IDX, idx, true)
+}
 
 /**
  * Parse a single event from the ring buffer at the given slot.
- * Returns null if the slot is empty (EventType.None).
  */
-function parseEvent(buf: AoSBuffer, slot: number): SparkEvent | null {
-  const offset = EVENT_RING_OFFSET + EVENT_RING_HEADER_SIZE + slot * EVENT_SLOT_SIZE
+function parseEvent(buf: SharedBuffer, slot: number): SparkEvent | null {
+  const offset = buf.eventRingOffset + EVENT_RING_HEADER_SIZE + slot * EVENT_SLOT_SIZE
   const view = buf.view
 
   const eventType = view.getUint8(offset) as EventType
@@ -225,59 +235,42 @@ function parseEvent(buf: AoSBuffer, slot: number): SparkEvent | null {
       }
 
     case EventType.Exit:
-      return {
-        type: eventType,
-      }
+      return { type: eventType }
 
     default:
-      // Unknown event type - skip
       return null
   }
 }
 
-// =============================================================================
-// RING BUFFER READER
-// =============================================================================
-
 /**
  * Read all pending events from the ring buffer.
- * Updates the read index atomically after reading.
  */
-export function readEvents(buf: AoSBuffer): SparkEvent[] {
+export function readEvents(buf: SharedBuffer): SparkEvent[] {
   const events: SparkEvent[] = []
   const writeIdx = getEventWriteIdx(buf)
   let readIdx = getEventReadIdx(buf)
 
-  // Read all events between readIdx and writeIdx
   while (readIdx < writeIdx) {
     const slot = readIdx % MAX_EVENTS
     const event = parseEvent(buf, slot)
-    if (event) {
-      events.push(event)
-    }
+    if (event) events.push(event)
     readIdx++
   }
 
-  // Update read index so Rust knows we've consumed these events
   setEventReadIdx(buf, readIdx)
   return events
 }
 
 // =============================================================================
-// HANDLER REGISTRIES (internal)
+// HANDLER REGISTRIES
 // =============================================================================
 
-// Per-component handlers (keyed by component index)
 const keyHandlers = new Map<number, KeyHandler[]>()
-const mouseHandlers = new Map<
-  number,
-  Partial<Record<MouseEvent['type'], MouseHandler[]>>
->()
+const mouseHandlers = new Map<number, Partial<Record<MouseEvent['type'], MouseHandler[]>>>()
 const focusHandlers = new Map<number, FocusHandler[]>()
 const valueHandlers = new Map<number, ValueHandler[]>()
 const scrollHandlers = new Map<number, ScrollHandler[]>()
 
-// Global handlers (not component-specific)
 const globalKeyHandlers: KeyHandler[] = []
 const globalMouseHandlers: MouseHandler[] = []
 const globalScrollHandlers: ScrollHandler[] = []
@@ -288,14 +281,8 @@ const exitHandlers: ExitHandler[] = []
 // HANDLER REGISTRATION
 // =============================================================================
 
-/**
- * Register a key handler for a specific component.
- * Returns an unsubscribe function.
- */
 export function registerKeyHandler(index: number, handler: KeyHandler): () => void {
-  if (!keyHandlers.has(index)) {
-    keyHandlers.set(index, [])
-  }
+  if (!keyHandlers.has(index)) keyHandlers.set(index, [])
   keyHandlers.get(index)!.push(handler)
 
   return () => {
@@ -308,10 +295,6 @@ export function registerKeyHandler(index: number, handler: KeyHandler): () => vo
   }
 }
 
-/**
- * Register a global key handler (receives all key events).
- * Returns an unsubscribe function.
- */
 export function registerGlobalKeyHandler(handler: KeyHandler): () => void {
   globalKeyHandlers.push(handler)
   return () => {
@@ -320,22 +303,14 @@ export function registerGlobalKeyHandler(handler: KeyHandler): () => void {
   }
 }
 
-/**
- * Register a mouse handler for a specific component and event type.
- * Returns an unsubscribe function.
- */
 export function registerMouseHandler(
   index: number,
   eventType: MouseEvent['type'],
   handler: MouseHandler
 ): () => void {
-  if (!mouseHandlers.has(index)) {
-    mouseHandlers.set(index, {})
-  }
+  if (!mouseHandlers.has(index)) mouseHandlers.set(index, {})
   const componentHandlers = mouseHandlers.get(index)!
-  if (!componentHandlers[eventType]) {
-    componentHandlers[eventType] = []
-  }
+  if (!componentHandlers[eventType]) componentHandlers[eventType] = []
   componentHandlers[eventType]!.push(handler)
 
   return () => {
@@ -345,17 +320,10 @@ export function registerMouseHandler(
       if (i >= 0) handlers.splice(i, 1)
       if (handlers.length === 0) delete componentHandlers[eventType]
     }
-    // Clean up empty component entry
-    if (Object.keys(componentHandlers).length === 0) {
-      mouseHandlers.delete(index)
-    }
+    if (Object.keys(componentHandlers).length === 0) mouseHandlers.delete(index)
   }
 }
 
-/**
- * Register a global mouse handler (receives all mouse events).
- * Returns an unsubscribe function.
- */
 export function registerGlobalMouseHandler(handler: MouseHandler): () => void {
   globalMouseHandlers.push(handler)
   return () => {
@@ -364,14 +332,8 @@ export function registerGlobalMouseHandler(handler: MouseHandler): () => void {
   }
 }
 
-/**
- * Register a focus handler for a specific component.
- * Returns an unsubscribe function.
- */
 export function registerFocusHandler(index: number, handler: FocusHandler): () => void {
-  if (!focusHandlers.has(index)) {
-    focusHandlers.set(index, [])
-  }
+  if (!focusHandlers.has(index)) focusHandlers.set(index, [])
   focusHandlers.get(index)!.push(handler)
 
   return () => {
@@ -384,14 +346,8 @@ export function registerFocusHandler(index: number, handler: FocusHandler): () =
   }
 }
 
-/**
- * Register a value handler for a specific component.
- * Returns an unsubscribe function.
- */
 export function registerValueHandler(index: number, handler: ValueHandler): () => void {
-  if (!valueHandlers.has(index)) {
-    valueHandlers.set(index, [])
-  }
+  if (!valueHandlers.has(index)) valueHandlers.set(index, [])
   valueHandlers.get(index)!.push(handler)
 
   return () => {
@@ -404,14 +360,8 @@ export function registerValueHandler(index: number, handler: ValueHandler): () =
   }
 }
 
-/**
- * Register a scroll handler for a specific component.
- * Returns an unsubscribe function.
- */
 export function registerScrollHandler(index: number, handler: ScrollHandler): () => void {
-  if (!scrollHandlers.has(index)) {
-    scrollHandlers.set(index, [])
-  }
+  if (!scrollHandlers.has(index)) scrollHandlers.set(index, [])
   scrollHandlers.get(index)!.push(handler)
 
   return () => {
@@ -424,10 +374,6 @@ export function registerScrollHandler(index: number, handler: ScrollHandler): ()
   }
 }
 
-/**
- * Register a global scroll handler.
- * Returns an unsubscribe function.
- */
 export function registerGlobalScrollHandler(handler: ScrollHandler): () => void {
   globalScrollHandlers.push(handler)
   return () => {
@@ -436,10 +382,6 @@ export function registerGlobalScrollHandler(handler: ScrollHandler): () => void 
   }
 }
 
-/**
- * Register a resize handler (global - terminal resize).
- * Returns an unsubscribe function.
- */
 export function registerResizeHandler(handler: ResizeHandler): () => void {
   resizeHandlers.push(handler)
   return () => {
@@ -448,10 +390,6 @@ export function registerResizeHandler(handler: ResizeHandler): () => void {
   }
 }
 
-/**
- * Register an exit handler (global - Ctrl+C, etc.).
- * Returns an unsubscribe function.
- */
 export function registerExitHandler(handler: ExitHandler): () => void {
   exitHandlers.push(handler)
   return () => {
@@ -464,19 +402,15 @@ export function registerExitHandler(handler: ExitHandler): () => void {
 // EVENT DISPATCHER
 // =============================================================================
 
-/**
- * Dispatch a single event to all registered handlers.
- * Key events can return true to consume (stop propagation).
- */
+let currentBuffer: SharedBuffer | null = null
+
 function dispatchEvent(event: SparkEvent): void {
   switch (event.type) {
     case EventType.Key: {
-      // Global key handlers first (can consume)
       for (const handler of globalKeyHandlers) {
-        if (handler(event) === true) return // consumed
+        if (handler(event) === true) return
       }
 
-      // Component-specific key handlers with BUBBLING
       if (currentBuffer) {
         let target = event.componentIndex
         let depth = 0
@@ -485,13 +419,12 @@ function dispatchEvent(event: SparkEvent): void {
           const handlers = keyHandlers.get(target)
           if (handlers) {
             for (const handler of handlers) {
-              if (handler(event) === true) return // consumed
+              if (handler(event) === true) return
             }
           }
 
-          // Move to parent
           const parent = getParentIndex(currentBuffer, target)
-          if (parent < 0) break // No parent (root)
+          if (parent < 0) break
           target = parent
           depth++
         }
@@ -505,12 +438,10 @@ function dispatchEvent(event: SparkEvent): void {
     case EventType.MouseEnter:
     case EventType.MouseLeave:
     case EventType.MouseMove: {
-      // Global mouse handlers (always fire)
       for (const handler of globalMouseHandlers) {
         handler(event)
       }
 
-      // Component-specific mouse handlers with BUBBLING
       if (currentBuffer) {
         let target = event.componentIndex
         let depth = 0
@@ -523,17 +454,11 @@ function dispatchEvent(event: SparkEvent): void {
               for (const handler of typeHandlers) {
                 handler(event)
               }
-              // Found a handler? We could stop bubbling here if we implemented stopPropagation.
-              // For now, let's behave like standard DOM bubbling (fire on all ancestors).
-              // BUT for click events on buttons, usually the button handles it and that's it.
-              // If we want to simulate "clicking the button" when clicking text inside it,
-              // bubbling is exactly what we need.
             }
           }
 
-          // Move to parent
           const parent = getParentIndex(currentBuffer, target)
-          if (parent < 0) break // No parent (root)
+          if (parent < 0) break
           target = parent
           depth++
         }
@@ -542,11 +467,9 @@ function dispatchEvent(event: SparkEvent): void {
     }
 
     case EventType.Scroll: {
-      // Global scroll handlers
       for (const handler of globalScrollHandlers) {
         handler(event)
       }
-      // Component-specific scroll handlers
       const handlers = scrollHandlers.get(event.componentIndex)
       if (handlers) {
         for (const handler of handlers) {
@@ -596,76 +519,43 @@ function dispatchEvent(event: SparkEvent): void {
 }
 
 // =============================================================================
-// EVENT LISTENER (Atomics.waitAsync - REACTIVE, NOT POLLING)
+// EVENT LISTENER (Atomics.waitAsync - REACTIVE)
 // =============================================================================
 
 let running = false
 let wakeInt32: Int32Array | null = null
-let currentBuffer: AoSBuffer | null = null
 
 /**
  * Start the event listener.
  *
- * IMPORTANT: This is NOT polling! Atomics.waitAsync SUSPENDS until Rust notifies.
- * The while(running) loop is NOT busy - each iteration waits for notification.
- *
- * Event flow:
- *   1. TS calls Atomics.waitAsync() - SUSPENDS (zero CPU)
- *   2. Rust writes event to ring buffer
- *   3. Rust calls Atomics.notify(wake_ts)
- *   4. TS wakes instantly (< 10 microseconds)
- *   5. TS reads events, dispatches to handlers
- *   6. Back to step 1
+ * Uses Atomics.waitAsync - SUSPENDS until Rust notifies.
+ * NOT polling. The while(running) loop waits for notification each iteration.
  */
-export function startEventListener(buf: AoSBuffer): void {
+export function startEventListener(buf: SharedBuffer): void {
   if (running) return
 
   running = true
   currentBuffer = buf
-  wakeInt32 = new Int32Array(buf.buffer, H_WAKE_TS, 1)
+  wakeInt32 = new Int32Array(buf.raw, H_WAKE_TS, 1)
 
-  // Start the reactive wait loop
   waitForEvents()
 }
 
-/**
- * The event wait loop.
- *
- * PLATFORM LIMITATION: Cross-language Atomics.notify doesn't work on macOS.
- * JavaScript's Atomics.waitAsync and Rust's atomic_wait use different
- * underlying primitives (__ulock on macOS vs futex on Linux).
- *
- * WORKAROUND: Short timeout (8ms) for responsiveness. This is NOT polling in
- * the traditional sense - the thread truly suspends between checks, and the
- * timeout only fires if no events arrive. With events flowing, wakes are instant.
- *
- * TODO: Test true futex wake on Linux where both use the same syscall.
- *
- * Event flow:
- *   1. TS: Atomics.waitAsync() - SUSPENDS (zero CPU while waiting)
- *   2. Rust: writes event, sets wake flag, calls wake_one()
- *   3. TS: wakes on value change OR timeout, reads events, dispatches
- */
 async function waitForEvents(): Promise<void> {
   while (running && wakeInt32 && currentBuffer) {
-    // Get current wake value
     const currentValue = Atomics.load(wakeInt32, 0)
 
-    // Wait for value change OR minimal timeout
-    // 1ms = fastest practical interval, very responsive
+    // Wait for value change or minimal timeout (1ms for cross-platform compatibility)
     const result = Atomics.waitAsync(wakeInt32, 0, currentValue, 1)
 
     if (result.async) {
       await result.value
     }
-    // 'not-equal' = value changed (instant), 'timed-out' = check anyway
 
     if (!running) break
 
-    // Reset wake flag
     Atomics.store(wakeInt32, 0, 0)
 
-    // Read and dispatch all pending events
     const events = readEvents(currentBuffer)
     for (const event of events) {
       dispatchEvent(event)
@@ -673,13 +563,9 @@ async function waitForEvents(): Promise<void> {
   }
 }
 
-/**
- * Stop the event listener.
- */
 export function stopEventListener(): void {
   running = false
 
-  // Wake to exit the wait loop
   if (wakeInt32) {
     Atomics.store(wakeInt32, 0, 1)
     Atomics.notify(wakeInt32, 0)
@@ -689,9 +575,6 @@ export function stopEventListener(): void {
   currentBuffer = null
 }
 
-/**
- * Check if the event listener is running.
- */
 export function isEventListenerRunning(): boolean {
   return running
 }
@@ -700,10 +583,6 @@ export function isEventListenerRunning(): boolean {
 // HANDLER CLEANUP
 // =============================================================================
 
-/**
- * Clean up all handlers for a specific component index.
- * Called when a component is unmounted.
- */
 export function cleanupHandlers(index: number): void {
   keyHandlers.delete(index)
   mouseHandlers.delete(index)
@@ -712,10 +591,6 @@ export function cleanupHandlers(index: number): void {
   scrollHandlers.delete(index)
 }
 
-/**
- * Clean up all handlers.
- * Called when the application is unmounted.
- */
 export function cleanupAllHandlers(): void {
   keyHandlers.clear()
   mouseHandlers.clear()
@@ -731,22 +606,14 @@ export function cleanupAllHandlers(): void {
 }
 
 // =============================================================================
-// MANUAL EVENT DISPATCH (for testing/debugging)
+// MANUAL EVENT DISPATCH (for testing)
 // =============================================================================
 
-/**
- * Manually dispatch an event (for testing/debugging).
- * Normally events come from the ring buffer.
- */
 export function dispatchEventManual(event: SparkEvent): void {
   dispatchEvent(event)
 }
 
-/**
- * Manually read and dispatch events without waiting.
- * Useful for synchronous testing or when you know events are pending.
- */
-export function processEvents(buf: AoSBuffer): SparkEvent[] {
+export function processEvents(buf: SharedBuffer): SparkEvent[] {
   const events = readEvents(buf)
   for (const event of events) {
     dispatchEvent(event)
@@ -755,49 +622,41 @@ export function processEvents(buf: AoSBuffer): SparkEvent[] {
 }
 
 // =============================================================================
-// HELPER: Modifier Checks
+// MODIFIER CHECKS
 // =============================================================================
 
-/** Check if Ctrl modifier is pressed */
 export function hasCtrl(event: KeyEvent): boolean {
   return (event.modifiers & MODIFIER_CTRL) !== 0
 }
 
-/** Check if Alt modifier is pressed */
 export function hasAlt(event: KeyEvent): boolean {
   return (event.modifiers & MODIFIER_ALT) !== 0
 }
 
-/** Check if Shift modifier is pressed */
 export function hasShift(event: KeyEvent): boolean {
   return (event.modifiers & MODIFIER_SHIFT) !== 0
 }
 
-/** Check if Meta/Cmd modifier is pressed */
 export function hasMeta(event: KeyEvent): boolean {
   return (event.modifiers & MODIFIER_META) !== 0
 }
 
-/** Check if this is a key press (not repeat or release) */
 export function isKeyPress(event: KeyEvent): boolean {
   return event.keyState === KEY_STATE_PRESS
 }
 
-/** Check if this is a key repeat */
 export function isKeyRepeat(event: KeyEvent): boolean {
   return event.keyState === KEY_STATE_REPEAT
 }
 
-/** Check if this is a key release */
 export function isKeyRelease(event: KeyEvent): boolean {
   return event.keyState === KEY_STATE_RELEASE
 }
 
 // =============================================================================
-// KEY CODE CONSTANTS (matching Rust keyboard.rs)
+// KEY CODE CONSTANTS
 // =============================================================================
 
-/** Common key codes */
 export const KEY_ENTER = 13
 export const KEY_TAB = 9
 export const KEY_BACKSPACE = 8
@@ -805,7 +664,6 @@ export const KEY_ESCAPE = 27
 export const KEY_DELETE = 127
 export const KEY_SPACE = 32
 
-/** Arrow keys (0x1000 range) */
 export const KEY_UP = 0x1001
 export const KEY_DOWN = 0x1002
 export const KEY_LEFT = 0x1003
@@ -816,7 +674,6 @@ export const KEY_PAGE_UP = 0x1007
 export const KEY_PAGE_DOWN = 0x1008
 export const KEY_INSERT = 0x1009
 
-/** Function keys (0x2000 range) - F1 = 0x2001, F12 = 0x200C */
 export const KEY_F1 = 0x2001
 export const KEY_F2 = 0x2002
 export const KEY_F3 = 0x2003
@@ -831,19 +688,16 @@ export const KEY_F11 = 0x200B
 export const KEY_F12 = 0x200C
 
 // =============================================================================
-// FRIENDLY KEY HELPERS
+// KEY HELPERS
 // =============================================================================
 
-/** Get the character for a printable key (or undefined for special keys) */
 export function getChar(event: KeyEvent): string | undefined {
-  // Printable ASCII range
   if (event.keycode >= 32 && event.keycode <= 126) {
     return String.fromCharCode(event.keycode)
   }
   return undefined
 }
 
-/** Get a human-readable key name */
 export function getKeyName(event: KeyEvent): string {
   switch (event.keycode) {
     case KEY_ENTER: return 'enter'
@@ -862,11 +716,9 @@ export function getKeyName(event: KeyEvent): string {
     case KEY_PAGE_DOWN: return 'pagedown'
     case KEY_INSERT: return 'insert'
     default:
-      // Function keys
       if (event.keycode >= KEY_F1 && event.keycode <= KEY_F12) {
         return `f${event.keycode - 0x2000}`
       }
-      // Printable character
       if (event.keycode >= 32 && event.keycode <= 126) {
         return String.fromCharCode(event.keycode)
       }
@@ -874,32 +726,26 @@ export function getKeyName(event: KeyEvent): string {
   }
 }
 
-/** Check if this is the Enter key */
 export function isEnter(event: KeyEvent): boolean {
   return event.keycode === KEY_ENTER
 }
 
-/** Check if this is the Space key */
 export function isSpace(event: KeyEvent): boolean {
   return event.keycode === KEY_SPACE
 }
 
-/** Check if this is the Escape key */
 export function isEscape(event: KeyEvent): boolean {
   return event.keycode === KEY_ESCAPE
 }
 
-/** Check if this is an arrow key */
 export function isArrowKey(event: KeyEvent): boolean {
   return event.keycode >= KEY_UP && event.keycode <= KEY_RIGHT
 }
 
-/** Check if this is a function key (F1-F12) */
 export function isFunctionKey(event: KeyEvent): boolean {
   return event.keycode >= KEY_F1 && event.keycode <= KEY_F12
 }
 
-/** Check if the key matches a specific character */
 export function isChar(event: KeyEvent, char: string): boolean {
   return event.keycode === char.charCodeAt(0)
 }

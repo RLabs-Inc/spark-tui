@@ -242,7 +242,11 @@ Each node occupies exactly 1024 bytes, organized in 16 cache lines (64 bytes eac
 | 212 | 2 | i16 | `grid_row_start` | 0 | Row start line (0 = auto) |
 | 214 | 2 | i16 | `grid_row_end` | 0 | Row end line (0 = auto, negative = span) |
 | 216 | 1 | u8 | `justify_self` | 0 | 0=auto, 1=start, 2=end, 3=center, 4=stretch |
-| 217-255 | 39 | — | _reserved_ | 0 | Future grid props |
+| 217-219 | 3 | — | _reserved_ | 0 | Alignment padding |
+| 220 | 4 | i32 | `first_child` | -1 | First child index (-1 = no children) |
+| 224 | 4 | i32 | `prev_sibling` | -1 | Previous sibling index (-1 = first child) |
+| 228 | 4 | i32 | `next_sibling` | -1 | Next sibling index (-1 = last child) |
+| 232-255 | 24 | — | _reserved_ | 0 | Future grid/hierarchy props |
 
 ---
 
@@ -405,6 +409,59 @@ Same format as column tracks.
 | Offset | Size | Type | Name | Default | Description |
 |--------|------|------|------|---------|-------------|
 | 960-1023 | 64 | — | _reserved_ | 0 | Animation, effects, transforms, physics |
+
+---
+
+## Hierarchy Management
+
+Parent-child relationships use a doubly-linked sibling list for O(1) child operations.
+
+### Fields (per node, in Line 4)
+
+| Field | Offset | Type | Description |
+|-------|--------|------|-------------|
+| `parent_index` | 180 | i32 | Parent node index (-1 = root) |
+| `first_child` | 220 | i32 | First child index (-1 = no children) |
+| `prev_sibling` | 224 | i32 | Previous sibling (-1 = first child) |
+| `next_sibling` | 228 | i32 | Next sibling (-1 = last child) |
+
+### Operations
+
+**Add child (prepend, O(1)):**
+```
+child.parent_index = parent
+child.prev_sibling = -1
+child.next_sibling = parent.first_child
+if parent.first_child >= 0:
+    old_first.prev_sibling = child
+parent.first_child = child
+```
+
+**Remove child (O(1)):**
+```
+if child.prev_sibling >= 0:
+    prev.next_sibling = child.next_sibling
+else:
+    parent.first_child = child.next_sibling
+
+if child.next_sibling >= 0:
+    next.prev_sibling = child.prev_sibling
+
+child.prev_sibling = -1
+child.next_sibling = -1
+```
+
+**Iterate children (O(children)):**
+```
+child = parent.first_child
+while child >= 0:
+    yield child
+    child = child.next_sibling
+```
+
+### Why Order Doesn't Matter
+
+Z-index determines render order, not insertion order. The renderer sorts children by z-index before drawing.
 
 ---
 

@@ -172,7 +172,11 @@ export const N_GRID_COLUMN_END = 210;
 export const N_GRID_ROW_START = 212;
 export const N_GRID_ROW_END = 214;
 export const N_JUSTIFY_SELF = 216;
-// 217-255: reserved
+// 217-219: reserved (alignment)
+export const N_FIRST_CHILD = 220;
+export const N_PREV_SIBLING = 224;
+export const N_NEXT_SIBLING = 228;
+// 232-255: reserved
 
 // --- Cache Lines 5-7 (256-447): Grid Column Tracks ---
 // 32 tracks × 6 bytes each = 192 bytes
@@ -1111,6 +1115,100 @@ export function getTabIndex(buf: SharedBuffer, nodeIndex: number): number {
 
 export function setTabIndex(buf: SharedBuffer, nodeIndex: number, tabIndex: number): void {
   setI32(buf, nodeIndex, N_TAB_INDEX, tabIndex);
+}
+
+// --- Hierarchy linked list (O(1) child operations) ---
+
+export function getFirstChild(buf: SharedBuffer, nodeIndex: number): number {
+  return getI32(buf, nodeIndex, N_FIRST_CHILD);
+}
+
+export function setFirstChild(buf: SharedBuffer, nodeIndex: number, childIndex: number): void {
+  setI32(buf, nodeIndex, N_FIRST_CHILD, childIndex);
+}
+
+export function getPrevSibling(buf: SharedBuffer, nodeIndex: number): number {
+  return getI32(buf, nodeIndex, N_PREV_SIBLING);
+}
+
+export function setPrevSibling(buf: SharedBuffer, nodeIndex: number, siblingIndex: number): void {
+  setI32(buf, nodeIndex, N_PREV_SIBLING, siblingIndex);
+}
+
+export function getNextSibling(buf: SharedBuffer, nodeIndex: number): number {
+  return getI32(buf, nodeIndex, N_NEXT_SIBLING);
+}
+
+export function setNextSibling(buf: SharedBuffer, nodeIndex: number, siblingIndex: number): void {
+  setI32(buf, nodeIndex, N_NEXT_SIBLING, siblingIndex);
+}
+
+/** Iterate children of a node. O(children) instead of O(N). */
+export function* iterChildren(buf: SharedBuffer, parentIndex: number): Generator<number> {
+  let child = getFirstChild(buf, parentIndex);
+  while (child >= 0) {
+    yield child;
+    child = getNextSibling(buf, child);
+  }
+}
+
+/** Get all children as an array. */
+export function getChildren(buf: SharedBuffer, parentIndex: number): number[] {
+  return [...iterChildren(buf, parentIndex)];
+}
+
+/**
+ * Link a child to a parent (prepend to sibling list). O(1).
+ * Also sets the child's parentIndex.
+ */
+export function linkChild(buf: SharedBuffer, childIndex: number, parentIndex: number): void {
+  // Set parent
+  setI32(buf, childIndex, N_PARENT_INDEX, parentIndex);
+
+  // Get current first child of parent
+  const oldFirst = getFirstChild(buf, parentIndex);
+
+  // Prepend: new child becomes first
+  setNextSibling(buf, childIndex, oldFirst);
+  setPrevSibling(buf, childIndex, -1);
+
+  // Update old first child's prev pointer
+  if (oldFirst >= 0) {
+    setPrevSibling(buf, oldFirst, childIndex);
+  }
+
+  // Update parent's first child
+  setFirstChild(buf, parentIndex, childIndex);
+}
+
+/**
+ * Unlink a child from its parent's sibling list. O(1).
+ * Clears the child's parentIndex and sibling pointers.
+ */
+export function unlinkChild(buf: SharedBuffer, childIndex: number): void {
+  const parentIndex = getParentIndex(buf, childIndex);
+  if (parentIndex < 0) return; // Not linked to any parent
+
+  const prev = getPrevSibling(buf, childIndex);
+  const next = getNextSibling(buf, childIndex);
+
+  // Update previous sibling or parent's first_child
+  if (prev >= 0) {
+    setNextSibling(buf, prev, next);
+  } else {
+    // This was the first child
+    setFirstChild(buf, parentIndex, next);
+  }
+
+  // Update next sibling's prev pointer
+  if (next >= 0) {
+    setPrevSibling(buf, next, prev);
+  }
+
+  // Clear own links
+  setPrevSibling(buf, childIndex, -1);
+  setNextSibling(buf, childIndex, -1);
+  setI32(buf, childIndex, N_PARENT_INDEX, -1);
 }
 
 // =============================================================================

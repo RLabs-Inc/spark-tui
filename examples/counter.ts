@@ -218,7 +218,7 @@ const { buffer, unmount } = mount(() => {
 
 console.log('[counter] Starting Rust engine...')
 const engine = loadEngine()
-const result = engine.init(ptr(buffer.buffer), buffer.buffer.byteLength)
+const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
 
 if (result !== 0) {
   console.error(`[counter] Engine init failed: ${result}`)

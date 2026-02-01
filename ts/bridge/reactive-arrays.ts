@@ -36,6 +36,7 @@ import {
   N_GRID_AUTO_COLUMNS_VALUE, N_GRID_AUTO_ROWS_VALUE,
   N_GRID_COLUMN_START, N_GRID_COLUMN_END, N_GRID_ROW_START, N_GRID_ROW_END,
   N_JUSTIFY_SELF,
+  N_FIRST_CHILD, N_PREV_SIBLING, N_NEXT_SIBLING,
 
   // === Cache Lines 5-10: Grid Tracks ===
   // Handled via setGridColumnTracks()/setGridRowTracks() - not as slot buffers
@@ -139,6 +140,11 @@ export interface ReactiveArrays {
   gridRowStart: SharedSlotBuffer       // i16 @ 212
   gridRowEnd: SharedSlotBuffer         // i16 @ 214
   justifySelf: SharedSlotBuffer        // u8 @ 216
+
+  // === Hierarchy Linked List (in Cache Line 4) ===
+  firstChild: SharedSlotBuffer         // i32 @ 220
+  prevSibling: SharedSlotBuffer        // i32 @ 224
+  nextSibling: SharedSlotBuffer        // i32 @ 228
 
   // === Cache Line 11: Computed Output ===
   computedX: SharedSlotBuffer          // f32 @ 640
@@ -295,6 +301,11 @@ export function createReactiveArrays(
     gridRowStart: i16(N_GRID_ROW_START),
     gridRowEnd: i16(N_GRID_ROW_END),
     justifySelf: u8(N_JUSTIFY_SELF),
+
+    // === Hierarchy Linked List ===
+    firstChild: i32(N_FIRST_CHILD),
+    prevSibling: i32(N_PREV_SIBLING),
+    nextSibling: i32(N_NEXT_SIBLING),
 
     // === Cache Line 11: Computed Output ===
     computedX: f32(N_COMPUTED_X),

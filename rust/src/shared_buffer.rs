@@ -189,7 +189,11 @@ pub const N_GRID_COLUMN_END: usize = 210;
 pub const N_GRID_ROW_START: usize = 212;
 pub const N_GRID_ROW_END: usize = 214;
 pub const N_JUSTIFY_SELF: usize = 216;
-// 217-255: reserved
+// 217-219: reserved (alignment)
+pub const N_FIRST_CHILD: usize = 220;
+pub const N_PREV_SIBLING: usize = 224;
+pub const N_NEXT_SIBLING: usize = 228;
+// 232-255: reserved
 
 // --- Cache Lines 5-7 (256-447): Grid Column Tracks ---
 // 32 tracks × 6 bytes each = 192 bytes
@@ -1575,6 +1579,23 @@ impl SharedBuffer {
 
     #[inline] pub fn tab_index(&self, i: usize) -> i32 { self.read_node_i32(i, N_TAB_INDEX) }
 
+    // Hierarchy linked list (O(1) child operations)
+    #[inline] pub fn first_child(&self, i: usize) -> i32 { self.read_node_i32(i, N_FIRST_CHILD) }
+    #[inline] pub fn prev_sibling(&self, i: usize) -> i32 { self.read_node_i32(i, N_PREV_SIBLING) }
+    #[inline] pub fn next_sibling(&self, i: usize) -> i32 { self.read_node_i32(i, N_NEXT_SIBLING) }
+
+    #[inline] pub fn set_first_child(&self, i: usize, v: i32) { self.write_node_i32(i, N_FIRST_CHILD, v) }
+    #[inline] pub fn set_prev_sibling(&self, i: usize, v: i32) { self.write_node_i32(i, N_PREV_SIBLING, v) }
+    #[inline] pub fn set_next_sibling(&self, i: usize, v: i32) { self.write_node_i32(i, N_NEXT_SIBLING, v) }
+
+    /// Iterate over children of a node. O(children) instead of O(N).
+    pub fn iter_children(&self, parent: usize) -> ChildIter<'_> {
+        ChildIter {
+            buf: self,
+            current: self.first_child(parent),
+        }
+    }
+
     // Legacy child_count - reads from reserved space
     #[inline] pub fn child_count(&self, i: usize) -> i32 { self.read_node_i32(i, I_CHILD_COUNT) }
 
@@ -2014,6 +2035,31 @@ impl SharedBuffer {
         let mut data = [0u8; 16];
         data[0] = exit_code;
         self.push_event(EventType::Exit, 0xFFFF, &data);
+    }
+}
+
+// =============================================================================
+// CHILD ITERATOR
+// =============================================================================
+
+/// Iterator over children of a node using the linked sibling list.
+/// O(children) instead of O(N).
+pub struct ChildIter<'a> {
+    buf: &'a SharedBuffer,
+    current: i32,
+}
+
+impl Iterator for ChildIter<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current < 0 {
+            None
+        } else {
+            let idx = self.current as usize;
+            self.current = self.buf.next_sibling(idx);
+            Some(idx)
+        }
     }
 }
 

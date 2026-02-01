@@ -98,14 +98,14 @@ These use 12 of the 39 reserved bytes (217-255).
 
 ## Implementation Tasks
 
-### Phase 1: Spec & Constants
+### Phase 1: Spec & Constants ✅ DONE
 
-- [ ] **1.1** Update `docs/SHARED-BUFFER-SPEC.md`
+- [x] **1.1** Update `docs/SHARED-BUFFER-SPEC.md`
   - Add hierarchy fields table to Line 4 section
   - Update reserved bytes count (39 → 27)
   - Add "Hierarchy Management" section explaining linked list
 
-- [ ] **1.2** Update `rust/src/shared_buffer.rs`
+- [x] **1.2** Update `rust/src/shared_buffer.rs`
   - Add constants:
     ```rust
     pub const N_FIRST_CHILD: usize = 220;
@@ -126,7 +126,7 @@ These use 12 of the 39 reserved bytes (217-255).
     pub fn iter_children(&self, parent: usize) -> impl Iterator<Item = usize>
     ```
 
-- [ ] **1.3** Update `ts/bridge/shared-buffer.ts`
+- [x] **1.3** Update `ts/bridge/shared-buffer.ts`
   - Add constants:
     ```typescript
     export const N_FIRST_CHILD = 220;
@@ -135,7 +135,7 @@ These use 12 of the 39 reserved bytes (217-255).
     ```
   - Add accessors (getFirstChild, setFirstChild, etc.)
 
-- [ ] **1.4** Update `ts/bridge/reactive-arrays.ts`
+- [x] **1.4** Update `ts/bridge/reactive-arrays.ts`
   - Add slot buffers:
     ```typescript
     firstChild: createSlotBuffer('i32', N_FIRST_CHILD),
@@ -143,9 +143,9 @@ These use 12 of the 39 reserved bytes (217-255).
     nextSibling: createSlotBuffer('i32', N_NEXT_SIBLING),
     ```
 
-### Phase 2: TypeScript Registry
+### Phase 2: TypeScript Registry ✅ DONE
 
-- [ ] **2.1** Update `ts/engine/registry.ts`
+- [x] **2.1** Update `ts/engine/registry.ts`
   - Add `registerParent(childIndex: number, parentIndex: number)`:
     ```typescript
     export function registerParent(childIndex: number, parentIndex: number): void {
@@ -238,7 +238,9 @@ These use 12 of the 39 reserved bytes (217-255).
     // Clear all linked list state (done automatically since nodes reset to -1)
     ```
 
-### Phase 3: TypeScript Primitives
+### Phase 3: TypeScript Primitives ⏳ BLOCKED
+
+**BLOCKED**: Primitives still use old 256-byte `shared-buffer-aos.ts`. Need full rewrite to new 1024-byte `shared-buffer.ts` with Grid props. Do in next session.
 
 - [ ] **3.1** Update `ts/primitives/box.ts`
   - After writing parentIndex, call registerParent:

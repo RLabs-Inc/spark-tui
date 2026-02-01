@@ -106,6 +106,8 @@ export interface LayoutProps {
   justifyContent?: Reactive<'flex-start' | 'center' | 'flex-end' | 'space-between' | 'space-around' | 'space-evenly'>
   /** Align items (container) */
   alignItems?: Reactive<'stretch' | 'flex-start' | 'center' | 'flex-end' | 'baseline'>
+  /** Align content (multi-line flex container) */
+  alignContent?: Reactive<'flex-start' | 'center' | 'flex-end' | 'space-between' | 'space-around' | 'space-evenly' | 'stretch'>
   /** Align self (item override) */
   alignSelf?: Reactive<'auto' | 'stretch' | 'flex-start' | 'center' | 'flex-end' | 'baseline'>
   /** Flex grow */
@@ -118,6 +120,62 @@ export interface LayoutProps {
   overflow?: Reactive<'visible' | 'hidden' | 'scroll' | 'auto'>
   /** Z-index for stacking */
   zIndex?: Reactive<number>
+  /** Row gap (overrides gap for rows) */
+  rowGap?: Reactive<number>
+  /** Column gap (overrides gap for columns) */
+  columnGap?: Reactive<number>
+}
+
+// =============================================================================
+// GRID PROPS
+// =============================================================================
+
+/** Grid track sizing: fixed length, percentage, fractional, or intrinsic */
+export type GridTrackSize =
+  | number                    // Fixed size in terminal cells
+  | `${number}%`              // Percentage of container
+  | `${number}fr`             // Fractional unit
+  | 'auto'                    // Auto sizing
+  | 'min-content'             // Minimum content size
+  | 'max-content'             // Maximum content size
+
+/** Grid template: array of track sizes or single repeat value */
+export type GridTemplate = GridTrackSize[]
+
+/** Grid auto flow direction */
+export type GridAutoFlow = 'row' | 'column' | 'row dense' | 'column dense'
+
+/** Grid line position: line number, span, or auto */
+export type GridLine = number | `span ${number}` | 'auto'
+
+export interface GridContainerProps {
+  /** Display mode: 'flex' | 'grid' | 'none' */
+  display?: Reactive<'flex' | 'grid' | 'none'>
+  /** Grid template columns - defines explicit column tracks */
+  gridTemplateColumns?: Reactive<GridTemplate>
+  /** Grid template rows - defines explicit row tracks */
+  gridTemplateRows?: Reactive<GridTemplate>
+  /** Grid auto flow direction */
+  gridAutoFlow?: Reactive<GridAutoFlow>
+  /** Size of auto-generated columns */
+  gridAutoColumns?: Reactive<GridTrackSize>
+  /** Size of auto-generated rows */
+  gridAutoRows?: Reactive<GridTrackSize>
+  /** Justify items within their grid area */
+  justifyItems?: Reactive<'start' | 'end' | 'center' | 'stretch'>
+}
+
+export interface GridItemProps {
+  /** Grid column start line (1-based, or negative for span) */
+  gridColumnStart?: Reactive<GridLine>
+  /** Grid column end line (1-based, or negative for span) */
+  gridColumnEnd?: Reactive<GridLine>
+  /** Grid row start line (1-based, or negative for span) */
+  gridRowStart?: Reactive<GridLine>
+  /** Grid row end line (1-based, or negative for span) */
+  gridRowEnd?: Reactive<GridLine>
+  /** Justify self within grid area */
+  justifySelf?: Reactive<'auto' | 'start' | 'end' | 'center' | 'stretch'>
 }
 
 export interface InteractionProps {
@@ -146,7 +204,7 @@ export interface MouseProps {
 // BOX PROPS
 // =============================================================================
 
-export interface BoxProps extends StyleProps, BorderProps, DimensionProps, SpacingProps, LayoutProps, InteractionProps, MouseProps {
+export interface BoxProps extends StyleProps, BorderProps, DimensionProps, SpacingProps, LayoutProps, GridContainerProps, GridItemProps, InteractionProps, MouseProps {
   /** Component ID (optional, auto-generated if not provided) */
   id?: string
   /** Is visible */
@@ -174,7 +232,7 @@ export interface BoxProps extends StyleProps, BorderProps, DimensionProps, Spaci
 // TEXT PROPS
 // =============================================================================
 
-export interface TextProps extends StyleProps, DimensionProps, SpacingProps, LayoutProps, MouseProps {
+export interface TextProps extends StyleProps, DimensionProps, SpacingProps, LayoutProps, GridItemProps, MouseProps {
   /** Component ID (optional, auto-generated if not provided) */
   id?: string
   /** Text content (strings and numbers auto-converted) */
@@ -222,7 +280,7 @@ export interface CursorConfig {
   bg?: Reactive<RGBA>
 }
 
-export interface InputProps extends StyleProps, BorderProps, DimensionProps, SpacingProps, LayoutProps, InteractionProps, MouseProps {
+export interface InputProps extends StyleProps, BorderProps, DimensionProps, SpacingProps, LayoutProps, GridItemProps, InteractionProps, MouseProps {
   /** Component ID (optional, auto-generated if not provided) */
   id?: string
   /** Current value (two-way bound) */
