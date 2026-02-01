@@ -19,6 +19,7 @@ import {
   getChildren,
   linkChild,
   unlinkChild,
+  initNodeHierarchy,
   COMPONENT_NONE,
 } from '../bridge/shared-buffer'
 
@@ -101,9 +102,16 @@ export function allocateIndex(id?: string): number {
   indexToId.set(index, componentId)
   allocatedIndices.add(index)
 
-  // Update node count in shared buffer header
+  // Initialize node in shared buffer
   if (isInitialized()) {
     const buf = getBuffer()
+
+    // CRITICAL: Initialize hierarchy fields to -1 before any linking.
+    // SharedArrayBuffer is zero-initialized, but 0 is a valid node index!
+    // Without this, getFirstChild(0) returns 0 instead of -1, causing infinite loops.
+    initNodeHierarchy(buf, index)
+
+    // Update node count
     const count = allocatedIndices.size
     setNodeCount(buf, count > nextIndex ? count : nextIndex)
   }

@@ -1233,6 +1233,18 @@ export function setNextSibling(buf: SharedBuffer, nodeIndex: number, siblingInde
   setI32(buf, nodeIndex, N_NEXT_SIBLING, siblingIndex);
 }
 
+/**
+ * Initialize a node's hierarchy fields to -1 (no parent, no children, no siblings).
+ * MUST be called when allocating a new node, before any linkChild() calls.
+ * SharedArrayBuffer is zero-initialized, but 0 is a valid node index!
+ */
+export function initNodeHierarchy(buf: SharedBuffer, nodeIndex: number): void {
+  setI32(buf, nodeIndex, N_PARENT_INDEX, -1);
+  setI32(buf, nodeIndex, N_FIRST_CHILD, -1);
+  setI32(buf, nodeIndex, N_PREV_SIBLING, -1);
+  setI32(buf, nodeIndex, N_NEXT_SIBLING, -1);
+}
+
 /** Iterate children of a node. O(children) instead of O(N). */
 export function* iterChildren(buf: SharedBuffer, parentIndex: number): Generator<number> {
   let child = getFirstChild(buf, parentIndex);
