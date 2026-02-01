@@ -95,7 +95,17 @@ export const H_EXIT_REQUESTED = 168;
 // --- Bytes 192-255: Stats & Debug ---
 export const H_RENDER_COUNT = 192;
 export const H_LAYOUT_COUNT = 196;
-// 200-255: reserved
+// Timing stats — Rust side (u32 microseconds each)
+export const H_LAYOUT_TIME_US = 200;
+export const H_FRAMEBUFFER_TIME_US = 204;
+export const H_RENDER_TIME_US = 208;
+export const H_TOTAL_FRAME_TIME_US = 212;
+// Timing stats — TS side (u32 nanoseconds each, up to ~4sec)
+export const H_TS_SIGNAL_TIME_NS = 216;
+export const H_TS_BUFFER_WRITE_TIME_NS = 220;
+export const H_TS_NOTIFY_TIME_NS = 224;
+export const H_TS_TOTAL_TIME_NS = 228;
+// 232-255: reserved
 
 // =============================================================================
 // NODE FIELD OFFSETS (1024 bytes per node)
@@ -966,6 +976,86 @@ export function getLayoutCount(buf: SharedBuffer): number {
   return buf.view.getUint32(H_LAYOUT_COUNT, true);
 }
 
+// --- Timing Stats (Rust side writes, TS reads) ---
+export function getLayoutTimeUs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_LAYOUT_TIME_US, true);
+}
+
+export function getFramebufferTimeUs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_FRAMEBUFFER_TIME_US, true);
+}
+
+export function getRenderTimeUs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_RENDER_TIME_US, true);
+}
+
+export function getTotalFrameTimeUs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_TOTAL_FRAME_TIME_US, true);
+}
+
+// --- Timing Stats (TS side writes, TS/Rust reads) ---
+export function setTsSignalTimeNs(buf: SharedBuffer, ns: number): void {
+  buf.view.setUint32(H_TS_SIGNAL_TIME_NS, ns >>> 0, true);
+}
+
+export function setTsBufferWriteTimeNs(buf: SharedBuffer, ns: number): void {
+  buf.view.setUint32(H_TS_BUFFER_WRITE_TIME_NS, ns >>> 0, true);
+}
+
+export function setTsNotifyTimeNs(buf: SharedBuffer, ns: number): void {
+  buf.view.setUint32(H_TS_NOTIFY_TIME_NS, ns >>> 0, true);
+}
+
+export function setTsTotalTimeNs(buf: SharedBuffer, ns: number): void {
+  buf.view.setUint32(H_TS_TOTAL_TIME_NS, ns >>> 0, true);
+}
+
+export function getTsSignalTimeNs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_TS_SIGNAL_TIME_NS, true);
+}
+
+export function getTsBufferWriteTimeNs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_TS_BUFFER_WRITE_TIME_NS, true);
+}
+
+export function getTsNotifyTimeNs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_TS_NOTIFY_TIME_NS, true);
+}
+
+export function getTsTotalTimeNs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_TS_TOTAL_TIME_NS, true);
+}
+
+/**
+ * Get all timing stats as an object.
+ * Convenient for benchmarking.
+ */
+export interface TimingStats {
+  // Rust side (microseconds)
+  layoutUs: number;
+  framebufferUs: number;
+  renderUs: number;
+  totalFrameUs: number;
+  // TS side (nanoseconds)
+  tsSignalNs: number;
+  tsBufferWriteNs: number;
+  tsNotifyNs: number;
+  tsTotalNs: number;
+}
+
+export function getTimingStats(buf: SharedBuffer): TimingStats {
+  return {
+    layoutUs: getLayoutTimeUs(buf),
+    framebufferUs: getFramebufferTimeUs(buf),
+    renderUs: getRenderTimeUs(buf),
+    totalFrameUs: getTotalFrameTimeUs(buf),
+    tsSignalNs: getTsSignalTimeNs(buf),
+    tsBufferWriteNs: getTsBufferWriteTimeNs(buf),
+    tsNotifyNs: getTsNotifyTimeNs(buf),
+    tsTotalNs: getTsTotalTimeNs(buf),
+  };
+}
+
 export function isExitRequested(buf: SharedBuffer): boolean {
   return buf.view.getUint8(H_EXIT_REQUESTED) !== 0;
 }
@@ -1000,7 +1090,7 @@ export function waitForRust(buf: SharedBuffer, timeout?: number): 'ok' | 'timed-
  * Wait for Rust to wake us (non-blocking, async).
  * Returns a promise that resolves when Rust wakes us.
  */
-export function waitForRustAsync(buf: SharedBuffer): Promise<void> {
+export async function waitForRustAsync(buf: SharedBuffer): Promise<void> {
   const idx = H_WAKE_TS / 4;
   const result = Atomics.waitAsync(buf.headerI32, idx, 0);
 

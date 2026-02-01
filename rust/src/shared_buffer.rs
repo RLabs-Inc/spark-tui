@@ -112,7 +112,17 @@ pub const H_EXIT_REQUESTED: usize = 168;
 // --- Bytes 192-255: Stats & Debug ---
 pub const H_RENDER_COUNT: usize = 192;
 pub const H_LAYOUT_COUNT: usize = 196;
-// 200-255: reserved
+// Timing stats — Rust side (u32 microseconds each)
+pub const H_LAYOUT_TIME_US: usize = 200;
+pub const H_FRAMEBUFFER_TIME_US: usize = 204;
+pub const H_RENDER_TIME_US: usize = 208;
+pub const H_TOTAL_FRAME_TIME_US: usize = 212;
+// Timing stats — TS side (u32 nanoseconds each, up to ~4sec)
+pub const H_TS_SIGNAL_TIME_NS: usize = 216;       // Time for signal.set() effect propagation
+pub const H_TS_BUFFER_WRITE_TIME_NS: usize = 220; // Time for SharedBuffer writes
+pub const H_TS_NOTIFY_TIME_NS: usize = 224;       // Time for Atomics.notify call
+pub const H_TS_TOTAL_TIME_NS: usize = 228;        // Total TS-side time (signal to notify)
+// 232-255: reserved
 
 // =============================================================================
 // NODE FIELD OFFSETS (1024 bytes per node)
@@ -1298,6 +1308,13 @@ impl SharedBuffer {
         self.read_header_u32(H_TERMINAL_HEIGHT)
     }
 
+    /// Set terminal dimensions (called on SIGWINCH)
+    #[inline]
+    pub fn set_terminal_size(&self, width: u32, height: u32) {
+        self.write_header_u32(H_TERMINAL_WIDTH, width);
+        self.write_header_u32(H_TERMINAL_HEIGHT, height);
+    }
+
     /// Get generation counter
     #[inline]
     pub fn generation(&self) -> u32 {
@@ -1394,6 +1411,58 @@ impl SharedBuffer {
     pub fn increment_layout_count(&self) {
         let count = self.read_header_u32(H_LAYOUT_COUNT);
         self.write_header_u32(H_LAYOUT_COUNT, count.wrapping_add(1));
+    }
+
+    // =========================================================================
+    // TIMING STATS (for benchmarking)
+    // =========================================================================
+
+    /// Set layout computation time (microseconds)
+    #[inline]
+    pub fn set_layout_time_us(&self, us: u32) {
+        self.write_header_u32(H_LAYOUT_TIME_US, us);
+    }
+
+    /// Set framebuffer computation time (microseconds)
+    #[inline]
+    pub fn set_framebuffer_time_us(&self, us: u32) {
+        self.write_header_u32(H_FRAMEBUFFER_TIME_US, us);
+    }
+
+    /// Set render time (microseconds)
+    #[inline]
+    pub fn set_render_time_us(&self, us: u32) {
+        self.write_header_u32(H_RENDER_TIME_US, us);
+    }
+
+    /// Set total frame time (microseconds)
+    #[inline]
+    pub fn set_total_frame_time_us(&self, us: u32) {
+        self.write_header_u32(H_TOTAL_FRAME_TIME_US, us);
+    }
+
+    /// Get layout time (microseconds)
+    #[inline]
+    pub fn layout_time_us(&self) -> u32 {
+        self.read_header_u32(H_LAYOUT_TIME_US)
+    }
+
+    /// Get framebuffer time (microseconds)
+    #[inline]
+    pub fn framebuffer_time_us(&self) -> u32 {
+        self.read_header_u32(H_FRAMEBUFFER_TIME_US)
+    }
+
+    /// Get render time (microseconds)
+    #[inline]
+    pub fn render_time_us(&self) -> u32 {
+        self.read_header_u32(H_RENDER_TIME_US)
+    }
+
+    /// Get total frame time (microseconds)
+    #[inline]
+    pub fn total_frame_time_us(&self) -> u32 {
+        self.read_header_u32(H_TOTAL_FRAME_TIME_US)
     }
 
     /// Check if exit has been requested

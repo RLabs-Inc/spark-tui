@@ -39,7 +39,7 @@ use taffy::{
 };
 
 use crate::shared_buffer::{
-    SharedBuffer, COMPONENT_BOX, COMPONENT_INPUT, COMPONENT_NONE, COMPONENT_TEXT, DIRTY_LAYOUT,
+    SharedBuffer, RenderMode, COMPONENT_BOX, COMPONENT_INPUT, COMPONENT_NONE, COMPONENT_TEXT, DIRTY_LAYOUT,
 };
 
 use super::text_measure::{measure_text_height, string_width};
@@ -86,11 +86,12 @@ impl LayoutContext {
 
     /// Clear cache ONLY for nodes with DIRTY_LAYOUT flag set.
     /// This is the key to using Taffy's caching properly with reactive dirty tracking.
-    fn clear_dirty_caches(&mut self, buf: &SharedBuffer, node_count: usize) {
+    fn clear_dirty_caches(&mut self, _buf: &SharedBuffer, node_count: usize) {
+        // Clear ALL caches when layout runs.
+        // This is needed because text size changes affect ancestor layouts.
+        // TODO: Optimize by walking parent chain for dirty nodes only.
         for i in 0..node_count.min(self.cache.len()) {
-            if buf.is_dirty(i, DIRTY_LAYOUT) {
-                self.cache[i].clear();
-            }
+            self.cache[i].clear();
         }
     }
 
@@ -906,9 +907,16 @@ pub fn compute_layout(buf: &SharedBuffer) -> u32 {
             return 0;
         }
 
+        // Available space depends on render mode:
+        // - Fullscreen: use terminal dimensions
+        // - Inline/Append: width from terminal, height unbounded (content determines)
+        let render_mode = buf.render_mode();
         let available = taffy::Size {
             width: AvailableSpace::Definite(buf.terminal_width() as f32),
-            height: AvailableSpace::Definite(buf.terminal_height() as f32),
+            height: match render_mode {
+                RenderMode::Diff => AvailableSpace::Definite(buf.terminal_height() as f32),
+                RenderMode::Inline | RenderMode::Append => AvailableSpace::MaxContent,
+            },
         };
 
         let roots = tree.ctx.roots.clone();

@@ -8,8 +8,9 @@
 
 // Mount API - THE entry point for SparkTUI apps
 export {
-  mount,
-  mountForTest,
+  mount,        // async, blocks until exit (most users)
+  mountSync,    // sync, returns handle (power users, tests)
+  mountForTest, // convenience for tests (noopNotifier)
   isMounted,
   getRenderMode,
   type MountOptions,

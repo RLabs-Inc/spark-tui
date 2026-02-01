@@ -13,6 +13,7 @@
  *   - or _    Decrement
  *   Tab       Navigate focus
  *   Enter     Activate focused button
+ *   t         Cycle theme
  *   q         Quit
  *   Ctrl+C    Quit
  */
@@ -21,27 +22,7 @@ import { signal, derived } from '@rlabs-inc/signals'
 import { box, text } from '../ts/primitives'
 import { t, themes, setTheme, getThemeNames } from '../ts/state/theme'
 import { mount } from '../ts/engine'
-import { loadEngine } from '../ts/bridge/ffi'
-import { isEnter, isSpace, isChar, getChar, KeyEvent } from '../ts/engine/events'
-import { ptr } from 'bun:ffi'
-import { join } from 'path'
-
-// =============================================================================
-// BUILD RUST ENGINE
-// =============================================================================
-
-console.log('[counter] Building Rust engine...')
-const buildResult = Bun.spawnSync({
-  cmd: ['cargo', 'build', '--release'],
-  cwd: join(import.meta.dir, '../rust'),
-  stdout: 'inherit',
-  stderr: 'inherit',
-})
-
-if (buildResult.exitCode !== 0) {
-  console.error('[counter] Failed to build Rust engine')
-  process.exit(1)
-}
+import { isEnter, isSpace, getChar } from '../ts/engine/events'
 
 // =============================================================================
 // REACTIVE STATE
@@ -52,35 +33,18 @@ const themeNames = getThemeNames()
 const themeIndex = signal(0)
 const currentThemeName = derived(() => themeNames[themeIndex.value])
 
-// Derived display string with padding for visual stability
-// const countDisplay = derived(() => {
-//   const n = count.value
-//   const sign = n >= -9 ? '' : ' '
-//   return sign + n.toString().padStart(4, '')
-// })
-
 // =============================================================================
-// MOUNT APP
+// APP
 // =============================================================================
 
-console.log('[counter] Mounting app...')
-
-// Use 'inline' mode to test if positioning bug is diff-related
-// Change to 'fullscreen' for normal behavior
-const { buffer, unmount } = mount(() => {
+await mount(() => {
   // Root: Full terminal, centered
   box({
-    // width: '100%',
-    // height: '100%',
-    // overflow: 'scroll',
     flexDirection: 'column',
-    // justifyContent: 'space-around',
-    // alignItems: 'center',
     children: () => {
       // Card container
       box({
         width: '100%',
-        // height: 50,
         flexDirection: 'column',
         alignItems: 'center',
         padding: 2,
@@ -101,7 +65,7 @@ const { buffer, unmount } = mount(() => {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
-            // gap: 2,
+            gap: 2,
             children: () => {
               // Minus button
               box({
@@ -109,8 +73,6 @@ const { buffer, unmount } = mount(() => {
                 height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
-                // border: 1,
-                // borderColor: t.error,
                 bg: t.error,
                 fg: t.text,
                 focusable: true,
@@ -146,8 +108,6 @@ const { buffer, unmount } = mount(() => {
                 height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
-                // border: 1,
-                // borderColor: t.success,
                 bg: t.success,
                 fg: t.text,
                 focusable: true,
@@ -166,23 +126,23 @@ const { buffer, unmount } = mount(() => {
               })
             },
           })
+
+          // Footer
           box({
-            // Footer
             flexDirection: 'column',
             justifyContent: 'center',
-            // visible: false,
             children: () => {
               text({
                 content: '+/- count  q quit',
-                fg: t.textMuted
+                fg: t.textMuted,
               })
               text({
                 content: () => `t theme: ${currentThemeName.value}`,
-                fg: t.textMuted
+                fg: t.textMuted,
               })
-            }
+            },
           })
-        }
+        },
       })
     },
 
@@ -198,7 +158,6 @@ const { buffer, unmount } = mount(() => {
         return true
       }
       if (ch === 'q' || ch === 'Q') {
-        unmount()
         process.exit(0)
       }
       if (ch === 't' || ch === 'T') {
@@ -206,26 +165,6 @@ const { buffer, unmount } = mount(() => {
         setTheme(themeNames[themeIndex.value] as keyof typeof themes)
         return true
       }
-    }
-
+    },
   })
-
-}, { mode: 'inline' }) // Test inline mode - change to 'fullscreen' for normal
-
-// =============================================================================
-// START RUST ENGINE
-// =============================================================================
-
-console.log('[counter] Starting Rust engine...')
-const engine = loadEngine()
-const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
-
-if (result !== 0) {
-  console.error(`[counter] Engine init failed: ${result}`)
-  process.exit(1)
-}
-
-console.log('[counter] Running! Press +/- to count, q to quit')
-
-// Keep process alive - engine handles stdin
-await new Promise(() => { })
+}, { mode: 'inline' })

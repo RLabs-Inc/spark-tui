@@ -2,10 +2,14 @@
  * SparkTUI Mount API (v3 Buffer)
  *
  * The main entry point for SparkTUI applications.
- * Handles bridge initialization, event listener, render mode, and cleanup.
+ * Handles bridge initialization, engine loading, event listener, and cleanup.
  *
  * PURELY REACTIVE: No loops. Change propagates through the dependency graph.
  * The event listener uses Atomics.waitAsync - it SUSPENDS until Rust notifies.
+ *
+ * Two APIs:
+ *   mount()     - async, blocks until exit (most users)
+ *   mountSync() - sync, returns handle for manual control (power users, tests)
  */
 
 import { initBridge, resetBridge, getBuffer } from '../bridge'
@@ -27,6 +31,8 @@ import {
   CONFIG_TAB_NAVIGATION,
   CONFIG_MOUSE_ENABLED,
 } from '../bridge/shared-buffer'
+import { loadEngine, type SparkEngine } from '../bridge/ffi'
+import { ptr } from 'bun:ffi'
 import type { Cleanup } from '../primitives/types'
 
 // =============================================================================
@@ -75,11 +81,17 @@ export interface MountHandle {
   /** Get the shared buffer for direct access */
   buffer: SharedBuffer
 
+  /** Get the Rust engine for direct access */
+  engine: SparkEngine
+
   /** Switch render mode at runtime */
   setMode(mode: MountRenderMode): void
 
   /** Get current render mode */
   getMode(): MountRenderMode
+
+  /** Block until the app exits (for power users who use mountSync) */
+  waitForExit(): Promise<void>
 }
 
 // =============================================================================
@@ -90,6 +102,8 @@ let currentCleanup: Cleanup | null = null
 let currentMode: MountRenderMode = 'fullscreen'
 let mounted = false
 let exitUnsubscribe: Cleanup | null = null
+let currentEngine: SparkEngine | null = null
+let exitResolver: (() => void) | null = null
 
 // =============================================================================
 // RENDER MODE
@@ -124,42 +138,40 @@ function getTerminalSize(): { width: number; height: number } {
 }
 
 // =============================================================================
-// MOUNT
+// MOUNT SYNC (Power users, tests)
 // =============================================================================
 
 /**
- * Mount a SparkTUI application.
+ * Mount a SparkTUI application synchronously.
  *
- * This is THE entry point for SparkTUI apps. It handles:
- * - Bridge initialization (SharedArrayBuffer + reactive arrays + notifier)
- * - Event listener startup (Atomics.waitAsync - reactive, not polling)
- * - Render mode configuration
- * - Terminal size detection
- * - Clean unmount with full cleanup
+ * Returns a handle for manual control. Use this for:
+ * - Tests that need to inspect state
+ * - Power users who want fine-grained control
+ * - Apps that need to do work after mounting before blocking
+ *
+ * For most apps, use `mount()` instead which handles everything.
  *
  * @param app - The app function that creates the UI
  * @param options - Mount options (render mode, terminal size, etc.)
  * @returns A handle to control the mounted app
  *
- * @example Fullscreen app (default)
+ * @example Power user pattern
  * ```ts
- * const { unmount } = mount(() => {
- *   box({ width: '100%', height: '100%', children: () => {
- *     text({ content: 'Hello, SparkTUI!' })
- *   }})
+ * const app = mountSync(() => {
+ *   box({ children: () => text({ content: 'Hello!' }) })
  * })
+ * // Do something with app.buffer or app.engine
+ * await app.waitForExit()
  * ```
  *
- * @example Inline mode (renders within terminal flow)
+ * @example Test pattern
  * ```ts
- * mount(() => {
- *   box({ children: () => {
- *     text({ content: 'Inline content' })
- *   }})
- * }, { mode: 'inline', height: 10 })
+ * const app = mountSync(() => { ... }, { noopNotifier: true })
+ * // Inspect app.buffer
+ * app.unmount()
  * ```
  */
-export function mount(app: () => void, options: MountOptions = {}): MountHandle {
+export function mountSync(app: () => void, options: MountOptions = {}): MountHandle {
   if (mounted) {
     throw new Error('SparkTUI is already mounted. Call unmount() first.')
   }
@@ -198,10 +210,35 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
   }
   setConfigFlags(buffer, flags)
 
+  // Load and initialize Rust engine (unless noop mode for tests)
+  let engine: SparkEngine
+  if (!noopNotifier) {
+    engine = loadEngine()
+    const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
+    if (result !== 0) {
+      throw new Error(`SparkTUI engine init failed with code ${result}`)
+    }
+    currentEngine = engine
+  } else {
+    // Create a noop engine for tests
+    engine = {
+      init: () => 0,
+      bufferSize: () => 0,
+      wake: () => {},
+      cleanup: () => {},
+      close: () => {},
+    }
+  }
+
   // Start event listener (Atomics.waitAsync - REACTIVE, NOT POLLING)
   if (!noopNotifier) {
     startEventListener(buffer)
   }
+
+  // Create exit promise that resolves when app exits
+  const exitPromise = new Promise<void>((resolve) => {
+    exitResolver = resolve
+  })
 
   // Create the mount handle
   const handle: MountHandle = {
@@ -221,15 +258,29 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
         currentCleanup = null
       }
 
+      // Cleanup engine
+      if (currentEngine) {
+        currentEngine.cleanup()
+        currentEngine.close()
+        currentEngine = null
+      }
+
       resetBridge()
 
       mounted = false
       currentMode = 'fullscreen'
 
+      // Resolve the exit promise
+      if (exitResolver) {
+        exitResolver()
+        exitResolver = null
+      }
+
       onUnmount?.()
     },
 
     buffer,
+    engine,
 
     setMode(newMode: MountRenderMode) {
       applyRenderMode(buffer, newMode)
@@ -238,9 +289,13 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
     getMode() {
       return currentMode
     },
+
+    waitForExit() {
+      return exitPromise
+    },
   }
 
-  // Register Ctrl+C handler (if enabled)
+  // Register exit handler (Ctrl+C, 'q', etc. from Rust)
   if (!disableCtrlC) {
     exitUnsubscribe = registerExitHandler(() => {
       handle.unmount()
@@ -259,6 +314,57 @@ export function mount(app: () => void, options: MountOptions = {}): MountHandle 
 }
 
 // =============================================================================
+// MOUNT (Most users)
+// =============================================================================
+
+/**
+ * Mount a SparkTUI application.
+ *
+ * This is THE entry point for SparkTUI apps. It handles everything:
+ * - Bridge initialization (SharedArrayBuffer + reactive arrays)
+ * - Rust engine loading and initialization
+ * - Event listener startup (Atomics.waitAsync - reactive, not polling)
+ * - Render mode configuration
+ * - Terminal size detection
+ * - Blocks until the app exits (Ctrl+C, 'q', etc.)
+ * - Clean unmount with full cleanup
+ *
+ * @param app - The app function that creates the UI
+ * @param options - Mount options (render mode, terminal size, etc.)
+ * @returns Promise that resolves when the app exits
+ *
+ * @example Simple app
+ * ```ts
+ * await mount(() => {
+ *   box({
+ *     children: () => text({ content: 'Hello, SparkTUI!' })
+ *   })
+ * })
+ * // App has exited
+ * ```
+ *
+ * @example Fullscreen with options
+ * ```ts
+ * await mount(() => {
+ *   box({ width: '100%', height: '100%', children: () => {
+ *     text({ content: 'Fullscreen!' })
+ *   }})
+ * }, { mode: 'fullscreen', disableMouse: true })
+ * ```
+ *
+ * @example Inline mode (renders within terminal flow)
+ * ```ts
+ * await mount(() => {
+ *   box({ children: () => text({ content: 'Inline content' }) })
+ * }, { mode: 'inline' })
+ * ```
+ */
+export async function mount(app: () => void, options: MountOptions = {}): Promise<void> {
+  const handle = mountSync(app, options)
+  await handle.waitForExit()
+}
+
+// =============================================================================
 // HELPERS
 // =============================================================================
 
@@ -274,11 +380,11 @@ export function getRenderMode(): MountRenderMode {
 
 /**
  * Convenience function for testing - mount and immediately get buffer access.
- * Automatically uses noopNotifier for testing without Rust.
+ * Automatically uses noopNotifier for testing without Rust engine.
  */
 export function mountForTest(
   app: () => void,
   options: Omit<MountOptions, 'noopNotifier'> = {}
 ): MountHandle {
-  return mount(app, { ...options, noopNotifier: true })
+  return mountSync(app, { ...options, noopNotifier: true })
 }

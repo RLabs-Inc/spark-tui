@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::sync::mpsc;
+use std::time::Instant;
 
 use spark_signals::{signal, derived, effect, Signal};
 
@@ -51,7 +52,7 @@ use crate::input::keyboard;
 use crate::input::mouse::MouseManager;
 use crate::input::scroll::ScrollManager;
 use crate::input::text_edit::TextEditor;
-use crate::input::reader::{StdinReader, StdinMessage};
+use crate::input::reader::{StdinReader, StdinMessage, ResizeWatcher, get_terminal_size};
 use super::terminal::TerminalSetup;
 use super::wake::WakeWatcher;
 
@@ -145,32 +146,58 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     let stdin_reader = StdinReader::spawn(tx.clone())?;
 
     // 4. Start wake watcher (sends Wake messages when TS writes to SharedBuffer)
-    let _wake_watcher = WakeWatcher::spawn(buf, tx, running.clone());
+    let _wake_watcher = WakeWatcher::spawn(buf, tx.clone(), running.clone());
 
-    // 5. Initialize input system state
+    // 5. Start resize watcher (sends Resize messages on SIGWINCH)
+    let _resize_watcher = ResizeWatcher::spawn(tx, running.clone());
+
+    // 6. Initialize input system state
     let mut parser = InputParser::new();
     let mut focus = FocusManager::new();
     let mut editor = TextEditor::new();
     let mut scroll = ScrollManager::new();
+
+    // Get initial terminal size (prefer ioctl over SharedBuffer for accuracy)
+    let (init_tw, init_th) = get_terminal_size()
+        .unwrap_or((buf.terminal_width() as u16, buf.terminal_height() as u16));
+
     // Cursor blink is handled by TS pulse() signal - no Rust-side timer needed
-    let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(
-        buf.terminal_width() as u16,
-        buf.terminal_height() as u16,
-    )));
+    let mouse_mgr = Rc::new(RefCell::new(MouseManager::new(init_tw, init_th)));
 
     // =========================================================================
-    // 6. Create the reactive graph
+    // 7. Create the reactive graph
     // =========================================================================
 
     // Root signal: generation counter.
     // Incremented when TS wakes Rust or when stdin input arrives.
     let generation: Signal<u64> = signal(0);
 
-    // Layout derived: reads generation, checks dirty flags, runs Taffy if needed.
+    // Terminal size signals - updated on SIGWINCH.
+    // Layout derived depends on these, so resize triggers re-layout automatically.
+    let terminal_width: Signal<u16> = signal(init_tw);
+    let terminal_height: Signal<u16> = signal(init_th);
+
+    // Shared frame start timestamp for timing measurements
+    let frame_start: Rc<RefCell<Option<Instant>>> = Rc::new(RefCell::new(None));
+    let frame_start_for_layout = frame_start.clone();
+
+    // Layout derived: reads generation + terminal size, checks dirty flags, runs Taffy if needed.
     let gen_for_layout = generation.clone();
+    let tw_for_layout = terminal_width.clone();
+    let th_for_layout = terminal_height.clone();
     let layout_derived = derived(move || {
+        let layout_start = Instant::now();
+
         // Read generation (creates reactive dependency)
         let generation_value = gen_for_layout.get();
+
+        // Read terminal size (creates reactive dependency - resize triggers re-layout)
+        let tw = tw_for_layout.get();
+        let th = th_for_layout.get();
+
+        // Update SharedBuffer with current terminal size
+        // This is where layout will read available space from
+        buf.set_terminal_size(tw as u32, th as u32);
 
         // Check dirty flags for smart skip
         let node_count = buf.node_count();
@@ -192,6 +219,15 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
             layout::compute_layout(buf);
         }
 
+        // Record layout timing
+        let layout_us = layout_start.elapsed().as_micros() as u32;
+        buf.set_layout_time_us(layout_us);
+
+        // Capture frame start time if not already set
+        if frame_start_for_layout.borrow().is_none() {
+            *frame_start_for_layout.borrow_mut() = Some(layout_start);
+        }
+
         // Return generation as the "result" — downstream deriveds
         // depend on this, so they re-run when generation changes
         generation_value
@@ -200,6 +236,8 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     // Framebuffer derived: depends on layout, builds 2D cell grid.
     let layout_d = layout_derived.clone();
     let fb_derived = derived(move || {
+        let fb_start = Instant::now();
+
         // Read layout derived (creates reactive dependency)
         let _layout_gen = layout_d.get();
 
@@ -211,6 +249,10 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
         // Build framebuffer from SharedBuffer
         let (buffer, hit_regions) = framebuffer::compute_framebuffer(buf, tw, th);
 
+        // Record framebuffer timing
+        let fb_us = fb_start.elapsed().as_micros() as u32;
+        buf.set_framebuffer_time_us(fb_us);
+
         FrameBufferResult {
             buffer,
             hit_regions,
@@ -221,9 +263,12 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     // ONE render effect: fires when framebuffer derived changes.
     let running_for_effect = running.clone();
     let mouse_for_effect = mouse_mgr.clone();
+    let frame_start_for_effect = frame_start.clone();
     let mut diff_renderer = DiffRenderer::new();
     let mut inline_renderer = InlineRenderer::new();
     let _stop_effect = effect(move || {
+        let render_start = Instant::now();
+
         if !running_for_effect.load(Ordering::SeqCst) {
             return;
         }
@@ -246,12 +291,29 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
             RenderMode::Diff => { let _ = diff_renderer.render(&result.buffer); }
         }
 
+        // Record render timing
+        let render_us = render_start.elapsed().as_micros() as u32;
+        buf.set_render_time_us(render_us);
+
+        // Record total frame time (from frame start to render complete)
+        if let Some(start) = *frame_start_for_effect.borrow() {
+            let total_us = start.elapsed().as_micros() as u32;
+            buf.set_total_frame_time_us(total_us);
+        }
+
+        // Clear frame start for next frame
+        *frame_start_for_effect.borrow_mut() = None;
+
         // Increment render counter so TS can track FPS
         buf.increment_render_count();
     });
 
+    // Clone signals for event loop
+    let tw_for_loop = terminal_width.clone();
+    let th_for_loop = terminal_height.clone();
+
     // =========================================================================
-    // 7. Initial render — trigger the reactive graph once
+    // 8. Initial render — trigger the reactive graph once
     // =========================================================================
     //
     // The effect won't run until generation changes. Trigger initial render
@@ -259,7 +321,7 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
     generation.set(1);
 
     // =========================================================================
-    // 8. Event-driven blocking: wait for input or wake, increment generation
+    // 9. Event-driven blocking: wait for input or wake, increment generation
     // =========================================================================
     //
     // The engine thread blocks on channel.recv(). It wakes IMMEDIATELY when
@@ -289,7 +351,12 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
                             );
                         }
                         ParsedEvent::Resize(w, h) => {
+                            // Escape-sequence based resize (some terminals)
                             mouse_mgr.borrow_mut().resize(w, h);
+                            tw_for_loop.set(w);
+                            th_for_loop.set(h);
+                            // Push resize event to TS
+                            buf.push_resize_event(w, h);
                         }
                         _ => {}
                     }
@@ -303,7 +370,21 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
                 // Input changed state → increment generation → reactive propagation
                 generation.set(generation.get() + 1);
             }
+            Ok(StdinMessage::Resize(w, h)) => {
+                // SIGWINCH detected by ResizeWatcher
+                // Update terminal size signals → triggers layout_derived → re-layout
+                mouse_mgr.borrow_mut().resize(w, h);
+                tw_for_loop.set(w);
+                th_for_loop.set(h);
+                // Push resize event to TS (optional - user callback)
+                buf.push_resize_event(w, h);
+                // Signal change auto-triggers reactive graph, but increment generation too
+                generation.set(generation.get() + 1);
+            }
             Ok(StdinMessage::Wake) => {
+                // Capture frame start for timing measurement
+                *frame_start.borrow_mut() = Some(Instant::now());
+
                 // TS wrote props to SharedBuffer → increment generation → reactive propagation
                 generation.set(generation.get() + 1);
             }
