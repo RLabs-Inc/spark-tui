@@ -105,7 +105,13 @@ export const H_TS_SIGNAL_TIME_NS = 216;
 export const H_TS_BUFFER_WRITE_TIME_NS = 220;
 export const H_TS_NOTIFY_TIME_NS = 224;
 export const H_TS_TOTAL_TIME_NS = 228;
-// 232-255: reserved
+// Instrumentation — counts and cross-runtime timing
+export const H_TS_NOTIFY_COUNT = 232;           // Count of Atomics.notify calls (u32)
+export const H_TS_NOTIFY_TIMESTAMP = 236;       // Unix microseconds when TS called notify (u64, 8 bytes)
+export const H_WAKE_COUNT = 244;                // Count of wakes detected by Rust (u32)
+export const H_WAKE_LATENCY_US = 248;           // Time from TS notify to Rust wake (u32 μs)
+export const H_EVENT_WRITE_COUNT = 252;         // Events written to ring buffer by Rust (u32)
+// 256+ is outside header
 
 // =============================================================================
 // NODE FIELD OFFSETS (1024 bytes per node)
@@ -1026,6 +1032,41 @@ export function getTsTotalTimeNs(buf: SharedBuffer): number {
   return buf.view.getUint32(H_TS_TOTAL_TIME_NS, true);
 }
 
+// --- Instrumentation accessors ---
+
+export function setTsNotifyCount(buf: SharedBuffer, count: number): void {
+  buf.view.setUint32(H_TS_NOTIFY_COUNT, count >>> 0, true);
+}
+
+export function incrementTsNotifyCount(buf: SharedBuffer): void {
+  const count = buf.view.getUint32(H_TS_NOTIFY_COUNT, true);
+  buf.view.setUint32(H_TS_NOTIFY_COUNT, (count + 1) >>> 0, true);
+}
+
+export function getTsNotifyCount(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_TS_NOTIFY_COUNT, true);
+}
+
+export function setTsNotifyTimestamp(buf: SharedBuffer, unixMicroseconds: bigint): void {
+  buf.view.setBigUint64(H_TS_NOTIFY_TIMESTAMP, unixMicroseconds, true);
+}
+
+export function getTsNotifyTimestamp(buf: SharedBuffer): bigint {
+  return buf.view.getBigUint64(H_TS_NOTIFY_TIMESTAMP, true);
+}
+
+export function getWakeCount(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_WAKE_COUNT, true);
+}
+
+export function getWakeLatencyUs(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_WAKE_LATENCY_US, true);
+}
+
+export function getEventWriteCount(buf: SharedBuffer): number {
+  return buf.view.getUint32(H_EVENT_WRITE_COUNT, true);
+}
+
 /**
  * Get all timing stats as an object.
  * Convenient for benchmarking.
@@ -1041,6 +1082,11 @@ export interface TimingStats {
   tsBufferWriteNs: number;
   tsNotifyNs: number;
   tsTotalNs: number;
+  // Instrumentation (counts and cross-runtime)
+  tsNotifyCount: number;
+  wakeCount: number;
+  wakeLatencyUs: number;
+  eventWriteCount: number;
 }
 
 export function getTimingStats(buf: SharedBuffer): TimingStats {
@@ -1053,6 +1099,10 @@ export function getTimingStats(buf: SharedBuffer): TimingStats {
     tsBufferWriteNs: getTsBufferWriteTimeNs(buf),
     tsNotifyNs: getTsNotifyTimeNs(buf),
     tsTotalNs: getTsTotalTimeNs(buf),
+    tsNotifyCount: getTsNotifyCount(buf),
+    wakeCount: getWakeCount(buf),
+    wakeLatencyUs: getWakeLatencyUs(buf),
+    eventWriteCount: getEventWriteCount(buf),
   };
 }
 
@@ -1436,31 +1486,79 @@ export function getTextPoolRemaining(buf: SharedBuffer): number {
 
 /**
  * Write text to a node, allocating from the text pool.
- * Returns false if text pool is full.
+ *
+ * Layered memory management:
+ * 1. Slot reuse: If node already has text and new text fits, writes in place (zero allocation)
+ * 2. New allocation: If text is longer, allocates from pool end
+ * 3. Compaction: If pool full, compacts to reclaim dead space, then retries
+ * 4. Failure: Only fails if live text genuinely exceeds pool size
+ *
+ * Returns { success: true } or { success: false, liveBytes, poolSize } for error reporting.
  */
-export function setText(buf: SharedBuffer, nodeIndex: number, text: string): boolean {
+export function setText(
+  buf: SharedBuffer,
+  nodeIndex: number,
+  text: string
+): { success: true } | { success: false; liveBytes: number; poolSize: number; needed: number } {
   const encoded = textEncoder.encode(text);
-  const writePtr = getTextPoolWritePtr(buf);
+  const newLength = encoded.length;
 
-  if (writePtr + encoded.length > buf.textPoolSize) {
-    return false; // Pool full
+  // Check if we can reuse the existing slot
+  const existingOffset = getU32(buf, nodeIndex, N_TEXT_OFFSET);
+  const existingLength = getU32(buf, nodeIndex, N_TEXT_LENGTH);
+
+  if (existingLength > 0 && newLength <= existingLength) {
+    // Reuse existing slot - write in place
+    const poolView = new Uint8Array(buf.raw, buf.textPoolOffset + existingOffset, newLength);
+    poolView.set(encoded);
+
+    // Update length (offset stays the same)
+    setU32(buf, nodeIndex, N_TEXT_LENGTH, newLength);
+
+    // Mark dirty
+    markDirty(buf, nodeIndex, DIRTY_TEXT);
+
+    return { success: true };
+  }
+
+  // Need new allocation
+  let writePtr = getTextPoolWritePtr(buf);
+
+  if (writePtr + newLength > buf.textPoolSize) {
+    // Pool full - try compaction
+    const reclaimed = compactTextPool(buf);
+
+    if (reclaimed > 0) {
+      // Compaction helped - retry allocation
+      writePtr = getTextPoolWritePtr(buf);
+    }
+
+    if (writePtr + newLength > buf.textPoolSize) {
+      // Still full after compaction - genuinely out of space
+      return {
+        success: false,
+        liveBytes: writePtr,
+        poolSize: buf.textPoolSize,
+        needed: newLength,
+      };
+    }
   }
 
   // Write text to pool
-  const poolView = new Uint8Array(buf.raw, buf.textPoolOffset + writePtr, encoded.length);
+  const poolView = new Uint8Array(buf.raw, buf.textPoolOffset + writePtr, newLength);
   poolView.set(encoded);
 
   // Update node's offset and length
   setU32(buf, nodeIndex, N_TEXT_OFFSET, writePtr);
-  setU32(buf, nodeIndex, N_TEXT_LENGTH, encoded.length);
+  setU32(buf, nodeIndex, N_TEXT_LENGTH, newLength);
 
   // Update pool write pointer
-  buf.view.setUint32(H_TEXT_POOL_WRITE_PTR, writePtr + encoded.length, true);
+  buf.view.setUint32(H_TEXT_POOL_WRITE_PTR, writePtr + newLength, true);
 
   // Mark dirty
   markDirty(buf, nodeIndex, DIRTY_TEXT);
 
-  return true;
+  return { success: true };
 }
 
 /**
@@ -1484,6 +1582,58 @@ export function getText(buf: SharedBuffer, nodeIndex: number): string {
  */
 export function resetTextPool(buf: SharedBuffer): void {
   buf.view.setUint32(H_TEXT_POOL_WRITE_PTR, 0, true);
+}
+
+/**
+ * Compact the text pool by removing dead space.
+ * Only called when pool is full - not part of normal operation.
+ * Returns the amount of space reclaimed.
+ */
+export function compactTextPool(buf: SharedBuffer): number {
+  const nodeCount = getNodeCount(buf);
+  const oldWritePtr = getTextPoolWritePtr(buf);
+
+  // Collect all live text regions: [nodeIndex, offset, length]
+  const liveRegions: Array<{ nodeIndex: number; offset: number; length: number }> = [];
+  let totalLiveBytes = 0;
+
+  for (let i = 0; i < nodeCount; i++) {
+    const length = getU32(buf, i, N_TEXT_LENGTH);
+    if (length > 0) {
+      const offset = getU32(buf, i, N_TEXT_OFFSET);
+      liveRegions.push({ nodeIndex: i, offset, length });
+      totalLiveBytes += length;
+    }
+  }
+
+  // Sort by offset so we can compact in order
+  liveRegions.sort((a, b) => a.offset - b.offset);
+
+  // Create temp buffer and copy all live text
+  const tempBuffer = new Uint8Array(totalLiveBytes);
+  let tempWritePtr = 0;
+
+  for (const region of liveRegions) {
+    const src = new Uint8Array(buf.raw, buf.textPoolOffset + region.offset, region.length);
+    tempBuffer.set(src, tempWritePtr);
+    tempWritePtr += region.length;
+  }
+
+  // Copy compacted data back to pool
+  const poolView = new Uint8Array(buf.raw, buf.textPoolOffset, totalLiveBytes);
+  poolView.set(tempBuffer);
+
+  // Update all node offsets to new positions
+  let newOffset = 0;
+  for (const region of liveRegions) {
+    setU32(buf, region.nodeIndex, N_TEXT_OFFSET, newOffset);
+    newOffset += region.length;
+  }
+
+  // Reset write pointer to end of live data
+  buf.view.setUint32(H_TEXT_POOL_WRITE_PTR, totalLiveBytes, true);
+
+  return oldWritePtr - totalLiveBytes; // Space reclaimed
 }
 
 // =============================================================================

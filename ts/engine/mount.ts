@@ -72,6 +72,12 @@ export interface MountOptions {
 
   /** Use noop notifier (for testing without Rust) */
   noopNotifier?: boolean
+
+  /** Maximum number of nodes (default: 10,000) */
+  maxNodes?: number
+
+  /** Text pool size in bytes (default: 10MB) */
+  textPoolSize?: number
 }
 
 export interface MountHandle {
@@ -185,10 +191,12 @@ export function mountSync(app: () => void, options: MountOptions = {}): MountHan
     disableMouse = false,
     onUnmount,
     noopNotifier = false,
+    maxNodes,
+    textPoolSize,
   } = options
 
   // Initialize bridge (SharedArrayBuffer + reactive arrays + notifier)
-  const { buffer } = initBridge({ noopNotifier })
+  const { buffer } = initBridge({ noopNotifier, maxNodes, textPoolSize })
 
   // Set terminal size
   const termSize = getTerminalSize()

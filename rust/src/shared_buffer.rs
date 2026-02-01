@@ -122,7 +122,16 @@ pub const H_TS_SIGNAL_TIME_NS: usize = 216;       // Time for signal.set() effec
 pub const H_TS_BUFFER_WRITE_TIME_NS: usize = 220; // Time for SharedBuffer writes
 pub const H_TS_NOTIFY_TIME_NS: usize = 224;       // Time for Atomics.notify call
 pub const H_TS_TOTAL_TIME_NS: usize = 228;        // Total TS-side time (signal to notify)
-// 232-255: reserved
+// Instrumentation — counts and cross-runtime timing
+pub const H_TS_NOTIFY_COUNT: usize = 232;         // Count of Atomics.notify calls (u32)
+pub const H_TS_NOTIFY_TIMESTAMP: usize = 236;     // Unix microseconds when TS called notify (u64)
+pub const H_WAKE_COUNT: usize = 244;              // Count of wakes detected by Rust (u32)
+pub const H_WAKE_LATENCY_US: usize = 248;         // Time from TS notify to Rust wake (u32 μs)
+pub const H_EVENT_WRITE_COUNT: usize = 252;       // Events written to ring buffer by Rust (u32)
+// Note: 256+ would exceed header, but we have 256 bytes total, so these fit
+// TS-side event counters go in bytes 256-319 which is OUTSIDE header but we can use node 0's space
+// Actually let's keep within 256 bytes - move some to different location or compress
+// For now, TS event stats can be tracked in TS memory only (not SharedBuffer)
 
 // =============================================================================
 // NODE FIELD OFFSETS (1024 bytes per node)
@@ -1242,6 +1251,16 @@ impl SharedBuffer {
     }
 
     #[inline]
+    fn read_header_u64(&self, offset: usize) -> u64 {
+        unsafe { ptr::read_unaligned(self.ptr.add(offset) as *const u64) }
+    }
+
+    #[inline]
+    fn write_header_u64(&self, offset: usize, value: u64) {
+        unsafe { ptr::write_unaligned(self.ptr.add(offset) as *mut u64, value) }
+    }
+
+    #[inline]
     fn read_header_i32(&self, offset: usize) -> i32 {
         unsafe { ptr::read_unaligned(self.ptr.add(offset) as *const i32) }
     }
@@ -1463,6 +1482,60 @@ impl SharedBuffer {
     #[inline]
     pub fn total_frame_time_us(&self) -> u32 {
         self.read_header_u32(H_TOTAL_FRAME_TIME_US)
+    }
+
+    // =========================================================================
+    // INSTRUMENTATION (cross-runtime timing & counts)
+    // =========================================================================
+
+    /// Increment wake count (called when Rust detects TS notification)
+    #[inline]
+    pub fn increment_wake_count(&self) {
+        let count = self.read_header_u32(H_WAKE_COUNT);
+        self.write_header_u32(H_WAKE_COUNT, count.wrapping_add(1));
+    }
+
+    /// Get wake count
+    #[inline]
+    pub fn wake_count(&self) -> u32 {
+        self.read_header_u32(H_WAKE_COUNT)
+    }
+
+    /// Read TS notify timestamp (Unix microseconds)
+    #[inline]
+    pub fn ts_notify_timestamp(&self) -> u64 {
+        self.read_header_u64(H_TS_NOTIFY_TIMESTAMP)
+    }
+
+    /// Set wake latency (microseconds from TS notify to Rust wake)
+    #[inline]
+    pub fn set_wake_latency_us(&self, us: u32) {
+        self.write_header_u32(H_WAKE_LATENCY_US, us);
+    }
+
+    /// Get wake latency (microseconds)
+    #[inline]
+    pub fn wake_latency_us(&self) -> u32 {
+        self.read_header_u32(H_WAKE_LATENCY_US)
+    }
+
+    /// Increment event write count (called when Rust writes event to ring)
+    #[inline]
+    pub fn increment_event_write_count(&self) {
+        let count = self.read_header_u32(H_EVENT_WRITE_COUNT);
+        self.write_header_u32(H_EVENT_WRITE_COUNT, count.wrapping_add(1));
+    }
+
+    /// Get event write count
+    #[inline]
+    pub fn event_write_count(&self) -> u32 {
+        self.read_header_u32(H_EVENT_WRITE_COUNT)
+    }
+
+    /// Get TS notify count
+    #[inline]
+    pub fn ts_notify_count(&self) -> u32 {
+        self.read_header_u32(H_TS_NOTIFY_COUNT)
     }
 
     /// Check if exit has been requested
@@ -2078,6 +2151,7 @@ impl SharedBuffer {
         }
 
         self.set_event_write_idx((write_idx + 1) as u32);
+        self.increment_event_write_count(); // Instrumentation
         self.notify_ts();
     }
 

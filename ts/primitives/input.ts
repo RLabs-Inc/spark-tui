@@ -215,15 +215,18 @@ function getSpecialKeyName(keycode: number): string | null {
 // TEXT POOL WRITER
 // =============================================================================
 
-function writeTextToPool(buf: SharedBuffer, index: number, text: string): number {
-  const success = setText(buf, index, text)
-  if (!success) {
+function writeTextToPool(buf: SharedBuffer, index: number, text: string): void {
+  const result = setText(buf, index, text)
+  if (!result.success) {
+    const { liveBytes, poolSize, needed } = result
+    const liveMB = (liveBytes / 1024 / 1024).toFixed(2)
+    const poolMB = (poolSize / 1024 / 1024).toFixed(2)
     throw new Error(
-      `Text pool overflow when writing to node ${index}. ` +
-      `Consider: 1) Reusing text slots, 2) Text compaction, or 3) Larger textPoolSize.`
+      `Text pool full (${liveMB}MB live / ${poolMB}MB total). ` +
+      `Cannot allocate ${needed} bytes for node ${index}. ` +
+      `Increase textPoolSize in mount() config.`
     )
   }
-  return 1
 }
 
 // =============================================================================

@@ -14,6 +14,7 @@
  *   Tab       Navigate focus
  *   Enter     Activate focused button
  *   t         Cycle theme
+ *   d         Toggle debug stats
  *   q         Quit
  *   Ctrl+C    Quit
  */
@@ -22,6 +23,19 @@ import { signal, derived } from '@rlabs-inc/signals'
 import { box, text } from '../ts/primitives'
 import { t, themes, setTheme, getThemeNames } from '../ts/state/theme'
 import { mount } from '../ts/engine'
+import { getBuffer } from '../ts/bridge'
+import {
+  getRenderCount,
+  getLayoutCount,
+  getLayoutTimeUs,
+  getFramebufferTimeUs,
+  getRenderTimeUs,
+  getTotalFrameTimeUs,
+  getTsNotifyCount,
+  getWakeCount,
+  getWakeLatencyUs,
+  getEventWriteCount,
+} from '../ts/bridge/shared-buffer'
 import { isEnter, isSpace, getChar } from '../ts/engine/events'
 
 // =============================================================================
@@ -32,6 +46,10 @@ const count = signal(0)
 const themeNames = getThemeNames()
 const themeIndex = signal(0)
 const currentThemeName = derived(() => themeNames[themeIndex.value])
+
+// Debug panel state
+const showDebug = signal(false)
+const debugTick = signal(0) // Force refresh of debug values
 
 // =============================================================================
 // APP
@@ -133,12 +151,74 @@ await mount(() => {
             justifyContent: 'center',
             children: () => {
               text({
-                content: '+/- count  q quit',
+                content: '+/- count  q quit  d debug',
                 fg: t.textMuted,
               })
               text({
                 content: () => `t theme: ${currentThemeName.value}`,
                 fg: t.textMuted,
+              })
+            },
+          })
+
+          // Debug panel
+          box({
+            flexDirection: 'column',
+            padding: 1,
+            border: 1,
+            borderColor: t.warning,
+            children: () => {
+              text({ content: '📊 Timing Stats (d to refresh)', fg: t.warning })
+              text({
+                content: () => {
+                  const _ = debugTick.value // React to refresh
+                  const buf = getBuffer()
+                  const r = String(getRenderCount(buf)).padStart(6)
+                  const l = String(getLayoutCount(buf)).padStart(6)
+                  return `Renders:${r}  Layouts:${l}`
+                },
+                fg: t.text,
+              })
+              text({
+                content: () => {
+                  const _ = debugTick.value
+                  const buf = getBuffer()
+                  const lt = String(getLayoutTimeUs(buf)).padStart(6)
+                  const fb = String(getFramebufferTimeUs(buf)).padStart(6)
+                  return `Layout:${lt}μs  FB:${fb}μs`
+                },
+                fg: t.text,
+              })
+              text({
+                content: () => {
+                  const _ = debugTick.value
+                  const buf = getBuffer()
+                  const rt = String(getRenderTimeUs(buf)).padStart(6)
+                  const tot = String(getTotalFrameTimeUs(buf)).padStart(6)
+                  return `Render:${rt}μs  Total:${tot}μs`
+                },
+                fg: t.text,
+              })
+              // New instrumentation metrics
+              text({
+                content: () => {
+                  const _ = debugTick.value
+                  const buf = getBuffer()
+                  const notify = String(getTsNotifyCount(buf)).padStart(6)
+                  const wake = String(getWakeCount(buf)).padStart(6)
+                  return `Notify:${notify}  Wakes:${wake}`
+                },
+                fg: t.text,
+              })
+              text({
+                content: () => {
+                  const _ = debugTick.value
+                  const buf = getBuffer()
+                  const latency = String(getWakeLatencyUs(buf)).padStart(6)
+                  const events = String(getEventWriteCount(buf)).padStart(6)
+                  return `WakeLat:${latency}μs  Events:${events}`
+                },
+                fg: t.text,
               })
             },
           })
@@ -163,6 +243,11 @@ await mount(() => {
       if (ch === 't' || ch === 'T') {
         themeIndex.value = (themeIndex.value + 1) % themeNames.length
         setTheme(themeNames[themeIndex.value] as keyof typeof themes)
+        return true
+      }
+      if (ch === 'd' || ch === 'D') {
+        showDebug.value = !showDebug.value
+        debugTick.value++ // Force refresh timing values
         return true
       }
     },

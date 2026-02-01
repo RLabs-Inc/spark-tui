@@ -38,7 +38,8 @@ import { getArrays, getBuffer } from '../bridge'
 import {
   packColor,
   setText,
-  getTextPoolWritePtr,
+  getU32,
+  N_TEXT_OFFSET,
   DIRTY_TEXT,
   markDirty,
   type SharedBuffer,
@@ -165,23 +166,24 @@ function parseGridLine(line: GridLine | undefined): number {
 
 /**
  * Write text to the text pool via setText() helper.
- * Returns the text offset for the repeater (same value setText writes).
+ * Returns the text offset for the repeater (reads from node after write).
  */
 function writeTextToPool(buf: SharedBuffer, index: number, text: string): number {
-  // Get writePtr BEFORE setText (this is where the text will be written)
-  const writePtr = getTextPoolWritePtr(buf)
+  const result = setText(buf, index, text)
 
-  const success = setText(buf, index, text)
-  if (!success) {
+  if (!result.success) {
+    const { liveBytes, poolSize, needed } = result
+    const liveMB = (liveBytes / 1024 / 1024).toFixed(2)
+    const poolMB = (poolSize / 1024 / 1024).toFixed(2)
     throw new Error(
-      `Text pool overflow when writing to node ${index}. ` +
-      `Consider: 1) Reusing text slots for dynamic content, ` +
-      `2) Implementing text compaction, or 3) Increasing textPoolSize.`
+      `Text pool full (${liveMB}MB live / ${poolMB}MB total). ` +
+      `Cannot allocate ${needed} bytes for node ${index}. ` +
+      `Increase textPoolSize in mount() config.`
     )
   }
 
-  // Return the actual offset - repeat() will write this same value
-  return writePtr
+  // Read the actual offset from the node (may differ due to slot reuse or compaction)
+  return getU32(buf, index, N_TEXT_OFFSET)
 }
 
 // =============================================================================
@@ -220,7 +222,17 @@ export function text(props: TextProps): Cleanup {
     ))
   } else {
     // Static text — write once, no repeater needed
-    setText(buf, index, String(props.content))
+    const result = setText(buf, index, String(props.content))
+    if (!result.success) {
+      const { liveBytes, poolSize, needed } = result
+      const liveMB = (liveBytes / 1024 / 1024).toFixed(2)
+      const poolMB = (poolSize / 1024 / 1024).toFixed(2)
+      throw new Error(
+        `Text pool full (${liveMB}MB live / ${poolMB}MB total). ` +
+        `Cannot allocate ${needed} bytes for node ${index}. ` +
+        `Increase textPoolSize in mount() config.`
+      )
+    }
   }
 
   // --------------------------------------------------------------------------

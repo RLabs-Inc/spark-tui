@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::input::reader::StdinMessage;
 use crate::shared_buffer::SharedBuffer;
@@ -69,6 +69,21 @@ impl WakeWatcher {
                 // Drain coalesced wakes (multiple TS microtasks may have fired)
                 while buf.consume_wake() {}
 
+                // === Instrumentation ===
+                // Calculate wake latency: current Unix μs - TS notify timestamp
+                let ts_notify_us = buf.ts_notify_timestamp();
+                let now_us = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_micros() as u64)
+                    .unwrap_or(0);
+
+                if ts_notify_us > 0 && now_us >= ts_notify_us {
+                    let latency_us = (now_us - ts_notify_us) as u32;
+                    buf.set_wake_latency_us(latency_us);
+                }
+                buf.increment_wake_count();
+                // === End instrumentation ===
+
                 if tx.send(StdinMessage::Wake).is_err() {
                     break; // Channel closed, engine shutting down
                 }
@@ -78,18 +93,16 @@ impl WakeWatcher {
                 continue;
             }
 
-            // Adaptive backoff
+            // Adaptive backoff - prioritize low CPU over low latency
+            // TODO: Replace with atomic_wait for 0-CPU + instant wake
             idle_count = idle_count.saturating_add(1);
-            if idle_count < 64 {
-                // Phase 1: tight spin — nanosecond detection
-                // PAUSE on x86, YIELD on ARM
+            if idle_count < 16 {
+                // Phase 1: minimal spin
                 std::hint::spin_loop();
-            } else if idle_count < 256 {
-                // Phase 2: OS yield — microsecond detection
-                thread::yield_now();
             } else {
-                // Phase 3: short sleep — 50μs max latency, ~0% CPU
-                thread::sleep(Duration::from_micros(50));
+                // Phase 2: 1ms sleep - confirms CPU issue is here
+                // Real fix needs atomic_wait/futex for true 0% CPU
+                thread::sleep(Duration::from_millis(1));
             }
         }
     }

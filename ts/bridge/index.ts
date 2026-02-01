@@ -25,6 +25,10 @@ let _notifier: Notifier | null = null
 export interface BridgeOptions {
   /** Use NoopNotifier (for testing without Rust side) */
   noopNotifier?: boolean
+  /** Maximum number of nodes (default: 10,000) */
+  maxNodes?: number
+  /** Text pool size in bytes (default: 10MB) */
+  textPoolSize?: number
 }
 
 /** Check if bridge is initialized. */
@@ -47,7 +51,10 @@ export function initBridge(opts?: BridgeOptions): {
     return { buffer: _buffer, arrays: _arrays!, notifier: _notifier! }
   }
 
-  _buffer = createSharedBuffer()
+  _buffer = createSharedBuffer({
+    maxNodes: opts?.maxNodes,
+    textPoolSize: opts?.textPoolSize,
+  })
   _notifier = opts?.noopNotifier
     ? createNoopNotifier()
     : createWakeNotifier(_buffer)
