@@ -9,9 +9,9 @@
  *   Rust writes event -> Atomics.notify(wake_ts) -> TS wakes -> reads ring -> dispatches
  */
 
+import { join } from 'path'
 import {
   type SharedBuffer,
-  H_WAKE_TS,
   H_EVENT_WRITE_IDX,
   H_EVENT_READ_IDX,
   EVENT_RING_HEADER_SIZE,
@@ -519,59 +519,56 @@ function dispatchEvent(event: SparkEvent): void {
 }
 
 // =============================================================================
-// EVENT LISTENER (Atomics.waitAsync - REACTIVE)
+// EVENT LISTENER (Worker-based - TRUE 0% CPU, non-blocking main thread)
 // =============================================================================
 
 let running = false
-let wakeInt32: Int32Array | null = null
+let eventWorker: Worker | null = null
 
 /**
  * Start the event listener.
  *
- * Uses Atomics.waitAsync - SUSPENDS until Rust notifies.
- * NOT polling. The while(running) loop waits for notification each iteration.
+ * Spawns a worker thread that blocks on spark_wait_for_events().
+ * Main thread never blocks — animations and timers work normally.
+ * Worker posts "events" message when Rust signals events are ready.
+ *
+ * - Main thread: 0% CPU when idle (no timers), animations work
+ * - Worker thread: 0% CPU (blocked on condvar), instant wake on input
  */
-export function startEventListener(buf: SharedBuffer): void {
+export function startEventListener(buf: SharedBuffer, libPath: string): void {
   if (running) return
 
   running = true
   currentBuffer = buf
-  wakeInt32 = new Int32Array(buf.raw, H_WAKE_TS, 1)
 
-  waitForEvents()
-}
+  // Create worker
+  const workerPath = join(import.meta.dir, 'event-worker.ts')
+  eventWorker = new Worker(workerPath)
 
-async function waitForEvents(): Promise<void> {
-  while (running && wakeInt32 && currentBuffer) {
-    const currentValue = Atomics.load(wakeInt32, 0)
+  // Handle events from worker
+  eventWorker.onmessage = () => {
+    if (!running || !currentBuffer) return
 
-    // Wait for value change or minimal timeout (1ms for cross-platform compatibility)
-    const result = Atomics.waitAsync(wakeInt32, 0, currentValue, 1)
-
-    if (result.async) {
-      await result.value
-    }
-
-    if (!running) break
-
-    Atomics.store(wakeInt32, 0, 0)
-
+    // Process all pending events
     const events = readEvents(currentBuffer)
     for (const event of events) {
       dispatchEvent(event)
     }
   }
+
+  // Start the worker with the library path
+  eventWorker.postMessage({ type: 'start', libPath })
 }
 
 export function stopEventListener(): void {
   running = false
 
-  if (wakeInt32) {
-    Atomics.store(wakeInt32, 0, 1)
-    Atomics.notify(wakeInt32, 0)
+  if (eventWorker) {
+    eventWorker.postMessage({ type: 'stop' })
+    eventWorker.terminate()
+    eventWorker = null
   }
 
-  wakeInt32 = null
   currentBuffer = null
 }
 

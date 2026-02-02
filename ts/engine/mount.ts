@@ -31,7 +31,7 @@ import {
   CONFIG_TAB_NAVIGATION,
   CONFIG_MOUSE_ENABLED,
 } from '../bridge/shared-buffer'
-import { loadEngine, type SparkEngine } from '../bridge/ffi'
+import { loadEngine, getLibPath, type SparkEngine } from '../bridge/ffi'
 import { ptr } from 'bun:ffi'
 import type { Cleanup } from '../primitives/types'
 
@@ -195,8 +195,29 @@ export function mountSync(app: () => void, options: MountOptions = {}): MountHan
     textPoolSize,
   } = options
 
-  // Initialize bridge (SharedArrayBuffer + reactive arrays + notifier)
-  const { buffer } = initBridge({ noopNotifier, maxNodes, textPoolSize })
+  // Load engine FIRST (we need engine.wake for the notifier)
+  let engine: SparkEngine
+  if (!noopNotifier) {
+    engine = loadEngine()
+    currentEngine = engine
+  } else {
+    // Create a noop engine for tests
+    engine = {
+      init: () => 0,
+      bufferSize: () => 0,
+      wake: () => {},
+      cleanup: () => {},
+      close: () => {},
+    }
+  }
+
+  // Initialize bridge with FFI wake function (~5ns vs 500-2000μs!)
+  const { buffer } = initBridge({
+    noopNotifier,
+    maxNodes,
+    textPoolSize,
+    wakeFn: engine.wake,
+  })
 
   // Set terminal size
   const termSize = getTerminalSize()
@@ -218,29 +239,17 @@ export function mountSync(app: () => void, options: MountOptions = {}): MountHan
   }
   setConfigFlags(buffer, flags)
 
-  // Load and initialize Rust engine (unless noop mode for tests)
-  let engine: SparkEngine
+  // Initialize Rust engine with the buffer
   if (!noopNotifier) {
-    engine = loadEngine()
     const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
     if (result !== 0) {
       throw new Error(`SparkTUI engine init failed with code ${result}`)
     }
-    currentEngine = engine
-  } else {
-    // Create a noop engine for tests
-    engine = {
-      init: () => 0,
-      bufferSize: () => 0,
-      wake: () => {},
-      cleanup: () => {},
-      close: () => {},
-    }
   }
 
-  // Start event listener (Atomics.waitAsync - REACTIVE, NOT POLLING)
+  // Start event listener (worker-based - TRUE 0% CPU, non-blocking main thread)
   if (!noopNotifier) {
-    startEventListener(buffer)
+    startEventListener(buffer, getLibPath())
   }
 
   // Create exit promise that resolves when app exits

@@ -18,7 +18,7 @@ const LIB_NAME = process.platform === 'darwin'
     : 'libspark_tui_engine.so'
 
 /** Path to the compiled Rust library */
-function getLibPath(): string {
+export function getLibPath(): string {
   // Look in rust/target/release/ relative to project root
   return join(import.meta.dir, '../../rust/target/release', LIB_NAME)
 }
@@ -41,6 +41,10 @@ const symbols = {
     args: [] as const,
     returns: FFIType.void,
   },
+  spark_wait_for_events: {
+    args: [] as const,
+    returns: FFIType.void,
+  },
 } as const
 
 export interface SparkEngine {
@@ -50,6 +54,8 @@ export interface SparkEngine {
   bufferSize(): number
   /** Wake the engine (TS calls after writing props to SharedBuffer). */
   wake(): void
+  /** Block until Rust has events ready (0% CPU while waiting). */
+  waitForEvents(): void
   /** Stop the engine and clean up terminal. */
   cleanup(): void
   /** Close the library. */
@@ -74,6 +80,9 @@ export function loadEngine(libPath?: string): SparkEngine {
     },
     wake() {
       lib.symbols.spark_wake()
+    },
+    waitForEvents() {
+      lib.symbols.spark_wait_for_events()
     },
     cleanup() {
       lib.symbols.spark_cleanup()

@@ -47,7 +47,7 @@ pub mod input;
 pub mod pipeline;
 
 use shared_buffer::{SharedBuffer, DEFAULT_BUFFER_SIZE, calculate_buffer_size};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, Mutex, Condvar};
 
 // =============================================================================
 // GLOBAL STATE
@@ -62,6 +62,26 @@ fn get_buffer() -> &'static SharedBuffer {
 
 /// Global engine handle.
 static ENGINE: OnceLock<pipeline::Engine> = OnceLock::new();
+
+/// Condvar for Rust→TS event notification.
+/// TS calls spark_wait_for_events() which blocks on this.
+/// Rust calls notify_ts_events() when events are written to ring buffer.
+static TS_EVENT_SIGNAL: OnceLock<(Mutex<bool>, Condvar)> = OnceLock::new();
+
+fn init_ts_event_signal() {
+    let _ = TS_EVENT_SIGNAL.set((Mutex::new(false), Condvar::new()));
+}
+
+/// Signal TS that events are ready in the ring buffer.
+/// Called internally by Rust when writing events.
+pub fn notify_ts_events() {
+    if let Some((lock, cvar)) = TS_EVENT_SIGNAL.get() {
+        if let Ok(mut ready) = lock.lock() {
+            *ready = true;
+            cvar.notify_one();
+        }
+    }
+}
 
 // =============================================================================
 // FFI EXPORTS
@@ -85,6 +105,9 @@ static ENGINE: OnceLock<pipeline::Engine> = OnceLock::new();
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_init(ptr: *mut u8, len: u32) -> u32 {
     let buf = unsafe { SharedBuffer::from_raw(ptr, len as usize) };
+
+    // Initialize TS event signal (condvar for Rust→TS notification)
+    init_ts_event_signal();
 
     match BUFFER.set(buf) {
         Ok(_) => {
@@ -135,12 +158,16 @@ pub extern "C" fn spark_buffer_size_custom(max_nodes: u32, text_pool_size: u32) 
 
 /// Wake the engine (TS calls this after writing props to SharedBuffer).
 ///
-/// This sets the wake flag which the wake watcher thread monitors.
-/// The engine will process the changes on the next reactive cycle.
+/// This sets the wake flag AND unparks the wake watcher thread.
+/// The combination gives us:
+/// - 0% CPU when idle (thread is parked)
+/// - Instant wake (~1-2μs latency)
+/// - FFI overhead: ~5ns
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_wake() {
     let buf = get_buffer();
     buf.set_wake_flag();
+    pipeline::wake::unpark_wake_thread();
 }
 
 /// Stop the engine and clean up.
@@ -148,8 +175,31 @@ pub extern "C" fn spark_wake() {
 /// Call this before program exit to restore terminal state.
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_cleanup() {
+    // Wake TS event loop so it can exit
+    notify_ts_events();
+
     if let Some(engine) = ENGINE.get() {
         engine.stop();
+    }
+}
+
+/// Wait for events from Rust (TS calls this).
+///
+/// Blocks until Rust writes events to the ring buffer.
+/// This is the Rust→TS notification mechanism, symmetric with spark_wake().
+///
+/// - 0% CPU while waiting (condvar = kernel-level sleep)
+/// - Instant wake when events arrive
+/// - No polling, no fixed FPS
+#[unsafe(no_mangle)]
+pub extern "C" fn spark_wait_for_events() {
+    if let Some((lock, cvar)) = TS_EVENT_SIGNAL.get() {
+        if let Ok(mut ready) = lock.lock() {
+            while !*ready {
+                ready = cvar.wait(ready).unwrap();
+            }
+            *ready = false;
+        }
     }
 }
 
@@ -161,3 +211,28 @@ pub extern "C" fn spark_cleanup() {
 // atomic wake works correctly. They live in pipeline/wake.rs.
 
 pub use pipeline::wake::{spark_test_adaptive_wake, spark_test_atomic_wait};
+
+// =============================================================================
+// BENCHMARKING FFI OVERHEAD
+// =============================================================================
+
+/// No-op function for benchmarking pure FFI call overhead.
+/// Does absolutely nothing - measures only the JS→Rust→JS roundtrip cost.
+#[unsafe(no_mangle)]
+pub extern "C" fn spark_noop() {
+    // Intentionally empty
+}
+
+/// No-op with args for benchmarking marshaling overhead.
+#[unsafe(no_mangle)]
+pub extern "C" fn spark_noop_args(_a: u32, _b: u32) -> u32 {
+    0
+}
+
+/// No-op that touches an atomic to prevent over-optimization.
+#[unsafe(no_mangle)]
+pub extern "C" fn spark_noop_atomic() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    COUNTER.fetch_add(1, Ordering::Relaxed);
+}

@@ -7,7 +7,7 @@
 
 import { createSharedBuffer, type SharedBuffer, DEFAULT_MAX_NODES } from './shared-buffer'
 import { createReactiveArrays, type ReactiveArrays } from './reactive-arrays'
-import { createNoopNotifier, createWakeNotifier } from './notify'
+import { createNoopNotifier, createFFINotifier } from './notify'
 import type { Notifier } from '@rlabs-inc/signals'
 
 // =============================================================================
@@ -29,6 +29,8 @@ export interface BridgeOptions {
   maxNodes?: number
   /** Text pool size in bytes (default: 10MB) */
   textPoolSize?: number
+  /** FFI wake function (engine.wake). Required when not using noopNotifier. */
+  wakeFn?: () => void
 }
 
 /** Check if bridge is initialized. */
@@ -55,9 +57,15 @@ export function initBridge(opts?: BridgeOptions): {
     maxNodes: opts?.maxNodes,
     textPoolSize: opts?.textPoolSize,
   })
-  _notifier = opts?.noopNotifier
-    ? createNoopNotifier()
-    : createWakeNotifier(_buffer)
+
+  if (opts?.noopNotifier) {
+    _notifier = createNoopNotifier()
+  } else if (opts?.wakeFn) {
+    _notifier = createFFINotifier(_buffer, opts.wakeFn)
+  } else {
+    throw new Error('wakeFn is required when not using noopNotifier')
+  }
+
   _arrays = createReactiveArrays(_buffer, _notifier)
 
   return { buffer: _buffer, arrays: _arrays, notifier: _notifier }

@@ -1,35 +1,45 @@
-//! Wake watcher — adaptive spin-wait for TS → Rust notification.
+//! Wake watcher — FFI-triggered thread parking for TS → Rust notification.
 //!
-//! Monitors the wake flag in SharedBuffer using adaptive spinning:
+//! Uses `std::thread::park/unpark` for true 0% CPU idle with instant wake:
 //!
-//! - Active use (typing, mouse):  spin_loop()  → nanosecond detection
-//! - Brief idle (between keys):   yield_now()  → microsecond detection
-//! - Long idle (no interaction):  sleep(50μs)  → 50μs max latency, ~0% CPU
+//! 1. Watcher thread calls `thread::park()` — blocks, 0% CPU
+//! 2. TS calls FFI `spark_wake()` → Rust calls `thread.unpark()` — instant wake
+//! 3. Watcher processes the wake, sends to engine channel, parks again
 //!
-//! When a wake is detected, sends a message through the same mpsc channel
-//! as stdin — so the engine thread wakes immediately from either source.
-//! After detection, resets to tight spinning for the burst of activity
-//! that typically follows.
-//!
-//! No FFI from TS. No polling in the engine thread. Pure shared memory.
+//! This replaces the adaptive spin-wait approach which burned 10%+ CPU.
+//! FFI call overhead is ~5ns, unpark latency is ~1-2μs.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, OnceLock};
+use std::thread::{self, JoinHandle, Thread};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::input::reader::StdinMessage;
 use crate::shared_buffer::SharedBuffer;
 
 // =============================================================================
+// GLOBAL THREAD HANDLE
+// =============================================================================
+
+/// The wake thread's handle, stored for FFI to unpark.
+static WAKE_THREAD: OnceLock<Thread> = OnceLock::new();
+
+/// Unpark the wake thread. Called by FFI `spark_wake()`.
+pub fn unpark_wake_thread() {
+    if let Some(thread) = WAKE_THREAD.get() {
+        thread.unpark();
+    }
+}
+
+// =============================================================================
 // WAKE WATCHER
 // =============================================================================
 
-/// Adaptive spin-wait wake watcher thread.
+/// Park-based wake watcher thread.
 ///
-/// Monitors the SharedBuffer wake flag and forwards wake events
-/// through the unified engine channel.
+/// Blocks on `thread::park()` with 0% CPU, wakes instantly when
+/// FFI `spark_wake()` calls `unpark()`.
 pub struct WakeWatcher {
     handle: Option<JoinHandle<()>>,
 }
@@ -48,6 +58,9 @@ impl WakeWatcher {
         let handle = thread::Builder::new()
             .name("spark-wake".to_string())
             .spawn(move || {
+                // Store this thread's handle so FFI can unpark us
+                let _ = WAKE_THREAD.set(thread::current());
+
                 Self::watch_loop(buf, tx, running);
             })
             .expect("Failed to spawn wake watcher thread");
@@ -62,15 +75,13 @@ impl WakeWatcher {
         tx: Sender<StdinMessage>,
         running: Arc<AtomicBool>,
     ) {
-        let mut idle_count: u32 = 0;
-
         while running.load(Ordering::Relaxed) {
+            // Check for wake flag (may have been set before we parked)
             if buf.consume_wake() {
-                // Drain coalesced wakes (multiple TS microtasks may have fired)
+                // Drain coalesced wakes (multiple TS writes may have fired)
                 while buf.consume_wake() {}
 
                 // === Instrumentation ===
-                // Calculate wake latency: current Unix μs - TS notify timestamp
                 let ts_notify_us = buf.ts_notify_timestamp();
                 let now_us = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -88,50 +99,42 @@ impl WakeWatcher {
                     break; // Channel closed, engine shutting down
                 }
 
-                // Reset to tight spin — activity burst expected
-                idle_count = 0;
+                // Don't park immediately — check for more wakes first
                 continue;
             }
 
-            // Adaptive backoff - prioritize low CPU over low latency
-            // TODO: Replace with atomic_wait for 0-CPU + instant wake
-            idle_count = idle_count.saturating_add(1);
-            if idle_count < 16 {
-                // Phase 1: minimal spin
-                std::hint::spin_loop();
-            } else {
-                // Phase 2: 1ms sleep - confirms CPU issue is here
-                // Real fix needs atomic_wait/futex for true 0% CPU
-                thread::sleep(Duration::from_millis(1));
-            }
+            // No wake pending — park until FFI unparks us (0% CPU, instant wake)
+            thread::park();
         }
     }
 }
 
 impl Drop for WakeWatcher {
     fn drop(&mut self) {
+        // Unpark to ensure the thread can exit if it's parked
+        if let Some(thread) = WAKE_THREAD.get() {
+            thread.unpark();
+        }
         if let Some(handle) = self.handle.take() {
-            let _ = handle;
+            let _ = handle.join();
         }
     }
 }
 
 // =============================================================================
-// FFI TEST FUNCTIONS
+// FFI TEST FUNCTIONS (kept for reference/testing)
 // =============================================================================
-//
-// These are FFI exports for TypeScript to test the cross-language wake
-// mechanism. They validate that JS Atomics.notify() properly wakes Rust
-// threads waiting on shared memory.
 
-/// Test the adaptive spin-wait mechanism.
+use std::sync::atomic::AtomicU32;
+
+/// Test the park/unpark mechanism.
 ///
 /// Buffer layout (24 bytes):
-///   [0]:  u32 — wake flag (JS stores 1)
+///   [0]:  u32 — wake flag (FFI stores 1 + unparks)
 ///   [1]:  u32 — result (0=waiting, 1=detected)
 ///   [2]:  u32 — latency in microseconds
-///   [3]:  u32 — phase when detected (1=spin, 2=yield, 3=sleep)
-///   [4]:  u32 — iteration count when detected
+///   [3]:  u32 — reserved
+///   [4]:  u32 — reserved
 ///   [5]:  u32 — reserved
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_test_adaptive_wake(ptr: *mut u8) -> u32 {
@@ -142,43 +145,23 @@ pub extern "C" fn spark_test_adaptive_wake(ptr: *mut u8) -> u32 {
     let addr = ptr as usize;
 
     thread::Builder::new()
-        .name("adaptive-wake-test".into())
+        .name("park-wake-test".into())
         .spawn(move || {
             let flag = unsafe { &*(addr as *const AtomicU32) };
             let result = unsafe { &*((addr + 4) as *const AtomicU32) };
             let latency = unsafe { &*((addr + 8) as *const AtomicU32) };
-            let phase_out = unsafe { &*((addr + 12) as *const AtomicU32) };
-            let iter_out = unsafe { &*((addr + 16) as *const AtomicU32) };
 
             let start = std::time::Instant::now();
-            let mut idle_count: u32 = 0;
 
+            // Park until woken
             loop {
                 if flag.load(Ordering::Acquire) != 0 {
                     let elapsed = start.elapsed().as_micros() as u32;
-                    let phase = if idle_count < 64 {
-                        1
-                    } else if idle_count < 256 {
-                        2
-                    } else {
-                        3
-                    };
-
                     result.store(1, Ordering::Release);
                     latency.store(elapsed, Ordering::Release);
-                    phase_out.store(phase, Ordering::Release);
-                    iter_out.store(idle_count, Ordering::Release);
                     return;
                 }
-
-                idle_count = idle_count.saturating_add(1);
-                if idle_count < 64 {
-                    std::hint::spin_loop();
-                } else if idle_count < 256 {
-                    thread::yield_now();
-                } else {
-                    thread::sleep(Duration::from_micros(50));
-                }
+                thread::park();
             }
         })
         .ok();
@@ -213,9 +196,7 @@ pub extern "C" fn spark_test_atomic_wait(ptr: *mut u8, mode: u32) -> u32 {
             let start = std::time::Instant::now();
 
             match mode {
-                // Mode 0: atomic_wait::wait — THE critical test
-                // macOS: libc++ atomic_wait (same ABI as C++20 std::atomic_wait)
-                // Linux: futex(FUTEX_WAIT)
+                // Mode 0: atomic_wait::wait
                 0 => {
                     atomic_wait::wait(flag, 0);
                     let elapsed = start.elapsed().as_micros() as u32;
@@ -223,7 +204,7 @@ pub extern "C" fn spark_test_atomic_wait(ptr: *mut u8, mode: u32) -> u32 {
                     latency.store(elapsed, Ordering::Release);
                     eprintln!("[rust] atomic_wait::wait woke after {}μs", elapsed);
                 }
-                // Mode 1: Spin on atomic load (control — always works)
+                // Mode 1: Spin on atomic load (control)
                 1 => {
                     loop {
                         if flag.load(Ordering::Acquire) != 0 {
@@ -236,7 +217,7 @@ pub extern "C" fn spark_test_atomic_wait(ptr: *mut u8, mode: u32) -> u32 {
                     latency.store(elapsed, Ordering::Release);
                     eprintln!("[rust] spin detected change in {}μs", elapsed);
                 }
-                // Mode 2: wait_on_address — uses os_sync_wait_on_address on macOS 14.4+
+                // Mode 2: wait_on_address
                 2 => {
                     use wait_on_address::AtomicWait;
                     flag.wait(0);
@@ -245,12 +226,11 @@ pub extern "C" fn spark_test_atomic_wait(ptr: *mut u8, mode: u32) -> u32 {
                     latency.store(elapsed, Ordering::Release);
                     eprintln!("[rust] wait_on_address woke after {}μs", elapsed);
                 }
-                // Mode 3: ecmascript_futex — ECMAScript memory model futex
-                // macOS: os_sync_wait_on_address via Racy<u32> (ECMAScript-compatible)
+                // Mode 3: ecmascript_futex
                 3 => {
-                    use std::ptr::NonNull;
                     use ecmascript_atomics::RacyMemory;
                     use ecmascript_futex::ECMAScriptAtomicWait;
+                    use std::ptr::NonNull;
 
                     let u32_ptr = NonNull::new(addr as *mut u32).unwrap();
                     let slice_ptr = NonNull::slice_from_raw_parts(u32_ptr, 4);
@@ -262,16 +242,17 @@ pub extern "C" fn spark_test_atomic_wait(ptr: *mut u8, mode: u32) -> u32 {
                         let racy_result = slice.get(1).unwrap();
                         let racy_latency = slice.get(2).unwrap();
 
-                        // Wait while value == 0 (block until JS stores 1)
                         let wait_result = racy_flag.wait(0);
                         let elapsed = start.elapsed().as_micros() as u32;
 
                         racy_result.store(1, ecmascript_atomics::Ordering::SeqCst);
                         racy_latency.store(elapsed, ecmascript_atomics::Ordering::SeqCst);
-                        eprintln!("[rust] ecmascript_futex woke after {}μs (wait result: {:?})", elapsed, wait_result);
+                        eprintln!(
+                            "[rust] ecmascript_futex woke after {}μs (wait result: {:?})",
+                            elapsed, wait_result
+                        );
                     }
 
-                    // Don't exit — JS owns this memory. Just forget the handle.
                     std::mem::forget(racy_mem);
                 }
                 _ => {

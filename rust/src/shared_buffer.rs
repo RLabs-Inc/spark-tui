@@ -1572,13 +1572,18 @@ impl SharedBuffer {
         }
     }
 
-    /// Wake the TypeScript side
+    /// Wake the TypeScript side.
+    ///
+    /// Sets the wake flag in shared memory AND signals the condvar that
+    /// TS is blocking on via spark_wait_for_events().
     pub fn notify_ts(&self) {
+        // Set flag in shared memory (TS can also poll this)
         unsafe {
             let wake_ptr = self.ptr.add(H_WAKE_TS) as *const AtomicU32;
             (*wake_ptr).store(1, Ordering::SeqCst);
-            atomic_wait::wake_one(wake_ptr);
         }
+        // Signal the condvar that TS is blocking on (the actual wake mechanism)
+        crate::notify_ts_events();
     }
 
     // =========================================================================
