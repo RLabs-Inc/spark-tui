@@ -1,482 +1,171 @@
 /**
- * SparkTUI — Complete API Showcase & Test
+ * SparkTUI API Showcase
  *
- * This file exercises EVERY user-facing API to verify it works.
- * It serves as both a test suite and documentation source.
+ * A comprehensive demonstration of the SparkTUI user API, organized by category.
+ * Each section shows correct usage patterns derived from the actual implementation.
  *
  * Sections:
- *   1. Signals & Reactivity
- *   2. Primitives (box, text, input)
- *   3. Control Flow (each, show, when)
- *   4. Layout (flexbox, dimensions, spacing)
- *   5. Styling (colors, borders, variants)
- *   6. Themes
- *   7. Events (keyboard, mouse, focus)
- *   8. Scroll
- *   9. Animation (cycle, pulse)
- *  10. Lifecycle (onMount, onDestroy)
+ * 1. Signals & Reactivity - signal, derived, getters
+ * 2. Primitives - box, text, input
+ * 3. Control Flow - show, each (with correct cleanup patterns!)
+ * 4. Layout - flexbox, dimensions, spacing
+ * 5. Styling - borders, colors, variants
+ * 6. Themes - 13 presets, theme switching
+ * 7. Animations - cycle, Frames
+ * 8. Keyboard & Focus
+ * 9. Mouse Events
+ * 10. Scroll
  *
- * Controls:
- *   Tab / Shift+Tab    Navigate focus
- *   Arrow keys         Scroll (when focused on scrollable)
- *   Enter / Space      Activate button
- *   1-9                Switch demo section
- *   t                  Cycle theme
- *   q / Ctrl+C         Quit
+ * Navigation: Tab to cycle sections, Ctrl+C to exit
  */
 
-import { signal, derived, effect } from '@rlabs-inc/signals'
-import {
-  box,
-  text,
-  input,
-  each,
-  show,
-  // when,  // TODO: Uncomment when async primitives ready
-  cycle,
-  Frames,
-  scoped,
-  onCleanup,
-} from '../ts/primitives'
-import { t, themes, setTheme, getThemeNames } from '../ts/state/theme'
-import { mount } from '../ts/engine'
-import { onMount, onDestroy } from '../ts/engine/lifecycle'
-import { focus, focusedIndex } from '../ts/state/focus'
-import { getBuffer } from '../ts/bridge'
-import {
-  isEnter,
-  isSpace,
-  getChar,
-  hasCtrl,
-  hasShift,
-  type KeyEvent,
-} from '../ts/engine/events'
-import { BorderStyle, Attr } from '../ts/types'
+import { signal, derived } from '@rlabs-inc/signals'
+import { mount } from '../ts/engine/mount'
+import { box, text, input, show, each, cycle, Frames } from '../ts/primitives'
+import { packColor } from '../ts/bridge/shared-buffer'
+import { setTheme, t, themes } from '../ts/state/theme'
+import { on, isPress } from '../ts/state/keyboard'
+import type { KeyEvent } from '../ts/state/keyboard'
+
+// Helper to get printable character from keycode
+function getChar(event: KeyEvent): string | null {
+  const code = event.keycode
+  if (code >= 32 && code <= 126) {
+    return String.fromCharCode(code)
+  }
+  return null
+}
 
 // =============================================================================
-// REACTIVE STATE
+// COLORS
 // =============================================================================
 
-// Current demo section
-const currentSection = signal(1)
+const colors = {
+  bg: packColor(20, 20, 28, 255),
+  bgSection: packColor(30, 30, 42, 255),
+  bgHighlight: packColor(45, 45, 65, 255),
+  border: packColor(70, 70, 100, 255),
+  borderActive: packColor(120, 140, 255, 255),
+  text: packColor(220, 220, 235, 255),
+  textMuted: packColor(120, 120, 150, 255),
+  textBright: packColor(255, 255, 255, 255),
+  accent: packColor(140, 170, 255, 255),
+  success: packColor(120, 220, 150, 255),
+  warning: packColor(255, 200, 100, 255),
+  error: packColor(255, 120, 120, 255),
+}
+
+// =============================================================================
+// STATE
+// =============================================================================
+
+const currentSection = signal(0)
 const sectionNames = [
-  '',
-  '1. Signals & Reactivity',
-  '2. Primitives',
-  '3. Control Flow',
-  '4. Layout',
-  '5. Styling',
-  '6. Themes',
-  '7. Events',
-  '8. Scroll',
-  '9. Animation',
+  'Signals',
+  'Primitives',
+  'Control Flow',
+  'Layout',
+  'Styling',
+  'Themes',
+  'Animations',
+  'Keyboard',
+  'Mouse',
+  'Scroll',
 ]
 
-// Theme cycling
-const themeNames = getThemeNames()
-const themeIndex = signal(0)
-
-// Section 1: Signals
-const counter = signal(0)
-const multiplied = derived(() => counter.value * 2)
-const message = derived(() => `Count: ${counter.value}, Doubled: ${multiplied.value}`)
-
-// Section 2: Primitives
-const inputValue = signal('')
-const inputValue2 = signal('')
-
-// Section 3: Control Flow
-const showConditional = signal(true)
-const listItems = signal([
-  { id: '1', name: 'Apple' },
-  { id: '2', name: 'Banana' },
-  { id: '3', name: 'Cherry' },
-])
-
-// Section 7: Events
-const lastKey = signal('(none)')
-const lastMouse = signal('(none)')
-const clickCount = signal(0)
-
-// Section 8: Scroll
-const scrollContent = Array.from({ length: 50 }, (_, i) => `Line ${i + 1}`)
-
-// Section 9: Animation
-const animationActive = signal(true)
-
 // =============================================================================
-// HELPER: Section Header
+// MOUNT APP
 // =============================================================================
 
-function sectionHeader(title: string) {
+const cols = process.stdout.columns || 100
+const rows = process.stdout.rows || 30
+
+mount(() => {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // KEYBOARD HANDLER
+  // ─────────────────────────────────────────────────────────────────────────────
+  on((event: KeyEvent) => {
+    if (!isPress(event)) return false
+
+    // Tab: next section
+    if (event.keycode === 9) {
+      currentSection.value = (currentSection.value + 1) % sectionNames.length
+      return true
+    }
+
+    // Shift+Tab: previous section (ESC [ Z)
+    if (event.keycode === 0x1b5b5a) {
+      currentSection.value = (currentSection.value - 1 + sectionNames.length) % sectionNames.length
+      return true
+    }
+
+    // Number keys 1-9, 0 for section selection
+    const char = getChar(event)
+    if (char && char >= '0' && char <= '9') {
+      const num = char === '0' ? 9 : parseInt(char) - 1
+      if (num < sectionNames.length) {
+        currentSection.value = num
+        return true
+      }
+    }
+
+    return false
+  })
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ROOT CONTAINER
+  // ─────────────────────────────────────────────────────────────────────────────
   box({
-    width: '100%',
-    padding: 1,
-    bg: t.surface,
-    border: BorderStyle.DOUBLE,
-    borderColor: t.primary,
-    children: () => {
-      text({ content: title, fg: t.primary, attrs: Attr.BOLD })
-    },
-  })
-}
-
-// =============================================================================
-// SECTION 1: SIGNALS & REACTIVITY
-// =============================================================================
-
-function Section1_Signals() {
-  return box({
+    id: 'root',
+    width: cols,
+    height: rows,
     flexDirection: 'column',
-    gap: 1,
+    bg: colors.bg,
     children: () => {
-      sectionHeader('1. Signals & Reactivity')
-
+      // ─────────────────────────────────────────────────────────────────────────
+      // HEADER
+      // ─────────────────────────────────────────────────────────────────────────
       box({
-        flexDirection: 'column',
-        gap: 1,
-        padding: 1,
+        id: 'header',
+        width: '100%',
+        height: 3,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingLeft: 2,
+        paddingRight: 2,
+        bg: colors.bgSection,
+        borderBottom: 1,
+        borderColor: colors.border,
         children: () => {
-          // Static text
-          text({ content: 'signal() creates reactive state', fg: t.textMuted })
-
-          // Reactive counter display
+          text({ content: 'SparkTUI API Showcase', fg: colors.accent })
           text({
-            content: message, // Direct signal binding
-            fg: t.text,
-          })
-
-          // Inline derived (getter function)
-          text({
-            content: () => `Squared: ${counter.value * counter.value}`,
-            fg: t.text,
-          })
-
-          // Buttons
-          box({
-            flexDirection: 'row',
-            gap: 2,
-            children: () => {
-              // Decrement
-              box({
-                width: 5,
-                height: 1,
-                bg: t.error,
-                fg: t.textBright,
-                focusable: true,
-                justifyContent: 'center',
-                onClick: () => { counter.value-- },
-                onKey: (e) => {
-                  if (isEnter(e) || isSpace(e)) {
-                    counter.value--
-                    return true
-                  }
-                },
-                children: () => text({ content: ' - ' }),
-              })
-
-              // Increment
-              box({
-                width: 5,
-                height: 1,
-                bg: t.success,
-                fg: t.textBright,
-                focusable: true,
-                justifyContent: 'center',
-                onClick: () => { counter.value++ },
-                onKey: (e) => {
-                  if (isEnter(e) || isSpace(e)) {
-                    counter.value++
-                    return true
-                  }
-                },
-                children: () => text({ content: ' + ' }),
-              })
-            },
-          })
-
-          text({ content: 'Click buttons or use Enter/Space when focused', fg: t.textMuted })
-        },
-      })
-    },
-  })
-}
-
-// =============================================================================
-// SECTION 2: PRIMITIVES (box, text, input)
-// =============================================================================
-
-function Section2_Primitives() {
-  return box({
-    flexDirection: 'column',
-    gap: 1,
-    children: () => {
-      sectionHeader('2. Primitives: box, text, input')
-
-      box({
-        flexDirection: 'column',
-        gap: 1,
-        padding: 1,
-        children: () => {
-          // Text with attributes
-          text({ content: 'Normal text', fg: t.text })
-          text({ content: 'Bold text', fg: t.text, attrs: Attr.BOLD })
-          text({ content: 'Italic text', fg: t.text, attrs: Attr.ITALIC })
-          text({ content: 'Underline text', fg: t.text, attrs: Attr.UNDERLINE })
-          text({ content: 'Combined', fg: t.primary, attrs: Attr.BOLD | Attr.UNDERLINE })
-
-          // Text alignment
-          box({
-            width: 40,
-            border: 1,
-            borderColor: t.textMuted,
-            flexDirection: 'column',
-            children: () => {
-              text({ content: 'Left aligned', align: 'left', fg: t.text })
-              text({ content: 'Center aligned', align: 'center', fg: t.text })
-              text({ content: 'Right aligned', align: 'right', fg: t.text })
-            },
-          })
-
-          // Input fields
-          text({ content: 'Input fields:', fg: t.textMuted })
-
-          box({
-            flexDirection: 'row',
-            gap: 2,
-            children: () => {
-              text({ content: 'Name:', fg: t.text })
-              input({
-                value: inputValue,
-                width: 20,
-                placeholder: 'Type here...',
-                border: 1,
-                borderColor: t.primary,
-                onSubmit: (val) => { inputValue2.value = `Submitted: ${val}` },
-              })
-            },
-          })
-
-          // Show input result
-          text({
-            content: () => inputValue2.value || '(Press Enter to submit)',
-            fg: t.textMuted,
+            content: () => `Section ${currentSection.value + 1}/${sectionNames.length}: ${sectionNames[currentSection.value]}`,
+            fg: colors.textMuted,
           })
         },
       })
-    },
-  })
-}
 
-// =============================================================================
-// SECTION 3: CONTROL FLOW (each, show)
-// =============================================================================
-
-function Section3_ControlFlow() {
-  return box({
-    flexDirection: 'column',
-    gap: 1,
-    children: () => {
-      sectionHeader('3. Control Flow: each, show')
-
+      // ─────────────────────────────────────────────────────────────────────────
+      // NAV BAR
+      // ─────────────────────────────────────────────────────────────────────────
       box({
-        flexDirection: 'column',
-        gap: 1,
-        padding: 1,
-        children: () => {
-          // show() demo
-          text({ content: 'show() - Conditional rendering:', fg: t.textMuted })
-
-          box({
-            flexDirection: 'row',
-            gap: 2,
-            alignItems: 'center',
-            children: () => {
-              box({
-                width: 10,
-                height: 1,
-                bg: t.primary,
-                fg: t.textBright,
-                focusable: true,
-                justifyContent: 'center',
-                onClick: () => { showConditional.value = !showConditional.value },
-                onKey: (e) => {
-                  if (isEnter(e) || isSpace(e)) {
-                    showConditional.value = !showConditional.value
-                    return true
-                  }
-                },
-                children: () => text({ content: 'Toggle' }),
-              })
-
-              show(
-                () => showConditional.value,
-                () => text({ content: '✓ Visible!', fg: t.success }),
-                () => text({ content: '✗ Hidden', fg: t.error })
-              )
-            },
-          })
-
-      // each() demo
-      text({ content: 'each() - List rendering:', fg: t.textMuted })
-
-      box({
-        flexDirection: 'column',
-        gap: 0,
-        border: 1,
-        borderColor: t.textMuted,
-        padding: 1,
-        children: () => {
-          each(
-            () => listItems.value,
-            (getItem, key) => {
-              return box({
-                children: () => {
-                  text({
-                    content: () => `• ${getItem().name}`,
-                    fg: t.text,
-                  })
-                },
-              })
-            },
-            { key: (item) => item.id }
-          )
-        },
-      })
-
-      // Add/remove buttons
-      box({
+        id: 'nav',
+        width: '100%',
+        height: 1,
         flexDirection: 'row',
         gap: 2,
+        paddingLeft: 2,
+        bg: colors.bgSection,
         children: () => {
-          box({
-            width: 12,
-            height: 1,
-            bg: t.success,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            onClick: () => {
-              const id = String(Date.now())
-              listItems.value = [...listItems.value, { id, name: `Item ${id.slice(-4)}` }]
-            },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                const id = String(Date.now())
-                listItems.value = [...listItems.value, { id, name: `Item ${id.slice(-4)}` }]
-                return true
-              }
-            },
-            children: () => text({ content: 'Add Item' }),
-          })
-
-          box({
-            width: 12,
-            height: 1,
-            bg: t.error,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            onClick: () => {
-              listItems.value = listItems.value.slice(0, -1)
-            },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                listItems.value = listItems.value.slice(0, -1)
-                return true
-              }
-            },
-            children: () => text({ content: 'Remove' }),
-          })
-        },
-      })
-        },
-      })
-    },
-  })
-}
-
-// =============================================================================
-// SECTION 4: LAYOUT (flexbox, dimensions, spacing)
-// =============================================================================
-
-function Section4_Layout() {
-  return box({
-    flexDirection: 'column',
-    gap: 1,
-    children: () => {
-      sectionHeader('4. Layout: Flexbox, Dimensions, Spacing')
-
-      box({
-        flexDirection: 'column',
-        gap: 1,
-        padding: 1,
-    children: () => {
-      // Flex direction
-      text({ content: 'flexDirection: row vs column', fg: t.textMuted })
-
-      box({
-        flexDirection: 'row',
-        gap: 2,
-        children: () => {
-          // Row
-          box({
-            flexDirection: 'row',
-            gap: 1,
-            border: 1,
-            borderColor: t.primary,
-            padding: 1,
-            children: () => {
-              text({ content: 'A', fg: t.text })
-              text({ content: 'B', fg: t.text })
-              text({ content: 'C', fg: t.text })
-            },
-          })
-
-          // Column
-          box({
-            flexDirection: 'column',
-            gap: 0,
-            border: 1,
-            borderColor: t.secondary,
-            padding: 1,
-            children: () => {
-              text({ content: 'A', fg: t.text })
-              text({ content: 'B', fg: t.text })
-              text({ content: 'C', fg: t.text })
-            },
-          })
-        },
-      })
-
-      // Justify content
-      text({ content: 'justifyContent options:', fg: t.textMuted })
-
-      const justifyOptions: Array<'flex-start' | 'center' | 'flex-end' | 'space-between'> = [
-        'flex-start', 'center', 'flex-end', 'space-between'
-      ]
-
-      box({
-        flexDirection: 'column',
-        gap: 1,
-        children: () => {
-          for (const justify of justifyOptions) {
+          for (let i = 0; i < sectionNames.length; i++) {
+            const idx = i
             box({
-              flexDirection: 'row',
-              gap: 1,
+              id: `nav-${i}`,
               children: () => {
-                text({ content: justify.padEnd(15), fg: t.textMuted, width: 15 })
-                box({
-                  width: 30,
-                  flexDirection: 'row',
-                  justifyContent: justify,
-                  border: 1,
-                  borderColor: t.textMuted,
-                  children: () => {
-                    box({ width: 3, height: 1, bg: t.primary })
-                    box({ width: 3, height: 1, bg: t.secondary })
-                    box({ width: 3, height: 1, bg: t.success })
-                  },
+                text({
+                  content: `${(i + 1) % 10}:${sectionNames[i]}`,
+                  fg: () => currentSection.value === idx ? colors.accent : colors.textMuted,
                 })
               },
             })
@@ -484,20 +173,273 @@ function Section4_Layout() {
         },
       })
 
-      // Grow
-      text({ content: 'grow: flex items filling space', fg: t.textMuted })
-
+      // ─────────────────────────────────────────────────────────────────────────
+      // CONTENT AREA
+      // ─────────────────────────────────────────────────────────────────────────
       box({
-        width: 50,
-        flexDirection: 'row',
-        border: 1,
-        borderColor: t.textMuted,
+        id: 'content',
+        width: '100%',
+        grow: 1,
+        padding: 2,
+        overflow: 'scroll',
         children: () => {
-          box({ width: 10, height: 1, bg: t.error, children: () => text({ content: 'fixed' }) })
-          box({ grow: 1, height: 1, bg: t.success, children: () => text({ content: 'grow:1' }) })
-          box({ width: 10, height: 1, bg: t.warning, children: () => text({ content: 'fixed' }) })
+          // SECTION 0: SIGNALS
+          show(
+            () => currentSection.value === 0,
+            () => SignalsSection()
+          )
+
+          // SECTION 1: PRIMITIVES
+          show(
+            () => currentSection.value === 1,
+            () => PrimitivesSection()
+          )
+
+          // SECTION 2: CONTROL FLOW
+          show(
+            () => currentSection.value === 2,
+            () => ControlFlowSection()
+          )
+
+          // SECTION 3: LAYOUT
+          show(
+            () => currentSection.value === 3,
+            () => LayoutSection()
+          )
+
+          // SECTION 4: STYLING
+          show(
+            () => currentSection.value === 4,
+            () => StylingSection()
+          )
+
+          // SECTION 5: THEMES
+          show(
+            () => currentSection.value === 5,
+            () => ThemesSection()
+          )
+
+          // SECTION 6: ANIMATIONS
+          show(
+            () => currentSection.value === 6,
+            () => AnimationsSection()
+          )
+
+          // SECTION 7: KEYBOARD
+          show(
+            () => currentSection.value === 7,
+            () => KeyboardSection()
+          )
+
+          // SECTION 8: MOUSE
+          show(
+            () => currentSection.value === 8,
+            () => MouseSection()
+          )
+
+          // SECTION 9: SCROLL
+          show(
+            () => currentSection.value === 9,
+            () => ScrollSection()
+          )
         },
       })
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // FOOTER
+      // ─────────────────────────────────────────────────────────────────────────
+      box({
+        id: 'footer',
+        width: '100%',
+        height: 1,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        bg: colors.bgSection,
+        borderTop: 1,
+        borderColor: colors.border,
+        children: () => {
+          text({
+            content: 'Tab: Next section | 1-0: Jump to section | Ctrl+C: Exit',
+            fg: colors.textMuted,
+          })
+        },
+      })
+    },
+  })
+}, { mode: 'fullscreen' })
+
+// =============================================================================
+// SECTION 0: SIGNALS & REACTIVITY
+// =============================================================================
+
+function SignalsSection() {
+  // Local state for this section
+  const counter = signal(0)
+  const doubled = derived(() => counter.value * 2)
+  const message = signal('Hello SparkTUI!')
+
+  // Auto-increment counter
+  const interval = setInterval(() => {
+    counter.value++
+  }, 1000)
+
+  // Return cleanup from root box
+  return box({
+    id: 'signals-section',
+    flexDirection: 'column',
+    gap: 1,
+    children: () => {
+      text({ content: '1. SIGNALS & REACTIVITY', fg: colors.accent })
+      text({ content: 'Reactive state management with fine-grained updates', fg: colors.textMuted })
+
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        gap: 1,
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          // signal() - writable reactive value
+          text({ content: 'signal() - Writable reactive value:', fg: colors.textBright })
+          text({ content: () => `  counter.value = ${counter.value}`, fg: colors.text })
+          text({ content: () => `  message.value = "${message.value}"`, fg: colors.text })
+
+          // derived() - computed value
+          text({ content: 'derived() - Computed from signals:', fg: colors.textBright, marginTop: 1 })
+          text({ content: () => `  doubled = counter * 2 = ${doubled.value}`, fg: colors.text })
+
+          // Getter function - inline reactive
+          text({ content: 'Getter () => - Inline reactive expression:', fg: colors.textBright, marginTop: 1 })
+          text({ content: () => `  tripled = ${counter.value * 3}`, fg: colors.text })
+        },
+      })
+
+      text({
+        content: 'All three forms work with any prop: width, height, color, content, etc.',
+        fg: colors.textMuted,
+        marginTop: 1,
+      })
+    },
+  })
+}
+
+// =============================================================================
+// SECTION 1: PRIMITIVES
+// =============================================================================
+
+function PrimitivesSection() {
+  const inputValue = signal('Type here...')
+
+  return box({
+    id: 'primitives-section',
+    flexDirection: 'column',
+    gap: 1,
+    children: () => {
+      text({ content: '2. PRIMITIVES', fg: colors.accent })
+      text({ content: 'box(), text(), input() - All return Cleanup functions', fg: colors.textMuted })
+
+      // BOX
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'box() - Container with flexbox layout', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              box({
+                width: 15,
+                height: 3,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'Box 1' }),
+              })
+              box({
+                width: 15,
+                height: 3,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.accent,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'Box 2' }),
+              })
+            },
+          })
+        },
+      })
+
+      // TEXT
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'text() - Text content (required: content prop)', fg: colors.textBright })
+
+          box({
+            flexDirection: 'column',
+            gap: 1,
+            marginTop: 1,
+            children: () => {
+              text({ content: 'Normal text', fg: colors.text })
+              text({ content: 'Colored text', fg: colors.success })
+              text({ content: 'Bold text', fg: colors.accent, attrs: { bold: true } })
+              text({ content: 'Italic text', fg: colors.warning, attrs: { italic: true } })
+              text({ content: 'Underlined', fg: colors.error, attrs: { underline: true } })
+            },
+          })
+        },
+      })
+
+      // INPUT
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'input() - Text input (required: value prop)', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              text({ content: 'Value:', fg: colors.text })
+              input({
+                id: 'demo-input',
+                value: inputValue,
+                width: 30,
+                border: 1,
+                borderColor: colors.border,
+                bg: colors.bgHighlight,
+                fg: colors.text,
+                paddingLeft: 1,
+                paddingRight: 1,
+              })
+            },
+          })
+
+          text({
+            content: () => `Current value: "${inputValue.value}"`,
+            fg: colors.textMuted,
+            marginTop: 1,
+          })
         },
       })
     },
@@ -505,91 +447,510 @@ function Section4_Layout() {
 }
 
 // =============================================================================
-// SECTION 5: STYLING (colors, borders, variants)
+// SECTION 2: CONTROL FLOW
 // =============================================================================
 
-function Section5_Styling() {
+function ControlFlowSection() {
+  const showContent = signal(true)
+  const items = signal([
+    { id: '1', name: 'Apple' },
+    { id: '2', name: 'Banana' },
+    { id: '3', name: 'Cherry' },
+  ])
+
   return box({
+    id: 'control-flow-section',
     flexDirection: 'column',
     gap: 1,
     children: () => {
-      sectionHeader('5. Styling: Colors, Borders, Variants')
+      text({ content: '3. CONTROL FLOW', fg: colors.accent })
+      text({ content: 'show() and each() - Conditional and list rendering', fg: colors.textMuted })
 
+      // SHOW
       box({
+        marginTop: 1,
         flexDirection: 'column',
-        gap: 1,
+        border: 1,
+        borderColor: colors.border,
         padding: 1,
-    children: () => {
-      // Border styles
-      text({ content: 'Border styles:', fg: t.textMuted })
-
-      box({
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 1,
         children: () => {
-          const styles: Array<[string, number]> = [
-            ['None', BorderStyle.NONE],
-            ['Single', BorderStyle.SINGLE],
-            ['Double', BorderStyle.DOUBLE],
-            ['Rounded', BorderStyle.ROUNDED],
-            ['Bold', BorderStyle.BOLD],
-            ['Dashed', BorderStyle.DASHED],
-            ['ASCII', BorderStyle.ASCII],
-          ]
+          text({ content: 'show(condition, renderFn) - Conditional rendering', fg: colors.textBright })
+          text({
+            content: 'CRITICAL: renderFn must RETURN the cleanup from root component!',
+            fg: colors.warning,
+          })
 
-          for (const [name, style] of styles) {
-            box({
-              width: 10,
-              height: 3,
-              border: style,
-              borderColor: t.primary,
-              justifyContent: 'center',
-              alignItems: 'center',
-              children: () => text({ content: name, fg: t.text }),
-            })
-          }
+          box({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              box({
+                width: 10,
+                height: 1,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                alignItems: 'center',
+                focusable: true,
+                onClick: () => { showContent.value = !showContent.value },
+                children: () => text({ content: 'Toggle' }),
+              })
+
+              text({ content: () => `showContent = ${showContent.value}`, fg: colors.textMuted })
+            },
+          })
+
+          box({
+            marginTop: 1,
+            height: 3,
+            children: () => {
+              // Correct pattern: renderFn returns the cleanup
+              show(
+                () => showContent.value,
+                () => {
+                  return box({
+                    bg: colors.success,
+                    padding: 1,
+                    children: () => text({ content: 'Content is visible!', fg: colors.bg }),
+                  })
+                }
+              )
+
+              // Else branch also returns cleanup
+              show(
+                () => !showContent.value,
+                () => {
+                  return box({
+                    bg: colors.error,
+                    padding: 1,
+                    children: () => text({ content: 'Content is hidden!', fg: colors.bg }),
+                  })
+                }
+              )
+            },
+          })
         },
       })
 
-      // Variants
-      text({ content: 'Variants (semantic colors):', fg: t.textMuted })
-
+      // EACH
       box({
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 1,
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
         children: () => {
-          const variants: Array<'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'info'> = [
-            'primary', 'secondary', 'success', 'warning', 'error', 'info'
-          ]
+          text({ content: 'each(items, renderFn, {key}) - List rendering', fg: colors.textBright })
+          text({
+            content: 'renderFn receives (getItem, key) and must RETURN cleanup!',
+            fg: colors.warning,
+          })
 
-          for (const variant of variants) {
-            box({
-              width: 12,
-              height: 1,
-              variant,
-              justifyContent: 'center',
-              children: () => text({ content: variant }),
-            })
-          }
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              box({
+                width: 8,
+                height: 1,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                focusable: true,
+                onClick: () => {
+                  const id = String(Date.now())
+                  items.value = [...items.value, { id, name: `Item ${id.slice(-4)}` }]
+                },
+                children: () => text({ content: 'Add' }),
+              })
+
+              box({
+                width: 10,
+                height: 1,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                focusable: true,
+                onClick: () => {
+                  if (items.value.length > 0) {
+                    items.value = items.value.slice(0, -1)
+                  }
+                },
+                children: () => text({ content: 'Remove' }),
+              })
+
+              text({ content: () => `Count: ${items.value.length}`, fg: colors.textMuted })
+            },
+          })
+
+          box({
+            flexDirection: 'row',
+            gap: 1,
+            marginTop: 1,
+            flexWrap: 'wrap',
+            children: () => {
+              // Correct pattern: renderFn returns the cleanup
+              each(
+                () => items.value,
+                (getItem, key) => {
+                  return box({
+                    id: `item-${key}`,
+                    bg: colors.bgHighlight,
+                    border: 1,
+                    borderColor: colors.border,
+                    paddingLeft: 1,
+                    paddingRight: 1,
+                    children: () => {
+                      text({ content: () => getItem().name, fg: colors.text })
+                    },
+                  })
+                },
+                { key: (item) => item.id }
+              )
+            },
+          })
+        },
+      })
+    },
+  })
+}
+
+// =============================================================================
+// SECTION 3: LAYOUT
+// =============================================================================
+
+function LayoutSection() {
+  return box({
+    id: 'layout-section',
+    flexDirection: 'column',
+    gap: 1,
+    children: () => {
+      text({ content: '4. LAYOUT', fg: colors.accent })
+      text({ content: 'Flexbox layout powered by Taffy', fg: colors.textMuted })
+
+      // Flex Direction
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'flexDirection: row | column', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              // Row
+              box({
+                flexDirection: 'column',
+                children: () => {
+                  text({ content: 'row:', fg: colors.textMuted })
+                  box({
+                    flexDirection: 'row',
+                    gap: 1,
+                    children: () => {
+                      for (let i = 1; i <= 3; i++) {
+                        box({
+                          width: 4,
+                          height: 2,
+                          bg: colors.bgHighlight,
+                          border: 1,
+                          borderColor: colors.border,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          children: () => text({ content: String(i) }),
+                        })
+                      }
+                    },
+                  })
+                },
+              })
+
+              // Column
+              box({
+                flexDirection: 'column',
+                children: () => {
+                  text({ content: 'column:', fg: colors.textMuted })
+                  box({
+                    flexDirection: 'column',
+                    gap: 0,
+                    children: () => {
+                      for (let i = 1; i <= 3; i++) {
+                        box({
+                          width: 8,
+                          height: 1,
+                          bg: colors.bgHighlight,
+                          border: 1,
+                          borderColor: colors.border,
+                          justifyContent: 'center',
+                          children: () => text({ content: String(i) }),
+                        })
+                      }
+                    },
+                  })
+                },
+              })
+            },
+          })
+        },
+      })
+
+      // Justify Content
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'justifyContent: flex-start | center | flex-end | space-between', fg: colors.textBright })
+
+          const justifyOptions = ['flex-start', 'center', 'flex-end', 'space-between'] as const
+
+          box({
+            flexDirection: 'column',
+            gap: 1,
+            marginTop: 1,
+            children: () => {
+              for (const justify of justifyOptions) {
+                box({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 1,
+                  children: () => {
+                    text({ content: `${justify}:`.padEnd(16), fg: colors.textMuted })
+                    box({
+                      width: 40,
+                      flexDirection: 'row',
+                      justifyContent: justify,
+                      bg: colors.bgHighlight,
+                      border: 1,
+                      borderColor: colors.border,
+                      children: () => {
+                        for (let i = 0; i < 3; i++) {
+                          box({
+                            width: 4,
+                            height: 1,
+                            bg: colors.accent,
+                            justifyContent: 'center',
+                            children: () => text({ content: '[]', fg: colors.bg }),
+                          })
+                        }
+                      },
+                    })
+                  },
+                })
+              }
+            },
+          })
+        },
+      })
+
+      // Grow
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'grow: 0 | 1 | 2 ... - Flex grow factor', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            width: 60,
+            marginTop: 1,
+            bg: colors.bgHighlight,
+            border: 1,
+            borderColor: colors.border,
+            children: () => {
+              box({
+                grow: 1,
+                height: 2,
+                bg: colors.success,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'grow:1', fg: colors.bg }),
+              })
+              box({
+                grow: 2,
+                height: 2,
+                bg: colors.warning,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'grow:2', fg: colors.bg }),
+              })
+              box({
+                grow: 1,
+                height: 2,
+                bg: colors.error,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'grow:1', fg: colors.bg }),
+              })
+            },
+          })
+        },
+      })
+    },
+  })
+}
+
+// =============================================================================
+// SECTION 4: STYLING
+// =============================================================================
+
+function StylingSection() {
+  return box({
+    id: 'styling-section',
+    flexDirection: 'column',
+    gap: 1,
+    children: () => {
+      text({ content: '5. STYLING', fg: colors.accent })
+      text({ content: 'Borders, colors, and visual properties', fg: colors.textMuted })
+
+      // Borders
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'Borders: border, borderTop/Right/Bottom/Left, borderColor', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              // Full border
+              box({
+                width: 12,
+                height: 3,
+                border: 1,
+                borderColor: colors.accent,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'border:1' }),
+              })
+
+              // Top only
+              box({
+                width: 12,
+                height: 3,
+                borderTop: 1,
+                borderColor: colors.success,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'borderTop' }),
+              })
+
+              // Left + Right
+              box({
+                width: 12,
+                height: 3,
+                borderLeft: 1,
+                borderRight: 1,
+                borderColor: colors.warning,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'L+R' }),
+              })
+
+              // Thick border
+              box({
+                width: 12,
+                height: 3,
+                border: 2,
+                borderColor: colors.error,
+                justifyContent: 'center',
+                alignItems: 'center',
+                children: () => text({ content: 'border:2' }),
+              })
+            },
+          })
         },
       })
 
       // Colors
-      text({ content: 'Direct colors (theme reactive):', fg: t.textMuted })
-
       box({
-        flexDirection: 'row',
-        gap: 1,
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
         children: () => {
-          box({ width: 8, height: 1, bg: t.primary, children: () => text({ content: 'primary' }) })
-          box({ width: 10, height: 1, bg: t.secondary, children: () => text({ content: 'secondary' }) })
-          box({ width: 8, height: 1, bg: t.success, children: () => text({ content: 'success' }) })
-          box({ width: 8, height: 1, bg: t.warning, children: () => text({ content: 'warning' }) })
-          box({ width: 6, height: 1, bg: t.error, children: () => text({ content: 'error' }) })
+          text({ content: 'Colors: fg, bg (packColor or ANSI 0-255)', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 1,
+            marginTop: 1,
+            children: () => {
+              // Color swatches
+              const swatches = [
+                { bg: colors.accent, label: 'accent' },
+                { bg: colors.success, label: 'success' },
+                { bg: colors.warning, label: 'warning' },
+                { bg: colors.error, label: 'error' },
+              ]
+
+              for (const swatch of swatches) {
+                box({
+                  width: 10,
+                  height: 2,
+                  bg: swatch.bg,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  children: () => text({ content: swatch.label, fg: colors.bg }),
+                })
+              }
+            },
+          })
         },
       })
+
+      // Variants
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'Variants: 14 semantic styles from theme', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 1,
+            marginTop: 1,
+            flexWrap: 'wrap',
+            children: () => {
+              const variants = ['primary', 'secondary', 'success', 'warning', 'error', 'info', 'muted'] as const
+
+              for (const v of variants) {
+                box({
+                  variant: v,
+                  width: 10,
+                  height: 2,
+                  border: 1,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  children: () => text({ content: v }),
+                })
+              }
+            },
+          })
         },
       })
     },
@@ -597,65 +958,94 @@ function Section5_Styling() {
 }
 
 // =============================================================================
-// SECTION 6: THEMES
+// SECTION 5: THEMES
 // =============================================================================
 
-function Section6_Themes() {
+function ThemesSection() {
+  const themeNames = Object.keys(themes)
+  const currentThemeIdx = signal(0)
+
   return box({
+    id: 'themes-section',
     flexDirection: 'column',
     gap: 1,
     children: () => {
-      sectionHeader('6. Themes')
+      text({ content: '6. THEMES', fg: colors.accent })
+      text({ content: '13 preset themes + reactive theme colors via t.*', fg: colors.textMuted })
 
       box({
+        marginTop: 1,
         flexDirection: 'column',
-        gap: 1,
+        border: 1,
+        borderColor: colors.border,
         padding: 1,
         children: () => {
-          text({ content: 'Press "t" to cycle themes', fg: t.textMuted })
-
-          text({
-            content: () => `Current theme: ${themeNames[themeIndex.value]}`,
-            fg: t.primary,
-            attrs: Attr.BOLD,
-          })
-
-          text({ content: 'Available themes:', fg: t.textMuted })
+          text({ content: 'Click a theme to apply:', fg: colors.textBright })
 
           box({
             flexDirection: 'row',
-            flexWrap: 'wrap',
             gap: 1,
+            marginTop: 1,
+            flexWrap: 'wrap',
             children: () => {
               for (let i = 0; i < themeNames.length; i++) {
-                const name = themeNames[i]
+                const idx = i
+                const name = themeNames[i]!
                 box({
-                  width: name.length + 2,
+                  width: 12,
                   height: 1,
-                  bg: () => themeIndex.value === i ? t.primary : t.surface,
-                  fg: () => themeIndex.value === i ? t.textBright : t.text,
+                  bg: () => currentThemeIdx.value === idx ? colors.accent : colors.bgHighlight,
+                  fg: () => currentThemeIdx.value === idx ? colors.bg : colors.text,
+                  border: 1,
+                  borderColor: colors.border,
                   justifyContent: 'center',
+                  focusable: true,
+                  onClick: () => {
+                    currentThemeIdx.value = idx
+                    setTheme(name as keyof typeof themes)
+                  },
                   children: () => text({ content: name }),
                 })
               }
             },
           })
+        },
+      })
 
-          // Theme color preview
-          text({ content: 'Theme palette preview:', fg: t.textMuted })
+      // Theme-reactive sample
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: t.border,
+        bg: t.surface,
+        padding: 1,
+        children: () => {
+          text({ content: 'Theme-reactive box (uses t.* colors):', fg: t.text })
 
           box({
             flexDirection: 'row',
-            gap: 0,
+            gap: 2,
+            marginTop: 1,
             children: () => {
-              box({ width: 4, height: 2, bg: t.primary })
-              box({ width: 4, height: 2, bg: t.secondary })
-              box({ width: 4, height: 2, bg: t.success })
-              box({ width: 4, height: 2, bg: t.warning })
-              box({ width: 4, height: 2, bg: t.error })
-              box({ width: 4, height: 2, bg: t.info })
-              box({ width: 4, height: 2, bg: t.surface })
-              box({ width: 4, height: 2, bg: t.bg })
+              box({
+                variant: 'primary',
+                padding: 1,
+                border: 1,
+                children: () => text({ content: 'Primary' }),
+              })
+              box({
+                variant: 'success',
+                padding: 1,
+                border: 1,
+                children: () => text({ content: 'Success' }),
+              })
+              box({
+                variant: 'error',
+                padding: 1,
+                border: 1,
+                children: () => text({ content: 'Error' }),
+              })
             },
           })
         },
@@ -665,101 +1055,344 @@ function Section6_Themes() {
 }
 
 // =============================================================================
-// SECTION 7: EVENTS (keyboard, mouse, focus)
+// SECTION 6: ANIMATIONS
 // =============================================================================
 
-function Section7_Events() {
+function AnimationsSection() {
+  const animationActive = signal(true)
+
   return box({
+    id: 'animations-section',
     flexDirection: 'column',
     gap: 1,
     children: () => {
-      sectionHeader('7. Events: Keyboard, Mouse, Focus')
+      text({ content: '7. ANIMATIONS', fg: colors.accent })
+      text({ content: 'cycle() returns a signal that updates on interval', fg: colors.textMuted })
 
+      // Built-in frames
       box({
+        marginTop: 1,
         flexDirection: 'column',
-        gap: 1,
+        border: 1,
+        borderColor: colors.border,
         padding: 1,
-    children: () => {
-      // Keyboard events
-      text({ content: 'Keyboard events (press any key):', fg: t.textMuted })
-      text({
-        content: () => `Last key: ${lastKey.value}`,
-        fg: t.text,
-      })
-
-      // Mouse events
-      text({ content: 'Mouse events:', fg: t.textMuted })
-      text({
-        content: () => `Last mouse: ${lastMouse.value}`,
-        fg: t.text,
-      })
-
-      // Click counter
-      box({
-        flexDirection: 'row',
-        gap: 2,
-        alignItems: 'center',
         children: () => {
+          text({ content: 'Frames.* - 8 built-in animation sets:', fg: colors.textBright })
+
           box({
-            width: 15,
-            height: 3,
-            bg: t.primary,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            alignItems: 'center',
-            border: 1,
-            borderColor: t.secondary,
-            onClick: () => {
-              clickCount.value++
-              lastMouse.value = 'Click!'
-            },
-            onMouseEnter: () => { lastMouse.value = 'Enter' },
-            onMouseLeave: () => { lastMouse.value = 'Leave' },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                clickCount.value++
-                return true
+            flexDirection: 'row',
+            gap: 3,
+            marginTop: 1,
+            children: () => {
+              const frameTypes: Array<[string, readonly string[]]> = [
+                ['spinner', Frames.spinner],
+                ['dots', Frames.dots],
+                ['line', Frames.line],
+                ['bar', Frames.bar],
+                ['bounce', Frames.bounce],
+                ['arrow', Frames.arrow],
+                ['pulse', Frames.pulse],
+              ]
+
+              for (const [name, frames] of frameTypes) {
+                box({
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  width: 8,
+                  children: () => {
+                    text({
+                      content: cycle(frames, { fps: 10, active: animationActive }),
+                      fg: colors.accent,
+                    })
+                    text({ content: name, fg: colors.textMuted })
+                  },
+                })
               }
             },
-            children: () => text({ content: 'Click Me!' }),
+          })
+        },
+      })
+
+      // FPS comparison
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'FPS control:', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 3,
+            marginTop: 1,
+            children: () => {
+              for (const fps of [2, 8, 16, 24]) {
+                box({
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  children: () => {
+                    text({
+                      content: cycle(Frames.spinner, { fps, active: animationActive }),
+                      fg: colors.text,
+                    })
+                    text({ content: `${fps} fps`, fg: colors.textMuted })
+                  },
+                })
+              }
+            },
+          })
+        },
+      })
+
+      // Pause/resume
+      box({
+        marginTop: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+        children: () => {
+          box({
+            width: 12,
+            height: 1,
+            bg: colors.bgHighlight,
+            border: 1,
+            borderColor: colors.border,
+            justifyContent: 'center',
+            focusable: true,
+            onClick: () => { animationActive.value = !animationActive.value },
+            children: () => text({ content: () => animationActive.value ? 'Pause' : 'Resume' }),
+          })
+          text({
+            content: () => `Animations: ${animationActive.value ? 'Running' : 'Paused'}`,
+            fg: colors.textMuted,
+          })
+        },
+      })
+    },
+  })
+}
+
+// =============================================================================
+// SECTION 7: KEYBOARD
+// =============================================================================
+
+function KeyboardSection() {
+  const lastKey = signal('(none)')
+  const keyCount = signal(0)
+
+  // Section-specific key handler
+  on((event: KeyEvent) => {
+    if (currentSection.value !== 7) return false
+    if (!isPress(event)) return false
+
+    const char = getChar(event)
+    if (char) {
+      lastKey.value = char
+    } else {
+      // Special keys
+      if (event.keycode === 0x1b5b41) lastKey.value = 'ArrowUp'
+      else if (event.keycode === 0x1b5b42) lastKey.value = 'ArrowDown'
+      else if (event.keycode === 0x1b5b43) lastKey.value = 'ArrowRight'
+      else if (event.keycode === 0x1b5b44) lastKey.value = 'ArrowLeft'
+      else if (event.keycode === 13) lastKey.value = 'Enter'
+      else if (event.keycode === 27) lastKey.value = 'Escape'
+      else if (event.keycode === 32) lastKey.value = 'Space'
+      else lastKey.value = `keycode:${event.keycode}`
+    }
+    keyCount.value++
+
+    return false // Don't consume, let other handlers see it
+  })
+
+  return box({
+    id: 'keyboard-section',
+    flexDirection: 'column',
+    gap: 1,
+    children: () => {
+      text({ content: '8. KEYBOARD & FOCUS', fg: colors.accent })
+      text({ content: 'on() for global keys, onKey on focusable boxes', fg: colors.textMuted })
+
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'Press any key:', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 4,
+            marginTop: 1,
+            children: () => {
+              text({ content: () => `Last key: ${lastKey.value}`, fg: colors.text })
+              text({ content: () => `Total: ${keyCount.value}`, fg: colors.textMuted })
+            },
+          })
+        },
+      })
+
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'KeyEvent structure:', fg: colors.textBright })
+          text({ content: '  keycode: number (Unicode codepoint or special)', fg: colors.textMuted })
+          text({ content: '  modifiers: CTRL(1) | ALT(2) | SHIFT(4) | META(8)', fg: colors.textMuted })
+          text({ content: '  keyState: PRESS(0) | REPEAT(1) | RELEASE(2)', fg: colors.textMuted })
+        },
+      })
+
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'Focus: focusable prop + onFocus/onBlur callbacks', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              for (let i = 1; i <= 3; i++) {
+                const idx = i
+                box({
+                  id: `focus-box-${i}`,
+                  width: 15,
+                  height: 3,
+                  bg: colors.bgHighlight,
+                  border: 1,
+                  borderColor: colors.border,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  focusable: true,
+                  onFocus: () => { lastKey.value = `Focus ${idx}` },
+                  onBlur: () => { lastKey.value = `Blur ${idx}` },
+                  children: () => text({ content: `Focusable ${i}` }),
+                })
+              }
+            },
+          })
+        },
+      })
+    },
+  })
+}
+
+// =============================================================================
+// SECTION 8: MOUSE
+// =============================================================================
+
+function MouseSection() {
+  const clickCount = signal(0)
+  const lastEvent = signal('(none)')
+  const hovered = signal(false)
+
+  return box({
+    id: 'mouse-section',
+    flexDirection: 'column',
+    gap: 1,
+    children: () => {
+      text({ content: '9. MOUSE EVENTS', fg: colors.accent })
+      text({ content: 'onClick, onMouseDown/Up, onMouseEnter/Leave', fg: colors.textMuted })
+
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'Click the boxes:', fg: colors.textBright })
+
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            marginTop: 1,
+            children: () => {
+              // Click counter
+              box({
+                width: 15,
+                height: 3,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.accent,
+                justifyContent: 'center',
+                alignItems: 'center',
+                onClick: () => {
+                  clickCount.value++
+                  lastEvent.value = 'click'
+                },
+                children: () => text({ content: () => `Clicks: ${clickCount.value}` }),
+              })
+
+              // Hover box
+              box({
+                width: 15,
+                height: 3,
+                bg: () => hovered.value ? colors.accent : colors.bgHighlight,
+                border: 1,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                alignItems: 'center',
+                onMouseEnter: () => {
+                  hovered.value = true
+                  lastEvent.value = 'mouseEnter'
+                },
+                onMouseLeave: () => {
+                  hovered.value = false
+                  lastEvent.value = 'mouseLeave'
+                },
+                children: () => text({
+                  content: () => hovered.value ? 'Hovered!' : 'Hover me',
+                  fg: () => hovered.value ? colors.bg : colors.text,
+                }),
+              })
+
+              // Down/Up box
+              box({
+                width: 15,
+                height: 3,
+                bg: colors.bgHighlight,
+                border: 1,
+                borderColor: colors.border,
+                justifyContent: 'center',
+                alignItems: 'center',
+                onMouseDown: () => { lastEvent.value = 'mouseDown' },
+                onMouseUp: () => { lastEvent.value = 'mouseUp' },
+                children: () => text({ content: 'Down/Up' }),
+              })
+            },
           })
 
           text({
-            content: () => `Clicks: ${clickCount.value}`,
-            fg: t.text,
+            content: () => `Last event: ${lastEvent.value}`,
+            fg: colors.textMuted,
+            marginTop: 1,
           })
         },
       })
 
-      // Focus demo
-      text({ content: 'Focus (Tab to navigate):', fg: t.textMuted })
-
       box({
-        flexDirection: 'row',
-        gap: 1,
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
         children: () => {
-          for (let i = 1; i <= 4; i++) {
-            box({
-              id: `focus-demo-${i}`,
-              width: 10,
-              height: 1,
-              bg: t.surface,
-              fg: t.text,
-              border: 1,
-              borderColor: t.textMuted,
-              focusable: true,
-              justifyContent: 'center',
-              children: () => text({ content: `Box ${i}` }),
-            })
-          }
-        },
-      })
-
-      text({
-        content: () => `Focused index: ${focusedIndex.value}`,
-        fg: t.textMuted,
-      })
+          text({ content: 'MouseEvent structure:', fg: colors.textBright })
+          text({ content: '  x, y: number (cell coordinates)', fg: colors.textMuted })
+          text({ content: '  button: 0=left, 1=middle, 2=right', fg: colors.textMuted })
+          text({ content: '  componentIndex: target component', fg: colors.textMuted })
         },
       })
     },
@@ -767,40 +1400,88 @@ function Section7_Events() {
 }
 
 // =============================================================================
-// SECTION 8: SCROLL
+// SECTION 9: SCROLL
 // =============================================================================
 
-function Section8_Scroll() {
+function ScrollSection() {
   return box({
+    id: 'scroll-section',
     flexDirection: 'column',
     gap: 1,
     children: () => {
-      sectionHeader('8. Scroll')
+      text({ content: '10. SCROLL', fg: colors.accent })
+      text({ content: "overflow: 'scroll' or 'auto' makes container scrollable", fg: colors.textMuted })
 
       box({
-        flexDirection: 'column',
-        gap: 1,
-        padding: 1,
+        marginTop: 1,
+        flexDirection: 'row',
+        gap: 2,
         children: () => {
-          text({ content: 'Scrollable container (Tab to focus, arrows to scroll):', fg: t.textMuted })
-
-          // Scrollable box
+          // Vertical scroll
           box({
-            width: 40,
-            height: 8,
-            overflow: 'scroll',
-            border: 1,
-            borderColor: t.primary,
             flexDirection: 'column',
             children: () => {
-              for (const line of scrollContent) {
-                text({ content: line, fg: t.text })
-              }
+              text({ content: 'Vertical (arrow keys):', fg: colors.textBright })
+
+              box({
+                width: 30,
+                height: 8,
+                overflow: 'scroll',
+                border: 1,
+                borderColor: colors.border,
+                bg: colors.bgHighlight,
+                focusable: true,
+                flexDirection: 'column',
+                children: () => {
+                  for (let i = 1; i <= 20; i++) {
+                    text({ content: `Line ${i}: Scroll content...`, fg: colors.text })
+                  }
+                },
+              })
             },
           })
 
-          text({ content: 'Use Arrow keys, Page Up/Down, Home/End', fg: t.textMuted })
-          text({ content: 'Mouse wheel also works in fullscreen mode', fg: t.textMuted })
+          // Horizontal scroll
+          box({
+            flexDirection: 'column',
+            children: () => {
+              text({ content: 'Horizontal:', fg: colors.textBright })
+
+              box({
+                width: 30,
+                height: 8,
+                overflow: 'scroll',
+                border: 1,
+                borderColor: colors.border,
+                bg: colors.bgHighlight,
+                focusable: true,
+                flexDirection: 'column',
+                children: () => {
+                  for (let i = 1; i <= 10; i++) {
+                    text({
+                      content: `Line ${i}: ${'This is a very long line that extends beyond the visible area '.repeat(2)}`,
+                      fg: colors.text,
+                    })
+                  }
+                },
+              })
+            },
+          })
+        },
+      })
+
+      box({
+        marginTop: 1,
+        flexDirection: 'column',
+        border: 1,
+        borderColor: colors.border,
+        padding: 1,
+        children: () => {
+          text({ content: 'Scroll controls:', fg: colors.textBright })
+          text({ content: '  Arrow keys: Scroll by 1', fg: colors.textMuted })
+          text({ content: '  Page Up/Down: Scroll by viewport', fg: colors.textMuted })
+          text({ content: '  Home/End: Jump to start/end', fg: colors.textMuted })
+          text({ content: '  Mouse wheel: Scroll by 3', fg: colors.textMuted })
         },
       })
     },
@@ -808,221 +1489,8 @@ function Section8_Scroll() {
 }
 
 // =============================================================================
-// SECTION 9: ANIMATION
+// KEEP ALIVE
 // =============================================================================
 
-function Section9_Animation() {
-  return box({
-    flexDirection: 'column',
-    gap: 1,
-    children: () => {
-      sectionHeader('9. Animation: cycle, pulse')
-
-      box({
-        flexDirection: 'column',
-        gap: 1,
-        padding: 1,
-    children: () => {
-      text({ content: 'cycle() - Frame-based animation:', fg: t.textMuted })
-
-      box({
-        flexDirection: 'row',
-        gap: 3,
-        children: () => {
-          // Spinner
-          box({
-            flexDirection: 'row',
-            gap: 1,
-            children: () => {
-              text({
-                content: cycle(Frames.spinner, { fps: 12, active: animationActive }),
-                fg: t.primary,
-              })
-              text({ content: 'Loading...', fg: t.text })
-            },
-          })
-
-          // Dots
-          box({
-            flexDirection: 'row',
-            gap: 1,
-            children: () => {
-              text({
-                content: cycle(Frames.dots, { fps: 8, active: animationActive }),
-                fg: t.secondary,
-              })
-              text({ content: 'Processing', fg: t.text })
-            },
-          })
-
-          // Bounce
-          box({
-            flexDirection: 'row',
-            gap: 1,
-            children: () => {
-              text({
-                content: cycle(Frames.bounce, { fps: 6, active: animationActive }),
-                fg: t.success,
-              })
-              text({ content: 'Bounce', fg: t.text })
-            },
-          })
-        },
-      })
-
-      // Toggle animation
-      box({
-        flexDirection: 'row',
-        gap: 2,
-        alignItems: 'center',
-        children: () => {
-          box({
-            width: 15,
-            height: 1,
-            bg: () => animationActive.value ? t.success : t.error,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            onClick: () => { animationActive.value = !animationActive.value },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                animationActive.value = !animationActive.value
-                return true
-              }
-            },
-            children: () => text({
-              content: () => animationActive.value ? 'Pause' : 'Resume',
-            }),
-          })
-
-          text({
-            content: () => `Animation: ${animationActive.value ? 'ON' : 'OFF'}`,
-            fg: t.textMuted,
-          })
-        },
-      })
-
-      // Available frame sets
-      text({ content: 'Available Frames:', fg: t.textMuted })
-      text({
-        content: 'spinner, dots, line, bar, clock, bounce, arrow, pulse',
-        fg: t.text,
-      })
-        },
-      })
-    },
-  })
-}
-
-// =============================================================================
-// MAIN APP
-// =============================================================================
-
-await mount(() => {
-  box({
-    flexDirection: 'column',
-    children: () => {
-      // Header
-      box({
-        width: '100%',
-        padding: 1,
-        bg: t.primary,
-        fg: t.textBright,
-        justifyContent: 'center',
-        children: () => {
-          text({
-            content: 'SparkTUI Complete API Showcase',
-            attrs: Attr.BOLD,
-          })
-        },
-      })
-
-      // Navigation
-      box({
-        width: '100%',
-        padding: 1,
-        bg: t.surface,
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: 1,
-        children: () => {
-          text({ content: 'Sections:', fg: t.textMuted })
-          for (let i = 1; i <= 9; i++) {
-            box({
-              width: 3,
-              height: 1,
-              bg: () => currentSection.value === i ? t.primary : null,
-              fg: () => currentSection.value === i ? t.textBright : t.text,
-              justifyContent: 'center',
-              children: () => text({ content: String(i) }),
-            })
-          }
-          text({ content: '| t:theme q:quit', fg: t.textMuted })
-        },
-      })
-
-      // Current section content
-      box({
-        flexDirection: 'column',
-        padding: 1,
-        children: () => {
-          show(() => currentSection.value === 1, Section1_Signals)
-          show(() => currentSection.value === 2, Section2_Primitives)
-          show(() => currentSection.value === 3, Section3_ControlFlow)
-          show(() => currentSection.value === 4, Section4_Layout)
-          show(() => currentSection.value === 5, Section5_Styling)
-          show(() => currentSection.value === 6, Section6_Themes)
-          show(() => currentSection.value === 7, Section7_Events)
-          show(() => currentSection.value === 8, Section8_Scroll)
-          show(() => currentSection.value === 9, Section9_Animation)
-        },
-      })
-
-      // Footer
-      box({
-        width: '100%',
-        padding: 1,
-        bg: t.surface,
-        justifyContent: 'center',
-        children: () => {
-          text({
-            content: () => `Theme: ${themeNames[themeIndex.value]} | Section: ${sectionNames[currentSection.value]}`,
-            fg: t.textMuted,
-          })
-        },
-      })
-    },
-
-    // Global keyboard handler
-    onKey: (key: KeyEvent) => {
-      const ch = getChar(key)
-
-      // Update last key display
-      const mods: string[] = []
-      if (hasCtrl(key)) mods.push('Ctrl')
-      if (hasShift(key)) mods.push('Shift')
-      const modStr = mods.length ? mods.join('+') + '+' : ''
-      lastKey.value = `${modStr}${ch || `code:${key.keycode}`}`
-
-      // Section navigation (1-9)
-      if (ch! >= '1' && ch! <= '9') {
-        currentSection.value = parseInt(ch!)
-        return true
-      }
-
-      // Theme cycling
-      if (ch === 't' || ch === 'T') {
-        themeIndex.value = (themeIndex.value + 1) % themeNames.length
-        setTheme(themeNames[themeIndex.value] as keyof typeof themes)
-        return true
-      }
-
-      // Quit
-      if (ch === 'q' || ch === 'Q') {
-        process.exit(0)
-      }
-
-      return false
-    },
-  })
-}, { mode: 'inline' })
+console.log('[api-showcase] App mounted - Tab to switch sections, Ctrl+C to exit')
+await new Promise(() => {})

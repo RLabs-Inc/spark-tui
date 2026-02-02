@@ -20,7 +20,6 @@ import { ptr } from 'bun:ffi'
 import { signal, derived, effect, effectScope } from '@rlabs-inc/signals'
 import type { WritableSignal } from '@rlabs-inc/signals'
 import { loadEngine } from '../ts/bridge/ffi'
-import { initBridgeAoS, getAoSBuffer } from '../ts/bridge'
 import { box } from '../ts/primitives/box'
 import { text } from '../ts/primitives/text'
 import { each } from '../ts/primitives/each'
@@ -31,7 +30,7 @@ import {
   setTerminalSize,
   setNodeCount,
   packColor,
-} from '../ts/bridge/shared-buffer-aos'
+} from '../ts/bridge/shared-buffer'
 import type { RGBA } from '../ts/types'
 
 // =============================================================================
@@ -214,7 +213,7 @@ function VerticalScrollDemo() {
                 content: () => getItem().content,
                 fg: colors.textSecondary,
               })
-              return () => {}
+              return () => { }
             },
             { key: item => item.id }
           )
@@ -316,7 +315,7 @@ function BothDirectionsDemo() {
                 content: () => getItem().content,
                 fg: colors.textSecondary,
               })
-              return () => {}
+              return () => { }
             },
             { key: item => item.id }
           )
@@ -418,7 +417,7 @@ function NestedScrollsDemo() {
                     content: () => `  ${getItem().content}`,
                     fg: colors.textSecondary,
                   })
-                  return () => {}
+                  return () => { }
                 },
                 { key: item => item.id }
               )
@@ -462,7 +461,7 @@ function NestedScrollsDemo() {
                     content: () => `  ${getItem().content}`,
                     fg: colors.textSecondary,
                   })
-                  return () => {}
+                  return () => { }
                 },
                 { key: item => item.id }
               )
@@ -490,7 +489,7 @@ function NestedScrollsDemo() {
                 content: () => getItem().content,
                 fg: colors.textMuted,
               })
-              return () => {}
+              return () => { }
             },
             { key: item => item.id }
           )
@@ -720,4 +719,4 @@ console.log('  - Nested scrolling: inner containers scroll first, then chain to 
 console.log('')
 
 // Keep process alive - Rust engine handles stdin/Ctrl+C
-await new Promise(() => {})
+await new Promise(() => { })

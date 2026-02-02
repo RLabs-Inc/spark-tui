@@ -1,45 +1,33 @@
 /**
- * SparkTUI — Beautiful Counter
+ * SparkTUI - Simple Counter
  *
- * The classic demo app showcasing:
+ * A minimal counter demonstrating:
  * - Reactive state with signals
- * - Flexbox layout (centered, column, row)
- * - Styled components with variants
- * - Focus & keyboard navigation
- * - Click handlers
+ * - Flexbox layout
+ * - Theme-aware styling
+ * - Keyboard shortcuts (+/- keys)
+ * - Mouse click handling
+ * - Theme cycling
  *
  * Controls:
- *   + or =    Increment
- *   - or _    Decrement
- *   Tab       Navigate focus
- *   Enter     Activate focused button
- *   t         Cycle theme
- *   d         Toggle debug stats
- *   q         Quit
- *   Ctrl+C    Quit
+ *   +/=    Increment
+ *   -/_    Decrement
+ *   r      Reset to zero
+ *   t      Cycle theme
+ *   q      Quit
+ *   Ctrl+C Quit
+ *
+ * Run: bun run examples/counter.ts
  */
 
 import { signal, derived } from '@rlabs-inc/signals'
+import { mount } from '../ts/engine'
 import { box, text } from '../ts/primitives'
 import { t, themes, setTheme, getThemeNames } from '../ts/state/theme'
-import { mount } from '../ts/engine'
-import { getBuffer } from '../ts/bridge'
-import {
-  getRenderCount,
-  getLayoutCount,
-  getLayoutTimeUs,
-  getFramebufferTimeUs,
-  getRenderTimeUs,
-  getTotalFrameTimeUs,
-  getTsNotifyCount,
-  getWakeCount,
-  getWakeLatencyUs,
-  getEventWriteCount,
-} from '../ts/bridge/shared-buffer'
 import { isEnter, isSpace, getChar } from '../ts/engine/events'
 
 // =============================================================================
-// REACTIVE STATE
+// STATE
 // =============================================================================
 
 const count = signal(0)
@@ -47,178 +35,124 @@ const themeNames = getThemeNames()
 const themeIndex = signal(0)
 const currentThemeName = derived(() => themeNames[themeIndex.value])
 
-// Debug panel state
-const showDebug = signal(false)
-const debugTick = signal(0) // Force refresh of debug values
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function cycleTheme() {
+  themeIndex.value = (themeIndex.value + 1) % themeNames.length
+  setTheme(themeNames[themeIndex.value] as keyof typeof themes)
+}
 
 // =============================================================================
 // APP
 // =============================================================================
 
 await mount(() => {
-  // Root: Full terminal, centered
+  // Root container - centered
   box({
+    width: '100%',
+    height: '100%',
     flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
     children: () => {
-      // Card container
+      // Card
       box({
-        width: '100%',
+        width: 40,
         flexDirection: 'column',
         alignItems: 'center',
+        border: 3, // rounded
+        borderColor: t.primary,
         padding: 2,
-        paddingBottom: 0,
         gap: 2,
-        border: 1,
-        borderColor: t.secondary,
         children: () => {
           // Title
           text({
-            content: '✨ SparkTUI Counter ✨',
+            content: 'SparkTUI Counter',
             fg: t.primary,
           })
 
-          // Counter row: [ - ]  42  [ + ]
+          // Counter display row: [ - ] count [ + ]
           box({
             width: '100%',
             flexDirection: 'row',
-            alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 2,
+            alignItems: 'center',
             children: () => {
-              // Minus button
+              // Decrement button
               box({
-                width: 7,
+                width: 9,
                 height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
-                bg: t.error,
-                fg: t.text,
+                border: 1,
+                borderColor: t.error,
                 focusable: true,
-                onClick: () => {
-                  count.value = count.value - 1
-                },
+                onClick: () => { count.value-- },
                 onKey: (key) => {
                   if (isEnter(key) || isSpace(key)) {
-                    count.value = count.value - 1
+                    count.value--
                     return true
                   }
                 },
                 children: () => {
-                  text({ content: '  -  ', fg: t.text })
+                  text({ content: '  -  ', fg: t.error })
                 },
               })
 
               // Count display
               box({
+                width: 10,
+                height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
+                border: 1,
+                borderColor: t.textMuted,
                 children: () => {
                   text({
-                    content: count,
-                    fg: t.text,
+                    content: derived(() => String(count.value).padStart(4)),
+                    fg: t.textBright,
                   })
                 },
               })
 
-              // Plus button
+              // Increment button
               box({
-                width: 7,
+                width: 9,
                 height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
-                bg: t.success,
-                fg: t.text,
+                border: 1,
+                borderColor: t.success,
                 focusable: true,
-                onClick: () => {
-                  count.value = count.value + 1
-                },
+                onClick: () => { count.value++ },
                 onKey: (key) => {
                   if (isEnter(key) || isSpace(key)) {
-                    count.value = count.value + 1
+                    count.value++
                     return true
                   }
                 },
                 children: () => {
-                  text({ content: '  +  ', fg: t.text })
+                  text({ content: '  +  ', fg: t.success })
                 },
               })
             },
           })
 
-          // Footer
+          // Help text
           box({
             flexDirection: 'column',
-            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 0,
             children: () => {
               text({
-                content: '+/- count  q quit  d debug',
+                content: '+/- count | r reset | t theme',
                 fg: t.textMuted,
               })
               text({
-                content: () => `t theme: ${currentThemeName.value}`,
-                fg: t.textMuted,
-              })
-            },
-          })
-
-          // Debug panel
-          box({
-            flexDirection: 'column',
-            padding: 1,
-            border: 1,
-            borderColor: t.warning,
-            children: () => {
-              text({ content: '📊 Timing Stats (d to refresh)', fg: t.warning })
-              text({
-                content: () => {
-                  const _ = debugTick.value // React to refresh
-                  const buf = getBuffer()
-                  const r = String(getRenderCount(buf)).padStart(6)
-                  const l = String(getLayoutCount(buf)).padStart(6)
-                  return `Renders:${r}  Layouts:${l}`
-                },
-                fg: t.text,
-              })
-              text({
-                content: () => {
-                  const _ = debugTick.value
-                  const buf = getBuffer()
-                  const lt = String(getLayoutTimeUs(buf)).padStart(6)
-                  const fb = String(getFramebufferTimeUs(buf)).padStart(6)
-                  return `Layout:${lt}μs  FB:${fb}μs`
-                },
-                fg: t.text,
-              })
-              text({
-                content: () => {
-                  const _ = debugTick.value
-                  const buf = getBuffer()
-                  const rt = String(getRenderTimeUs(buf)).padStart(6)
-                  const tot = String(getTotalFrameTimeUs(buf)).padStart(6)
-                  return `Render:${rt}μs  Total:${tot}μs`
-                },
-                fg: t.text,
-              })
-              // New instrumentation metrics
-              text({
-                content: () => {
-                  const _ = debugTick.value
-                  const buf = getBuffer()
-                  const notify = String(getTsNotifyCount(buf)).padStart(6)
-                  const wake = String(getWakeCount(buf)).padStart(6)
-                  return `Notify:${notify}  Wakes:${wake}`
-                },
-                fg: t.text,
-              })
-              text({
-                content: () => {
-                  const _ = debugTick.value
-                  const buf = getBuffer()
-                  const latency = String(getWakeLatencyUs(buf)).padStart(6)
-                  const events = String(getEventWriteCount(buf)).padStart(6)
-                  return `WakeLat:${latency}μs  Events:${events}`
-                },
-                fg: t.text,
+                content: derived(() => `Theme: ${currentThemeName.value}`),
+                fg: t.textDim,
               })
             },
           })
@@ -229,27 +163,35 @@ await mount(() => {
     // Global keyboard handler
     onKey: (key) => {
       const ch = getChar(key)
+
+      // Increment
       if (ch === '+' || ch === '=') {
-        count.value = count.value + 1
+        count.value++
         return true
       }
+
+      // Decrement
       if (ch === '-' || ch === '_') {
-        count.value = count.value - 1
+        count.value--
         return true
       }
+
+      // Reset
+      if (ch === 'r' || ch === 'R') {
+        count.value = 0
+        return true
+      }
+
+      // Theme cycle
+      if (ch === 't' || ch === 'T') {
+        cycleTheme()
+        return true
+      }
+
+      // Quit
       if (ch === 'q' || ch === 'Q') {
         process.exit(0)
       }
-      if (ch === 't' || ch === 'T') {
-        themeIndex.value = (themeIndex.value + 1) % themeNames.length
-        setTheme(themeNames[themeIndex.value] as keyof typeof themes)
-        return true
-      }
-      if (ch === 'd' || ch === 'D') {
-        showDebug.value = !showDebug.value
-        debugTick.value++ // Force refresh timing values
-        return true
-      }
     },
   })
-}, { mode: 'inline' })
+})
