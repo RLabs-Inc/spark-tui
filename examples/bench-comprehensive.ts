@@ -329,7 +329,7 @@ try {
         // List of 100 items (200 components: 100 boxes + 100 texts)
         box({
           flexDirection: 'column',
-          flexGrow: 1,
+          grow: 1,
           children: () => {
             for (let i = 0; i < 100; i++) {
               box({
@@ -445,7 +445,7 @@ header('5. TRUE END-TO-END (signal → screen)')
 
     const t0 = Bun.nanoseconds()
     boxWidth.value = 30 + (i % 40)
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
     const t1 = Bun.nanoseconds()
 
     samples.push(t1 - t0)
@@ -464,7 +464,7 @@ header('5. TRUE END-TO-END (signal → screen)')
 
     const t0 = Bun.nanoseconds()
     boxColor.value = 0xFF000000 | ((i * 123456) & 0xFFFFFF)
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
     const t1 = Bun.nanoseconds()
 
     samples.push(t1 - t0)
@@ -512,7 +512,7 @@ header('6. SUSTAINED THROUGHPUT')
     const t0 = Bun.nanoseconds()
 
     counter.value = renders++
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
 
     samples.push(Bun.nanoseconds() - t0)
   }
@@ -541,7 +541,7 @@ header('7. BATCH UPDATES & COALESCING')
         listItems[i].value = `Item ${i} v${iter}`
       }
     })
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
     const t1 = Bun.nanoseconds()
 
     samples.push(t1 - t0)
@@ -561,7 +561,7 @@ header('7. BATCH UPDATES & COALESCING')
   }
   const writesDone = Bun.nanoseconds()
 
-  while (getRenderCount(handle.buffer) === prevCount) {}
+  while (getRenderCount(handle.buffer) === prevCount) { }
   const renderDone = Bun.nanoseconds()
 
   console.log(`  ${c.cyan}1000 writes${c.reset}: ${c.yellow}${fmt(writesDone - t0)}${c.reset}`)
@@ -585,7 +585,7 @@ header('8. WAKE LATENCY')
     const prevCount = getRenderCount(handle.buffer)
     const t0 = Bun.nanoseconds()
     counter.value = 80000 + i
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
     samples.push(Bun.nanoseconds() - t0)
   }
 
@@ -600,7 +600,7 @@ header('8. WAKE LATENCY')
     const prevCount = getRenderCount(handle.buffer)
     const t0 = Bun.nanoseconds()
     counter.value = 90000 + i
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
     samples.push(Bun.nanoseconds() - t0)
   }
 
@@ -632,7 +632,7 @@ for (const op of operations) {
 
     op.fn()
 
-    while (getRenderCount(handle.buffer) === prevCount) {}
+    while (getRenderCount(handle.buffer) === prevCount) { }
     e2eSamples.push(Bun.nanoseconds() - t0)
 
     const t = getTimingStats(handle.buffer)

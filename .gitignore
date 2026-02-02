@@ -17,3 +17,8 @@ rs/target/
 *.swp
 *.swo
 *~
+
+docs/internal/
+.planning/
+.gemini/
+.claude/

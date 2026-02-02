@@ -12,7 +12,7 @@ import {
   compactTextPool,
   getNodeCount,
   setNodeCount,
-} from '../ts/bridge/shared-buffer.ts'
+} from '../ts/bridge/shared-buffer'
 
 // Create a small buffer for testing (100KB pool instead of 10MB)
 const buf = createSharedBuffer({ maxNodes: 100, textPoolSize: 100 * 1024 })

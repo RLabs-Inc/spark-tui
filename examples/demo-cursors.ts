@@ -14,7 +14,7 @@
 import { signal } from '@rlabs-inc/signals'
 import { mount } from '../ts/engine/mount'
 import { box, text, input, cycle } from '../ts/primitives'
-import { packColor } from '../ts/bridge/shared-buffer-aos'
+import { packColor } from '../ts/bridge/shared-buffer'
 
 // =============================================================================
 // COLORS
@@ -432,4 +432,4 @@ const { unmount, setMode, getMode } = mount(() => {
 console.log('[demo-cursors] App mounted')
 
 // Keep process alive - Rust engine handles stdin (Ctrl+C exits)
-await new Promise(() => {})
+await new Promise(() => { })

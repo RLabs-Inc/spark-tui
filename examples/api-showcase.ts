@@ -297,11 +297,11 @@ function Section3_ControlFlow() {
             () => showConditional.value,
             () => {
               text({ content: '✓ Visible!', fg: t.success })
-              return () => {} // cleanup
+              return () => { } // cleanup
             },
             () => {
               text({ content: '✗ Hidden', fg: t.error })
-              return () => {}
+              return () => { }
             }
           )
         },
@@ -604,8 +604,8 @@ function Section6_Themes() {
             box({
               width: name.length + 2,
               height: 1,
-              bg: () => themeIndex.value === i ? t.primary : t.surface,
-              fg: () => themeIndex.value === i ? t.textBright : t.text,
+              bg: () => themeIndex.value === i ? t.primary.value : t.surface.value,
+              fg: () => themeIndex.value === i ? t.textBright.value : t.text.value,
               justifyContent: 'center',
               children: () => text({ content: name }),
             })
@@ -834,8 +834,8 @@ function Section9_Animation() {
           box({
             width: 15,
             height: 1,
-            bg: () => animationActive.value ? t.success : t.error,
-            fg: t.textBright,
+            bg: () => animationActive.value ? t.success.value : t.error.value,
+            fg: t.textBright.value,
             focusable: true,
             justifyContent: 'center',
             onClick: () => { animationActive.value = !animationActive.value },
@@ -904,13 +904,13 @@ await mount(() => {
             box({
               width: 3,
               height: 1,
-              bg: () => currentSection.value === i ? t.primary : null,
-              fg: () => currentSection.value === i ? t.textBright : t.text,
+              bg: () => currentSection.value === i ? t.primary.value : null,
+              fg: () => currentSection.value === i ? t.textBright.value : t.text.value,
               justifyContent: 'center',
               children: () => text({ content: String(i) }),
             })
           }
-          text({ content: '| t:theme q:quit', fg: t.textMuted })
+          text({ content: '| t:theme q:quit', fg: t.textMuted.value })
         },
       })
 
@@ -921,39 +921,39 @@ await mount(() => {
         children: () => {
           show(
             () => currentSection.value === 1,
-            () => { Section1_Signals(); return () => {} }
+            () => { Section1_Signals(); return () => { } }
           )
           show(
             () => currentSection.value === 2,
-            () => { Section2_Primitives(); return () => {} }
+            () => { Section2_Primitives(); return () => { } }
           )
           show(
             () => currentSection.value === 3,
-            () => { Section3_ControlFlow(); return () => {} }
+            () => { Section3_ControlFlow(); return () => { } }
           )
           show(
             () => currentSection.value === 4,
-            () => { Section4_Layout(); return () => {} }
+            () => { Section4_Layout(); return () => { } }
           )
           show(
             () => currentSection.value === 5,
-            () => { Section5_Styling(); return () => {} }
+            () => { Section5_Styling(); return () => { } }
           )
           show(
             () => currentSection.value === 6,
-            () => { Section6_Themes(); return () => {} }
+            () => { Section6_Themes(); return () => { } }
           )
           show(
             () => currentSection.value === 7,
-            () => { Section7_Events(); return () => {} }
+            () => { Section7_Events(); return () => { } }
           )
           show(
             () => currentSection.value === 8,
-            () => { Section8_Scroll(); return () => {} }
+            () => { Section8_Scroll(); return () => { } }
           )
           show(
             () => currentSection.value === 9,
-            () => { Section9_Animation(); return () => {} }
+            () => { Section9_Animation(); return () => { } }
           )
         },
       })
@@ -985,8 +985,8 @@ await mount(() => {
       lastKey.value = `${modStr}${ch || `code:${key.keycode}`}`
 
       // Section navigation (1-9)
-      if (ch >= '1' && ch <= '9') {
-        currentSection.value = parseInt(ch)
+      if (ch! >= '1' && ch! <= '9') {
+        currentSection.value = parseInt(ch!)
         return true
       }
 
