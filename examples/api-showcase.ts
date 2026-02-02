@@ -126,72 +126,78 @@ function sectionHeader(title: string) {
 // =============================================================================
 
 function Section1_Signals() {
-  sectionHeader('1. Signals & Reactivity')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
     children: () => {
-      // Static text
-      text({ content: 'signal() creates reactive state', fg: t.textMuted })
+      sectionHeader('1. Signals & Reactivity')
 
-      // Reactive counter display
-      text({
-        content: message, // Direct signal binding
-        fg: t.text,
-      })
-
-      // Inline derived (getter function)
-      text({
-        content: () => `Squared: ${counter.value * counter.value}`,
-        fg: t.text,
-      })
-
-      // Buttons
       box({
-        flexDirection: 'row',
-        gap: 2,
+        flexDirection: 'column',
+        gap: 1,
+        padding: 1,
         children: () => {
-          // Decrement
-          box({
-            width: 5,
-            height: 1,
-            bg: t.error,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            onClick: () => { counter.value-- },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                counter.value--
-                return true
-              }
-            },
-            children: () => text({ content: ' - ' }),
+          // Static text
+          text({ content: 'signal() creates reactive state', fg: t.textMuted })
+
+          // Reactive counter display
+          text({
+            content: message, // Direct signal binding
+            fg: t.text,
           })
 
-          // Increment
-          box({
-            width: 5,
-            height: 1,
-            bg: t.success,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            onClick: () => { counter.value++ },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                counter.value++
-                return true
-              }
-            },
-            children: () => text({ content: ' + ' }),
+          // Inline derived (getter function)
+          text({
+            content: () => `Squared: ${counter.value * counter.value}`,
+            fg: t.text,
           })
+
+          // Buttons
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            children: () => {
+              // Decrement
+              box({
+                width: 5,
+                height: 1,
+                bg: t.error,
+                fg: t.textBright,
+                focusable: true,
+                justifyContent: 'center',
+                onClick: () => { counter.value-- },
+                onKey: (e) => {
+                  if (isEnter(e) || isSpace(e)) {
+                    counter.value--
+                    return true
+                  }
+                },
+                children: () => text({ content: ' - ' }),
+              })
+
+              // Increment
+              box({
+                width: 5,
+                height: 1,
+                bg: t.success,
+                fg: t.textBright,
+                focusable: true,
+                justifyContent: 'center',
+                onClick: () => { counter.value++ },
+                onKey: (e) => {
+                  if (isEnter(e) || isSpace(e)) {
+                    counter.value++
+                    return true
+                  }
+                },
+                children: () => text({ content: ' + ' }),
+              })
+            },
+          })
+
+          text({ content: 'Click buttons or use Enter/Space when focused', fg: t.textMuted })
         },
       })
-
-      text({ content: 'Click buttons or use Enter/Space when focused', fg: t.textMuted })
     },
   })
 }
@@ -201,56 +207,62 @@ function Section1_Signals() {
 // =============================================================================
 
 function Section2_Primitives() {
-  sectionHeader('2. Primitives: box, text, input')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
     children: () => {
-      // Text with attributes
-      text({ content: 'Normal text', fg: t.text })
-      text({ content: 'Bold text', fg: t.text, attrs: Attr.BOLD })
-      text({ content: 'Italic text', fg: t.text, attrs: Attr.ITALIC })
-      text({ content: 'Underline text', fg: t.text, attrs: Attr.UNDERLINE })
-      text({ content: 'Combined', fg: t.primary, attrs: Attr.BOLD | Attr.UNDERLINE })
+      sectionHeader('2. Primitives: box, text, input')
 
-      // Text alignment
       box({
-        width: 40,
-        border: 1,
-        borderColor: t.textMuted,
         flexDirection: 'column',
+        gap: 1,
+        padding: 1,
         children: () => {
-          text({ content: 'Left aligned', align: 'left', fg: t.text })
-          text({ content: 'Center aligned', align: 'center', fg: t.text })
-          text({ content: 'Right aligned', align: 'right', fg: t.text })
-        },
-      })
+          // Text with attributes
+          text({ content: 'Normal text', fg: t.text })
+          text({ content: 'Bold text', fg: t.text, attrs: Attr.BOLD })
+          text({ content: 'Italic text', fg: t.text, attrs: Attr.ITALIC })
+          text({ content: 'Underline text', fg: t.text, attrs: Attr.UNDERLINE })
+          text({ content: 'Combined', fg: t.primary, attrs: Attr.BOLD | Attr.UNDERLINE })
 
-      // Input fields
-      text({ content: 'Input fields:', fg: t.textMuted })
-
-      box({
-        flexDirection: 'row',
-        gap: 2,
-        children: () => {
-          text({ content: 'Name:', fg: t.text })
-          input({
-            value: inputValue,
-            width: 20,
-            placeholder: 'Type here...',
+          // Text alignment
+          box({
+            width: 40,
             border: 1,
-            borderColor: t.primary,
-            onSubmit: (val) => { inputValue2.value = `Submitted: ${val}` },
+            borderColor: t.textMuted,
+            flexDirection: 'column',
+            children: () => {
+              text({ content: 'Left aligned', align: 'left', fg: t.text })
+              text({ content: 'Center aligned', align: 'center', fg: t.text })
+              text({ content: 'Right aligned', align: 'right', fg: t.text })
+            },
+          })
+
+          // Input fields
+          text({ content: 'Input fields:', fg: t.textMuted })
+
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            children: () => {
+              text({ content: 'Name:', fg: t.text })
+              input({
+                value: inputValue,
+                width: 20,
+                placeholder: 'Type here...',
+                border: 1,
+                borderColor: t.primary,
+                onSubmit: (val) => { inputValue2.value = `Submitted: ${val}` },
+              })
+            },
+          })
+
+          // Show input result
+          text({
+            content: () => inputValue2.value || '(Press Enter to submit)',
+            fg: t.textMuted,
           })
         },
-      })
-
-      // Show input result
-      text({
-        content: () => inputValue2.value || '(Press Enter to submit)',
-        fg: t.textMuted,
       })
     },
   })
@@ -261,51 +273,49 @@ function Section2_Primitives() {
 // =============================================================================
 
 function Section3_ControlFlow() {
-  sectionHeader('3. Control Flow: each, show')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
     children: () => {
-      // show() demo
-      text({ content: 'show() - Conditional rendering:', fg: t.textMuted })
+      sectionHeader('3. Control Flow: each, show')
 
       box({
-        flexDirection: 'row',
-        gap: 2,
-        alignItems: 'center',
+        flexDirection: 'column',
+        gap: 1,
+        padding: 1,
         children: () => {
-          box({
-            width: 10,
-            height: 1,
-            bg: t.primary,
-            fg: t.textBright,
-            focusable: true,
-            justifyContent: 'center',
-            onClick: () => { showConditional.value = !showConditional.value },
-            onKey: (e) => {
-              if (isEnter(e) || isSpace(e)) {
-                showConditional.value = !showConditional.value
-                return true
-              }
-            },
-            children: () => text({ content: 'Toggle' }),
-          })
+          // show() demo
+          text({ content: 'show() - Conditional rendering:', fg: t.textMuted })
 
-          show(
-            () => showConditional.value,
-            () => {
-              text({ content: '✓ Visible!', fg: t.success })
-              return () => { } // cleanup
+          box({
+            flexDirection: 'row',
+            gap: 2,
+            alignItems: 'center',
+            children: () => {
+              box({
+                width: 10,
+                height: 1,
+                bg: t.primary,
+                fg: t.textBright,
+                focusable: true,
+                justifyContent: 'center',
+                onClick: () => { showConditional.value = !showConditional.value },
+                onKey: (e) => {
+                  if (isEnter(e) || isSpace(e)) {
+                    showConditional.value = !showConditional.value
+                    return true
+                  }
+                },
+                children: () => text({ content: 'Toggle' }),
+              })
+
+              show(
+                () => showConditional.value,
+                () => text({ content: '✓ Visible!', fg: t.success }),
+                () => text({ content: '✗ Hidden', fg: t.error })
+              )
             },
-            () => {
-              text({ content: '✗ Hidden', fg: t.error })
-              return () => { }
-            }
-          )
-        },
-      })
+          })
 
       // each() demo
       text({ content: 'each() - List rendering:', fg: t.textMuted })
@@ -380,6 +390,8 @@ function Section3_ControlFlow() {
           })
         },
       })
+        },
+      })
     },
   })
 }
@@ -389,12 +401,16 @@ function Section3_ControlFlow() {
 // =============================================================================
 
 function Section4_Layout() {
-  sectionHeader('4. Layout: Flexbox, Dimensions, Spacing')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
+    children: () => {
+      sectionHeader('4. Layout: Flexbox, Dimensions, Spacing')
+
+      box({
+        flexDirection: 'column',
+        gap: 1,
+        padding: 1,
     children: () => {
       // Flex direction
       text({ content: 'flexDirection: row vs column', fg: t.textMuted })
@@ -482,6 +498,8 @@ function Section4_Layout() {
           box({ width: 10, height: 1, bg: t.warning, children: () => text({ content: 'fixed' }) })
         },
       })
+        },
+      })
     },
   })
 }
@@ -491,12 +509,16 @@ function Section4_Layout() {
 // =============================================================================
 
 function Section5_Styling() {
-  sectionHeader('5. Styling: Colors, Borders, Variants')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
+    children: () => {
+      sectionHeader('5. Styling: Colors, Borders, Variants')
+
+      box({
+        flexDirection: 'column',
+        gap: 1,
+        padding: 1,
     children: () => {
       // Border styles
       text({ content: 'Border styles:', fg: t.textMuted })
@@ -568,6 +590,8 @@ function Section5_Styling() {
           box({ width: 6, height: 1, bg: t.error, children: () => text({ content: 'error' }) })
         },
       })
+        },
+      })
     },
   })
 }
@@ -577,57 +601,63 @@ function Section5_Styling() {
 // =============================================================================
 
 function Section6_Themes() {
-  sectionHeader('6. Themes')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
     children: () => {
-      text({ content: 'Press "t" to cycle themes', fg: t.textMuted })
-
-      text({
-        content: () => `Current theme: ${themeNames[themeIndex.value]}`,
-        fg: t.primary,
-        attrs: Attr.BOLD,
-      })
-
-      text({ content: 'Available themes:', fg: t.textMuted })
+      sectionHeader('6. Themes')
 
       box({
-        flexDirection: 'row',
-        flexWrap: 'wrap',
+        flexDirection: 'column',
         gap: 1,
+        padding: 1,
         children: () => {
-          for (let i = 0; i < themeNames.length; i++) {
-            const name = themeNames[i]
-            box({
-              width: name.length + 2,
-              height: 1,
-              bg: () => themeIndex.value === i ? t.primary.value : t.surface.value,
-              fg: () => themeIndex.value === i ? t.textBright.value : t.text.value,
-              justifyContent: 'center',
-              children: () => text({ content: name }),
-            })
-          }
-        },
-      })
+          text({ content: 'Press "t" to cycle themes', fg: t.textMuted })
 
-      // Theme color preview
-      text({ content: 'Theme palette preview:', fg: t.textMuted })
+          text({
+            content: () => `Current theme: ${themeNames[themeIndex.value]}`,
+            fg: t.primary,
+            attrs: Attr.BOLD,
+          })
 
-      box({
-        flexDirection: 'row',
-        gap: 0,
-        children: () => {
-          box({ width: 4, height: 2, bg: t.primary })
-          box({ width: 4, height: 2, bg: t.secondary })
-          box({ width: 4, height: 2, bg: t.success })
-          box({ width: 4, height: 2, bg: t.warning })
-          box({ width: 4, height: 2, bg: t.error })
-          box({ width: 4, height: 2, bg: t.info })
-          box({ width: 4, height: 2, bg: t.surface })
-          box({ width: 4, height: 2, bg: t.bg })
+          text({ content: 'Available themes:', fg: t.textMuted })
+
+          box({
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 1,
+            children: () => {
+              for (let i = 0; i < themeNames.length; i++) {
+                const name = themeNames[i]
+                box({
+                  width: name.length + 2,
+                  height: 1,
+                  bg: () => themeIndex.value === i ? t.primary : t.surface,
+                  fg: () => themeIndex.value === i ? t.textBright : t.text,
+                  justifyContent: 'center',
+                  children: () => text({ content: name }),
+                })
+              }
+            },
+          })
+
+          // Theme color preview
+          text({ content: 'Theme palette preview:', fg: t.textMuted })
+
+          box({
+            flexDirection: 'row',
+            gap: 0,
+            children: () => {
+              box({ width: 4, height: 2, bg: t.primary })
+              box({ width: 4, height: 2, bg: t.secondary })
+              box({ width: 4, height: 2, bg: t.success })
+              box({ width: 4, height: 2, bg: t.warning })
+              box({ width: 4, height: 2, bg: t.error })
+              box({ width: 4, height: 2, bg: t.info })
+              box({ width: 4, height: 2, bg: t.surface })
+              box({ width: 4, height: 2, bg: t.bg })
+            },
+          })
         },
       })
     },
@@ -639,12 +669,16 @@ function Section6_Themes() {
 // =============================================================================
 
 function Section7_Events() {
-  sectionHeader('7. Events: Keyboard, Mouse, Focus')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
+    children: () => {
+      sectionHeader('7. Events: Keyboard, Mouse, Focus')
+
+      box({
+        flexDirection: 'column',
+        gap: 1,
+        padding: 1,
     children: () => {
       // Keyboard events
       text({ content: 'Keyboard events (press any key):', fg: t.textMuted })
@@ -726,6 +760,8 @@ function Section7_Events() {
         content: () => `Focused index: ${focusedIndex.value}`,
         fg: t.textMuted,
       })
+        },
+      })
     },
   })
 }
@@ -735,33 +771,38 @@ function Section7_Events() {
 // =============================================================================
 
 function Section8_Scroll() {
-  sectionHeader('8. Scroll')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
     children: () => {
-      text({ content: 'Scrollable container (Tab to focus, arrows to scroll):', fg: t.textMuted })
+      sectionHeader('8. Scroll')
 
-      // Scrollable box
       box({
-        width: 40,
-        height: 8,
-        overflow: 'scroll',
-        border: 1,
-        borderColor: t.primary,
-        focusable: true,
         flexDirection: 'column',
+        gap: 1,
+        padding: 1,
         children: () => {
-          for (const line of scrollContent) {
-            text({ content: line, fg: t.text })
-          }
+          text({ content: 'Scrollable container (Tab to focus, arrows to scroll):', fg: t.textMuted })
+
+          // Scrollable box
+          box({
+            width: 40,
+            height: 8,
+            overflow: 'scroll',
+            border: 1,
+            borderColor: t.primary,
+            flexDirection: 'column',
+            children: () => {
+              for (const line of scrollContent) {
+                text({ content: line, fg: t.text })
+              }
+            },
+          })
+
+          text({ content: 'Use Arrow keys, Page Up/Down, Home/End', fg: t.textMuted })
+          text({ content: 'Mouse wheel also works in fullscreen mode', fg: t.textMuted })
         },
       })
-
-      text({ content: 'Use Arrow keys, Page Up/Down, Home/End', fg: t.textMuted })
-      text({ content: 'Mouse wheel also works in fullscreen mode', fg: t.textMuted })
     },
   })
 }
@@ -771,12 +812,16 @@ function Section8_Scroll() {
 // =============================================================================
 
 function Section9_Animation() {
-  sectionHeader('9. Animation: cycle, pulse')
-
-  box({
+  return box({
     flexDirection: 'column',
     gap: 1,
-    padding: 1,
+    children: () => {
+      sectionHeader('9. Animation: cycle, pulse')
+
+      box({
+        flexDirection: 'column',
+        gap: 1,
+        padding: 1,
     children: () => {
       text({ content: 'cycle() - Frame-based animation:', fg: t.textMuted })
 
@@ -834,8 +879,8 @@ function Section9_Animation() {
           box({
             width: 15,
             height: 1,
-            bg: () => animationActive.value ? t.success.value : t.error.value,
-            fg: t.textBright.value,
+            bg: () => animationActive.value ? t.success : t.error,
+            fg: t.textBright,
             focusable: true,
             justifyContent: 'center',
             onClick: () => { animationActive.value = !animationActive.value },
@@ -862,6 +907,8 @@ function Section9_Animation() {
       text({
         content: 'spinner, dots, line, bar, clock, bounce, arrow, pulse',
         fg: t.text,
+      })
+        },
       })
     },
   })
@@ -904,13 +951,13 @@ await mount(() => {
             box({
               width: 3,
               height: 1,
-              bg: () => currentSection.value === i ? t.primary.value : null,
-              fg: () => currentSection.value === i ? t.textBright.value : t.text.value,
+              bg: () => currentSection.value === i ? t.primary : null,
+              fg: () => currentSection.value === i ? t.textBright : t.text,
               justifyContent: 'center',
               children: () => text({ content: String(i) }),
             })
           }
-          text({ content: '| t:theme q:quit', fg: t.textMuted.value })
+          text({ content: '| t:theme q:quit', fg: t.textMuted })
         },
       })
 
@@ -919,42 +966,15 @@ await mount(() => {
         flexDirection: 'column',
         padding: 1,
         children: () => {
-          show(
-            () => currentSection.value === 1,
-            () => { Section1_Signals(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 2,
-            () => { Section2_Primitives(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 3,
-            () => { Section3_ControlFlow(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 4,
-            () => { Section4_Layout(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 5,
-            () => { Section5_Styling(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 6,
-            () => { Section6_Themes(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 7,
-            () => { Section7_Events(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 8,
-            () => { Section8_Scroll(); return () => { } }
-          )
-          show(
-            () => currentSection.value === 9,
-            () => { Section9_Animation(); return () => { } }
-          )
+          show(() => currentSection.value === 1, Section1_Signals)
+          show(() => currentSection.value === 2, Section2_Primitives)
+          show(() => currentSection.value === 3, Section3_ControlFlow)
+          show(() => currentSection.value === 4, Section4_Layout)
+          show(() => currentSection.value === 5, Section5_Styling)
+          show(() => currentSection.value === 6, Section6_Themes)
+          show(() => currentSection.value === 7, Section7_Events)
+          show(() => currentSection.value === 8, Section8_Scroll)
+          show(() => currentSection.value === 9, Section9_Animation)
         },
       })
 
