@@ -545,7 +545,9 @@ export function box(props: BoxProps = {}): Cleanup {
   // --------------------------------------------------------------------------
   // INTERACTION — focusable, tab index
   // --------------------------------------------------------------------------
-  const shouldBeFocusable = props.focusable || (props.overflow === 'scroll' && props.focusable !== false)
+  // Auto-focusable when overflow is scroll or auto (enables keyboard scrolling)
+  const shouldBeFocusable = props.focusable ||
+    ((props.overflow === 'scroll' || props.overflow === 'auto') && props.focusable !== false)
   if (shouldBeFocusable) {
     arrays.interactionFlags.set(index, FLAG_FOCUSABLE)
     if (props.tabIndex !== undefined) disposals.push(repeat(numInput(props.tabIndex, -1), arrays.tabIndex, index))
