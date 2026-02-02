@@ -23,6 +23,28 @@ export interface RGBA {
   a: number
 }
 
+/**
+ * Flexible color input - accepts any format parseColor() understands.
+ *
+ * Supported formats:
+ * - RGBA object: `{ r: 255, g: 0, b: 0, a: 255 }`
+ * - Hex string: `'#ff0000'`, `'#f00'`, `'#ff0000ff'`
+ * - CSS name: `'red'`, `'dodgerblue'`, `'transparent'`
+ * - RGB/RGBA: `'rgb(255, 0, 0)'`, `'rgba(255, 0, 0, 0.5)'`
+ * - HSL/HSLA: `'hsl(0, 100%, 50%)'`, `'hsla(0, 100%, 50%, 0.5)'`
+ * - OKLCH: `'oklch(0.7 0.15 30)'` (perceptually uniform!)
+ * - Integer: `0xff0000` (0xRRGGBB format)
+ * - null: Terminal default color
+ *
+ * @example
+ * box({ bg: '#ff0000' })           // hex
+ * box({ bg: 'red' })               // CSS name
+ * box({ bg: 'oklch(0.7 0.15 30)' }) // OKLCH
+ * box({ bg: 0xff0000 })            // integer
+ * text({ fg: 'dodgerblue' })
+ */
+export type ColorInput = RGBA | string | number | null
+
 // =============================================================================
 // Dimension - Supports absolute and percentage values
 // =============================================================================

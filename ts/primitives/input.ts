@@ -26,7 +26,8 @@
 
 import { signal, repeat } from '@rlabs-inc/signals'
 import { ComponentType } from '../types'
-import type { RGBA } from '../types'
+import type { RGBA, ColorInput } from '../types'
+import { parseColor } from '../types/color'
 import {
   allocateIndex,
   releaseIndex,
@@ -88,9 +89,14 @@ function isReactive(prop: unknown): boolean {
   return typeof prop === 'function' || (prop !== null && typeof prop === 'object' && 'value' in (prop as any))
 }
 
-function toPackedColor(c: RGBA | number | null | undefined): number {
+/** Pack any ColorInput to u32 - handles hex, CSS names, rgb(), oklch(), etc. */
+function toPackedColor(c: ColorInput | undefined): number {
   if (c === null || c === undefined) return 0
   if (typeof c === 'number') return c
+  if (typeof c === 'string') {
+    const parsed = parseColor(c)
+    return packColor(parsed.r, parsed.g, parsed.b, parsed.a)
+  }
   return packColor(c.r, c.g, c.b, c.a ?? 255)
 }
 

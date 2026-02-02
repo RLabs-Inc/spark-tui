@@ -21,4 +21,4 @@ rs/target/
 docs/internal/
 .planning/
 .gemini/
-.claude/
+.claude/.planning/

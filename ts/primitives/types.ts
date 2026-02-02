@@ -5,8 +5,8 @@
  * Props can be static values OR reactive (signals/bindings).
  */
 
-import type { RGBA, CellAttrs, Dimension } from '../types'
-import type { WritableSignal, Binding, ReadonlyBinding } from '@rlabs-inc/signals'
+import type { RGBA, CellAttrs, Dimension, ColorInput } from '../types'
+import type { WritableSignal, ReadableSignal, Binding, ReadonlyBinding } from '@rlabs-inc/signals'
 import type { Variant } from '../state/theme'
 import type { KeyEvent } from '../state/keyboard'
 import type { MouseEvent, MouseHandlers, ScrollEvent } from '../state/mouse'
@@ -25,11 +25,11 @@ export type KeyHandler = (event: KeyEvent) => boolean | void
  * Accepts:
  * - Static value: `42`, `'hello'`
  * - Signal: `mySignal`
- * - Derived: `myDerived`
+ * - Derived: `myDerived` (ReadonlySignal)
  * - Binding: `bind(source)`
  * - Getter (inline derived): `() => count.value * 2`
  */
-export type Reactive<T> = T | WritableSignal<T> | Binding<T> | ReadonlyBinding<T> | (() => T)
+export type Reactive<T> = T | WritableSignal<T> | ReadableSignal<T> | Binding<T> | ReadonlyBinding<T> | (() => T)
 
 /**
  * Make specific props reactive while keeping others static.
@@ -43,10 +43,10 @@ export type WithReactive<T, K extends keyof T> = Omit<T, K> & {
 // =============================================================================
 
 export interface StyleProps {
-  /** Foreground color (text) */
-  fg?: Reactive<RGBA | null>
-  /** Background color */
-  bg?: Reactive<RGBA | null>
+  /** Foreground color (text) - accepts hex, CSS names, rgb(), oklch(), integer, or RGBA */
+  fg?: Reactive<ColorInput>
+  /** Background color - accepts hex, CSS names, rgb(), oklch(), integer, or RGBA */
+  bg?: Reactive<ColorInput>
   /** Opacity 0-1 */
   opacity?: Reactive<number>
 }
@@ -54,8 +54,8 @@ export interface StyleProps {
 export interface BorderProps {
   /** Border style (0=none, 1=single, 2=double, 3=rounded, etc.) */
   border?: Reactive<number>
-  /** Border color */
-  borderColor?: Reactive<RGBA | null>
+  /** Border color - accepts hex, CSS names, rgb(), oklch(), integer, or RGBA */
+  borderColor?: Reactive<ColorInput>
   /** Per-side border styles */
   borderTop?: Reactive<number>
   borderRight?: Reactive<number>
