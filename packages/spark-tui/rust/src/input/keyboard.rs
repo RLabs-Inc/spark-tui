@@ -65,32 +65,33 @@ pub fn dispatch_key(
     push_key_event(buf, target as u16, &key.code, key.modifiers.bits());
 
     // 6. Framework defaults (arrow scroll, page scroll, home/end)
+    // Keyboard scroll does NOT chain to parent (only mouse wheel chains)
     if let Some(focused) = focus.focused() {
         match &key.code {
             KeyCode::Up => {
-                scroll.scroll_by(buf, focused, 0, -1);
+                scroll.scroll_by(buf, focused, 0, -1, false);
                 return true;
             }
             KeyCode::Down => {
-                scroll.scroll_by(buf, focused, 0, 1);
+                scroll.scroll_by(buf, focused, 0, 1, false);
                 return true;
             }
             KeyCode::Left => {
-                scroll.scroll_by(buf, focused, -1, 0);
+                scroll.scroll_by(buf, focused, -1, 0, false);
                 return true;
             }
             KeyCode::Right => {
-                scroll.scroll_by(buf, focused, 1, 0);
+                scroll.scroll_by(buf, focused, 1, 0, false);
                 return true;
             }
             KeyCode::PageUp => {
                 let viewport_h = buf.computed_height(focused) as i32;
-                scroll.scroll_by(buf, focused, 0, -viewport_h);
+                scroll.scroll_by(buf, focused, 0, -viewport_h, false);
                 return true;
             }
             KeyCode::PageDown => {
                 let viewport_h = buf.computed_height(focused) as i32;
-                scroll.scroll_by(buf, focused, 0, viewport_h);
+                scroll.scroll_by(buf, focused, 0, viewport_h, false);
                 return true;
             }
             KeyCode::Home => {

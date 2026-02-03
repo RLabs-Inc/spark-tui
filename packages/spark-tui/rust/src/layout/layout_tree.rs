@@ -659,10 +659,24 @@ impl<'a> LayoutTree<'a> {
             self.buf.set_content_width(i, layout.content_size.width);
             self.buf.set_content_height(i, layout.content_size.height);
 
+            // Calculate max extent of DIRECT children (not Taffy's content_size)
+            // Rule: children_computed_size > parent_computed_size → parent scrollable
+            let mut children_max_x = 0.0f32;
+            let mut children_max_y = 0.0f32;
+            for &child in &self.ctx.children[i] {
+                let child_layout = self.ctx.final_layout[child];
+                children_max_x = children_max_x.max(
+                    child_layout.location.x + child_layout.size.width
+                );
+                children_max_y = children_max_y.max(
+                    child_layout.location.y + child_layout.size.height
+                );
+            }
+
             let has_children = !self.ctx.children[i].is_empty();
             let overflow = self.buf.overflow(i);
-            let max_scroll_x = (layout.content_size.width - layout.size.width).max(0.0);
-            let max_scroll_y = (layout.content_size.height - layout.size.height).max(0.0);
+            let max_scroll_x = (children_max_x - layout.size.width).max(0.0);
+            let max_scroll_y = (children_max_y - layout.size.height).max(0.0);
             let scrollable = match overflow {
                 1 => false,                    // clip
                 2 | 3 => true,                 // scroll/auto

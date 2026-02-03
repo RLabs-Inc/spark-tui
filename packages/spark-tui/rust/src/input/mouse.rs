@@ -169,20 +169,22 @@ impl MouseManager {
             }
             MouseKind::ScrollUp => {
                 // Route to component under cursor, or focused scrollable
+                // Mouse scroll DOES chain to parent (natural UX)
                 if let Some(idx) = target {
-                    scroll.scroll_by(buf, idx, 0, -3);
+                    scroll.scroll_by(buf, idx, 0, -3, true);
                     push_scroll_event(buf, idx as u16, 0, -3);
                 } else if let Some(focused) = focus.focused() {
-                    scroll.scroll_by(buf, focused, 0, -3);
+                    scroll.scroll_by(buf, focused, 0, -3, true);
                     push_scroll_event(buf, focused as u16, 0, -3);
                 }
             }
             MouseKind::ScrollDown => {
+                // Mouse scroll DOES chain to parent (natural UX)
                 if let Some(idx) = target {
-                    scroll.scroll_by(buf, idx, 0, 3);
+                    scroll.scroll_by(buf, idx, 0, 3, true);
                     push_scroll_event(buf, idx as u16, 0, 3);
                 } else if let Some(focused) = focus.focused() {
-                    scroll.scroll_by(buf, focused, 0, 3);
+                    scroll.scroll_by(buf, focused, 0, 3, true);
                     push_scroll_event(buf, focused as u16, 0, 3);
                 }
             }

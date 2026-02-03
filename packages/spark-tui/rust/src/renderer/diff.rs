@@ -18,7 +18,7 @@ use std::io;
 use super::ansi;
 use super::buffer::FrameBuffer;
 use super::output::{OutputBuffer, StatefulCellRenderer};
-use crate::utils::Cell;
+use crate::utils::{Cell, Rgba};
 
 /// Differential renderer for fullscreen mode.
 ///
@@ -55,6 +55,15 @@ impl DiffRenderer {
         let width = buffer.width();
         let height = buffer.height();
 
+        // First render (no previous): clear screen and cursor home.
+        // This ensures we start from a known blank state.
+        // Subsequent renders rely on diff against previous.
+        let is_first_render = self.previous.is_none();
+        if is_first_render {
+            ansi::clear_screen(&mut self.output)?;
+            ansi::cursor_to(&mut self.output, 0, 0)?;
+        }
+
         // Differential rendering
         for y in 0..height {
             for x in 0..width {
@@ -77,6 +86,12 @@ impl DiffRenderer {
                 }
             }
         }
+
+        // Reset terminal state at end of frame.
+        // This ensures the terminal starts next frame in a known state (no attributes).
+        // Without this, attributes from the last rendered cell leak into the next frame
+        // because we skip unchanged cells and don't re-emit resets.
+        ansi::reset(&mut self.output)?;
 
         // End synchronized output
         ansi::end_sync(&mut self.output)?;
@@ -114,6 +129,9 @@ impl DiffRenderer {
                 }
             }
         }
+
+        // Reset terminal state at end of frame
+        ansi::reset(&mut self.output)?;
 
         // End synchronized output
         ansi::end_sync(&mut self.output)?;
@@ -177,10 +195,33 @@ impl Default for DiffRenderer {
     }
 }
 
-/// Fast cell equality check.
+/// Semantic color equality check.
+///
+/// Handles the TERMINAL_DEFAULT representation mismatch:
+/// - Cell::default() uses Rgba::TERMINAL_DEFAULT = (-1,-1,-1,-1)
+/// - Rgba::from_u32(0xFFFFFFFF) = (255,255,255,255)
+/// Both represent "terminal default" but would compare as different.
+#[inline]
+fn colors_equal(a: Rgba, b: Rgba) -> bool {
+    // Fast path: exact match
+    if a == b {
+        return true;
+    }
+    // Both terminal default (handles -1 vs 255 mismatch)
+    if a.is_terminal_default() && b.is_terminal_default() {
+        return true;
+    }
+    // Both ANSI palette with same index
+    if a.is_ansi() && b.is_ansi() {
+        return a.ansi_index() == b.ansi_index();
+    }
+    false
+}
+
+/// Fast cell equality check with semantic color comparison.
 #[inline]
 fn cells_equal(a: &Cell, b: &Cell) -> bool {
-    a.char == b.char && a.attrs == b.attrs && a.fg == b.fg && a.bg == b.bg
+    a.char == b.char && a.attrs == b.attrs && colors_equal(a.fg, b.fg) && colors_equal(a.bg, b.bg)
 }
 
 // =============================================================================
@@ -214,6 +255,52 @@ mod tests {
             ..a
         };
         assert!(!cells_equal(&a, &c));
+    }
+
+    #[test]
+    fn test_colors_equal_terminal_default() {
+        // TERMINAL_DEFAULT as constant: (-1, -1, -1, -1)
+        let semantic_default = Rgba::TERMINAL_DEFAULT;
+
+        // TERMINAL_DEFAULT unpacked from u32: (255, 255, 255, 255)
+        // This is what we'd get from Rgba::from_u32(0xFFFFFFFF)
+        let packed_default = Rgba::from_u32(0xFFFFFFFF);
+
+        // These should be considered equal (both represent terminal default)
+        assert!(colors_equal(semantic_default, packed_default));
+        assert!(colors_equal(packed_default, semantic_default));
+
+        // But they're NOT equal with direct comparison (the bug we fixed)
+        assert_ne!(semantic_default, packed_default);
+    }
+
+    #[test]
+    fn test_colors_equal_ansi() {
+        // Same ANSI index should be equal
+        let ansi_red = Rgba::ansi(1);
+        let ansi_red2 = Rgba::ansi(1);
+        assert!(colors_equal(ansi_red, ansi_red2));
+
+        // Different ANSI indices should not be equal
+        let ansi_blue = Rgba::ansi(4);
+        assert!(!colors_equal(ansi_red, ansi_blue));
+    }
+
+    #[test]
+    fn test_cells_equal_with_terminal_default() {
+        // Cell with default() uses TERMINAL_DEFAULT (-1,-1,-1,-1)
+        let default_cell = Cell::default();
+
+        // Cell with unpacked terminal default (255,255,255,255)
+        let packed_cell = Cell {
+            char: ' ' as u32,
+            fg: Rgba::from_u32(0xFFFFFFFF),
+            bg: Rgba::from_u32(0xFFFFFFFF),
+            attrs: Attr::NONE,
+        };
+
+        // These should be considered equal (same semantic meaning)
+        assert!(cells_equal(&default_cell, &packed_cell));
     }
 
     #[test]

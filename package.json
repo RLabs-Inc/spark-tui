@@ -1,16 +1,13 @@
 {
-  "name": "@rlabs-inc/spark-tui",
-  "version": "0.1.0",
-  "type": "module",
-  "description": "Hybrid TUI framework - TypeScript primitives, Rust engine, SharedArrayBuffer bridge",
+  "name": "spark-tui-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build:rust": "cd rust && cargo build --release",
-    "proof": "bun run examples/proof.ts",
+    "build:rust": "cd packages/spark-tui/rust && cargo build --release",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@rlabs-inc/signals": "^1.13.1"
+    "typecheck": "bun run --filter '*' typecheck"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

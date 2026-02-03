@@ -23,7 +23,7 @@ import { signal, derived } from '@rlabs-inc/signals'
 import { mount } from '../ts/engine/mount'
 import { box, text, each, cycle, Frames } from '../ts/primitives'
 import { packColor } from '../ts/bridge/shared-buffer'
-import { on, getChar, isPress } from '../ts/state/keyboard'
+import { on, isPress, lastKey } from '../ts/state/keyboard'
 import type { KeyEvent } from '../ts/state/keyboard'
 
 // =============================================================================
@@ -146,7 +146,7 @@ mount(() => {
   on((event: KeyEvent) => {
     if (!isPress(event)) return false
 
-    const char = getChar(event)
+    const char = lastKey.value
 
     // Adjust count
     if (char === '+' || char === '=' || event.keycode === 0x1b5b41) { // Up arrow
@@ -194,8 +194,8 @@ mount(() => {
   // ─────────────────────────────────────────────────────────────────────────────
   box({
     id: 'root',
-    width: cols,
-    height: rows,
+    width: '100%',
+    height: '100%',
     flexDirection: 'column',
     bg: colors.bg,
     children: () => {
@@ -205,7 +205,7 @@ mount(() => {
       box({
         id: 'header',
         width: '100%',
-        height: 5,
+        // height: 5,
         flexDirection: 'column',
         bg: colors.bgCard,
         border: 1,
@@ -214,6 +214,7 @@ mount(() => {
         children: () => {
           box({
             flexDirection: 'row',
+            width: '100%',
             justifyContent: 'space-between',
             children: () => {
               box({
@@ -240,6 +241,8 @@ mount(() => {
 
           box({
             flexDirection: 'row',
+            width: '100%',
+            // flexWrap: 'wrap',
             gap: 4,
             marginTop: 1,
             children: () => {
@@ -268,8 +271,10 @@ mount(() => {
       // MAIN CONTENT
       // ─────────────────────────────────────────────────────────────────────────
       box({
+        width: '100%',  // TEST: bound main content to root
         grow: 1,
         flexDirection: 'row',
+        // flexWrap: 'wrap',  // removed - we want row layout for left/right panels
         padding: 1,
         gap: 1,
         children: () => {
@@ -277,14 +282,16 @@ mount(() => {
           // LEFT PANEL: Spinner Grid
           // ─────────────────────────────────────────────────────────────────────
           box({
-            grow: 2,
+            // grow: 1,  // TEST: grow to fill space left by right panel
             flexDirection: 'column',
+            width: '100%',
             border: 1,
             borderColor: colors.border,
             bg: colors.bgPanel,
             children: () => {
               // Panel header
               box({
+                width: '100%',  // TEST: fill parent width
                 height: 1,
                 bg: colors.bgCard,
                 paddingLeft: 1,
@@ -296,15 +303,18 @@ mount(() => {
                 },
               })
 
-              // Spinner grid (scrollable)
+              // Spinner grid container
               box({
-                grow: 1,
-                overflow: 'scroll',
+                width: '100%',  // TEST: bound to left panel width
+                // grow: 1,
                 padding: 1,
                 children: () => {
+                  // Spinner wrapper - flexWrap makes spinners wrap within bounded width
                   box({
+                    width: '100%',
                     flexDirection: 'row',
-                    flexWrap: 'wrap',
+                    // flexWrap: 'wrap',  // restored - wrapping works with width: 100%
+                    overflow: 'scroll',
                     gap: 1,
                     children: () => {
                       each(
@@ -319,6 +329,7 @@ mount(() => {
                             id: `spinner-box-${key}`,
                             width: 3,
                             height: 1,
+                            flexWrap: 'wrap',
                             justifyContent: 'center',
                             alignItems: 'center',
                             children: () => {
@@ -562,4 +573,4 @@ mount(() => {
 }, { mode: 'fullscreen' })
 
 console.log('[animation-stress] App mounted - +/- to adjust, Space to pause')
-await new Promise(() => {})
+await new Promise(() => { })

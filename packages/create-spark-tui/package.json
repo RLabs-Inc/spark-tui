@@ -1,0 +1,33 @@
+{
+  "name": "create-spark-tui",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Create SparkTUI applications with a single command",
+  "bin": {
+    "create-spark-tui": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  },
+  "files": [
+    "src",
+    "templates"
+  ],
+  "keywords": [
+    "spark-tui",
+    "cli",
+    "create",
+    "scaffold",
+    "tui"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rlabs-inc/spark-tui"
+  }
+}

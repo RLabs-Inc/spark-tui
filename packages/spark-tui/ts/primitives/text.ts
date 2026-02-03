@@ -17,7 +17,7 @@
  */
 
 import { repeat } from '@rlabs-inc/signals'
-import { ComponentType } from '../types'
+import { ComponentType, Attr } from '../types'
 import type { RGBA, ColorInput } from '../types'
 import { parseColor } from '../types/color'
 import {
@@ -348,6 +348,52 @@ export function text(props: TextProps): Cleanup {
     if (props.bg !== undefined) disposals.push(repeat(colorInput(props.bg), arrays.bgColor, index))
   }
   if (props.opacity !== undefined) disposals.push(repeat(numInput(props.opacity), arrays.opacity, index))
+
+  // --------------------------------------------------------------------------
+  // TEXT ATTRIBUTES (bold, italic, underline, etc.)
+  // --------------------------------------------------------------------------
+  const hasAttrProps = props.bold !== undefined || props.dim !== undefined ||
+    props.italic !== undefined || props.underline !== undefined ||
+    props.blink !== undefined || props.inverse !== undefined ||
+    props.hidden !== undefined || props.strikethrough !== undefined ||
+    props.attrs !== undefined
+
+  if (hasAttrProps) {
+    // Check if any attr prop is reactive
+    const anyReactive = isReactive(props.bold) || isReactive(props.dim) ||
+      isReactive(props.italic) || isReactive(props.underline) ||
+      isReactive(props.blink) || isReactive(props.inverse) ||
+      isReactive(props.hidden) || isReactive(props.strikethrough) ||
+      isReactive(props.attrs)
+
+    if (anyReactive) {
+      // Reactive: compute combined attrs on every change
+      disposals.push(repeat(() => {
+        let attrs = unwrap(props.attrs) ?? 0
+        if (unwrap(props.bold)) attrs |= Attr.BOLD
+        if (unwrap(props.dim)) attrs |= Attr.DIM
+        if (unwrap(props.italic)) attrs |= Attr.ITALIC
+        if (unwrap(props.underline)) attrs |= Attr.UNDERLINE
+        if (unwrap(props.blink)) attrs |= Attr.BLINK
+        if (unwrap(props.inverse)) attrs |= Attr.INVERSE
+        if (unwrap(props.hidden)) attrs |= Attr.HIDDEN
+        if (unwrap(props.strikethrough)) attrs |= Attr.STRIKETHROUGH
+        return attrs
+      }, arrays.textAttrs, index))
+    } else {
+      // Static: compute once
+      let attrs = (props.attrs as number) ?? 0
+      if (props.bold) attrs |= Attr.BOLD
+      if (props.dim) attrs |= Attr.DIM
+      if (props.italic) attrs |= Attr.ITALIC
+      if (props.underline) attrs |= Attr.UNDERLINE
+      if (props.blink) attrs |= Attr.BLINK
+      if (props.inverse) attrs |= Attr.INVERSE
+      if (props.hidden) attrs |= Attr.HIDDEN
+      if (props.strikethrough) attrs |= Attr.STRIKETHROUGH
+      arrays.textAttrs.set(index, attrs)
+    }
+  }
 
   // --------------------------------------------------------------------------
   // MOUSE HANDLERS

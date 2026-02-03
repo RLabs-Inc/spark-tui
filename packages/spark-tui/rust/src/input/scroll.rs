@@ -30,10 +30,16 @@ impl ScrollManager {
 
     /// Scroll by a delta, clamped to valid range.
     /// Returns true if scroll actually changed (false if at boundary).
-    pub fn scroll_by(&self, buf: &SharedBuffer, index: usize, dx: i32, dy: i32) -> bool {
+    ///
+    /// `allow_chain`: if true, scroll chains to parent when at boundary (mouse behavior).
+    ///                if false, scroll stops at boundary (keyboard behavior).
+    pub fn scroll_by(&self, buf: &SharedBuffer, index: usize, dx: i32, dy: i32, allow_chain: bool) -> bool {
         if !buf.is_scrollable(index) {
-            // Try scroll chaining: walk up to find scrollable parent
-            return self.try_chain_scroll(buf, index, dx, dy);
+            // Try scroll chaining: walk up to find scrollable parent (only if allowed)
+            if allow_chain {
+                return self.try_chain_scroll(buf, index, dx, dy);
+            }
+            return false;
         }
 
         let current_x = buf.scroll_x(index);
@@ -48,8 +54,8 @@ impl ScrollManager {
 
         if changed {
             buf.set_scroll(index, new_x, new_y);
-        } else {
-            // At boundary: try chaining to parent
+        } else if allow_chain {
+            // At boundary: try chaining to parent (only for mouse scroll)
             return self.try_chain_scroll(buf, index, dx, dy);
         }
 

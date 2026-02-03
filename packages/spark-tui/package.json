@@ -1,0 +1,46 @@
+{
+  "name": "@spark-tui/core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Hybrid TUI framework - TypeScript primitives, Rust engine, SharedArrayBuffer bridge",
+  "main": "./ts/index.ts",
+  "exports": {
+    ".": "./ts/index.ts",
+    "./primitives": "./ts/primitives/index.ts",
+    "./engine": "./ts/engine/mount.ts",
+    "./state": "./ts/state/context.ts",
+    "./bridge": "./ts/bridge/index.ts"
+  },
+  "scripts": {
+    "build:rust": "cd rust && cargo build --release",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rlabs-inc/signals": "^1.13.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  },
+  "files": [
+    "ts",
+    "rust/target/release/*.dylib",
+    "rust/target/release/*.so",
+    "rust/target/release/*.dll"
+  ],
+  "keywords": [
+    "tui",
+    "terminal",
+    "cli",
+    "reactive",
+    "rust",
+    "flexbox",
+    "grid"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rlabs-inc/spark-tui"
+  }
+}

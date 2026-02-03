@@ -20,11 +20,20 @@
  * Run: bun run examples/counter.ts
  */
 
-import { signal, derived } from '@rlabs-inc/signals'
-import { mount } from '../ts/engine'
-import { box, text } from '../ts/primitives'
-import { t, themes, setTheme, getThemeNames } from '../ts/state/theme'
-import { isEnter, isSpace, getChar } from '../ts/engine/events'
+import {
+  signal,
+  derived,
+  mount,
+  box,
+  text,
+  t,
+  themes,
+  setTheme,
+  getThemeNames,
+  isEnter,
+  isSpace,
+  getChar,
+} from '@spark-tui/core'
 
 // =============================================================================
 // STATE
@@ -59,7 +68,7 @@ await mount(() => {
     children: () => {
       // Card
       box({
-        width: 40,
+        // width: 40,
         flexDirection: 'column',
         alignItems: 'center',
         border: 3, // rounded
@@ -79,11 +88,12 @@ await mount(() => {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
+            gap: 2,
             children: () => {
               // Decrement button
               box({
                 width: 9,
-                height: 3,
+                // height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
                 border: 1,
@@ -103,8 +113,9 @@ await mount(() => {
 
               // Count display
               box({
-                width: 10,
-                height: 3,
+                // width: 10,
+                minWidth: 10,
+                // height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
                 border: 1,
@@ -120,7 +131,7 @@ await mount(() => {
               // Increment button
               box({
                 width: 9,
-                height: 3,
+                // height: 3,
                 justifyContent: 'center',
                 alignItems: 'center',
                 border: 1,
@@ -194,4 +205,4 @@ await mount(() => {
       }
     },
   })
-})
+}, { mode: 'inline' })

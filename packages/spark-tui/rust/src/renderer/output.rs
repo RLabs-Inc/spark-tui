@@ -175,9 +175,34 @@ impl StatefulCellRenderer {
     ///
     /// Only emits escape codes for state that has changed.
     pub fn render_cell(&mut self, output: &mut OutputBuffer, x: u16, y: u16, cell: &Cell) {
-        // Skip continuation cells (wide character placeholders)
+        // Handle continuation cells (wide character placeholders, char == 0).
+        //
+        // If we just rendered the wide character at x-1 on this same row,
+        // DON'T output anything - the wide char already covers this position.
+        // The terminal displays wide chars across 2 columns automatically.
+        //
+        // Only output a space if this cell TRANSITIONED to a continuation
+        // (i.e., we didn't just render the wide char - the diff detected a change).
         if cell.char == 0 {
-            // Update position tracking but don't output
+            // Check if we just rendered a wide character immediately before this
+            let just_rendered_wide = self.last_y == y as i32 && self.last_x == x as i32 - 1;
+
+            if just_rendered_wide {
+                // Wide char at x-1 already covers this cell visually.
+                // Just update tracking, don't output anything.
+                self.last_x = x as i32;
+                // Don't update last_y - stay on same row
+                return;
+            }
+
+            // This continuation cell changed from something else (or is on a different row).
+            // Output a space to clear whatever was there before.
+            ansi::cursor_to(output, x, y).ok();
+            if self.last_bg.map_or(true, |c| c != cell.bg) {
+                ansi::bg(output, cell.bg).ok();
+                self.last_bg = Some(cell.bg);
+            }
+            output.write_char(' ');
             self.last_x = x as i32;
             self.last_y = y as i32;
             return;
@@ -225,8 +250,10 @@ impl StatefulCellRenderer {
     ///
     /// Used by InlineRenderer where we write sequentially with newlines.
     pub fn render_cell_inline(&mut self, output: &mut OutputBuffer, cell: &Cell) {
-        // Skip continuation cells - wide char already consumed this column
+        // Continuation cells output a space to maintain grid alignment.
+        // In inline mode we can't skip cells without breaking the grid.
         if cell.char == 0 {
+            output.write_char(' ');
             return;
         }
 
@@ -339,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn test_continuation_cell_skipped() {
+    fn test_continuation_cell_outputs_space() {
         let mut renderer = StatefulCellRenderer::new();
         let mut output = OutputBuffer::new();
 
@@ -352,7 +379,42 @@ mod tests {
 
         renderer.render_cell(&mut output, 0, 0, &continuation);
 
-        // Should output nothing for continuation cells
-        assert!(output.is_empty());
+        // Continuation cells now output cursor move + space to clear previous content
+        let output_str = output.as_str();
+        assert!(output_str.contains(' '), "Should output a space for continuation cells");
+        assert!(output_str.contains("\x1b["), "Should contain cursor move");
+    }
+
+    #[test]
+    fn test_continuation_cell_always_positions() {
+        let mut renderer = StatefulCellRenderer::new();
+        let mut output = OutputBuffer::new();
+
+        // First render a wide character to set up position
+        // (In practice this would be a wide char like '你', but for testing
+        // we just simulate by rendering at position 0)
+        let wide = Cell {
+            char: '你' as u32,
+            fg: Rgba::WHITE,
+            bg: Rgba::BLACK,
+            attrs: Attr::NONE,
+        };
+        renderer.render_cell(&mut output, 0, 0, &wide);
+        output.clear();
+
+        // Render continuation at position 1 - this MUST emit cursor move
+        // because after a wide char the terminal cursor is at x+2, not x+1
+        let continuation = Cell {
+            char: 0,
+            fg: Rgba::WHITE,
+            bg: Rgba::BLACK,
+            attrs: Attr::NONE,
+        };
+        renderer.render_cell(&mut output, 1, 0, &continuation);
+
+        // Continuation cells ALWAYS emit cursor move to ensure correct positioning
+        let output_str = output.as_str();
+        assert!(output_str.contains("\x1b["), "Continuation should always include cursor move");
+        assert!(output_str.contains(' '), "Continuation should output space");
     }
 }

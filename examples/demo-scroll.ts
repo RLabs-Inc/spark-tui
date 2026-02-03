@@ -32,6 +32,7 @@ import {
   packColor,
 } from '../ts/bridge/shared-buffer'
 import type { RGBA } from '../ts/types'
+import { initBridge } from '@/bridge'
 
 // =============================================================================
 // COLORS - Semantic palette
@@ -674,7 +675,7 @@ function ScrollDemoApp() {
 console.log('Initializing SparkTUI Scroll Demo...\n')
 
 // Initialize the AoS bridge
-const { buffer } = initBridgeAoS()
+const { buffer } = initBridge()
 
 // Set terminal size
 const cols = process.stdout.columns || 80
@@ -689,7 +690,7 @@ setNodeCount(buffer, 500)
 
 // Load and initialize the Rust engine
 const engine = loadEngine()
-const result = engine.init(ptr(buffer.buffer), buffer.buffer.byteLength)
+const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
 
 if (result !== 0) {
   console.error(`Engine init failed: ${result}`)

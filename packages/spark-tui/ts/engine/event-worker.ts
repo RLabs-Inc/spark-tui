@@ -12,7 +12,6 @@
 declare var self: Worker
 
 import { dlopen, FFIType } from 'bun:ffi'
-import { join } from 'path'
 
 // FFI symbols - only need waitForEvents
 const symbols = {

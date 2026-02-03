@@ -205,9 +205,10 @@ export function mountSync(app: () => void, options: MountOptions = {}): MountHan
     engine = {
       init: () => 0,
       bufferSize: () => 0,
-      wake: () => {},
-      cleanup: () => {},
-      close: () => {},
+      wake: () => { },
+      waitForEvents: () => { },
+      cleanup: () => { },
+      close: () => { },
     }
   }
 

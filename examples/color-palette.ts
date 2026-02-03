@@ -97,7 +97,7 @@ function drawSlider(
 
   box({
     id,
-    width: width + 12,
+    width: '100%',
     height: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -149,10 +149,7 @@ function drawSlider(
 // MOUNT APP
 // =============================================================================
 
-const cols = process.stdout.columns || 100
-const rows = process.stdout.rows || 35
-
-const { unmount } = mount(() => {
+await mount(() => {
   // Keyboard navigation
   on((event: KeyEvent) => {
     const keycode = event.keycode
@@ -220,8 +217,8 @@ const { unmount } = mount(() => {
   // Root container
   box({
     id: 'root',
-    width: cols,
-    height: rows,
+    width: '100%',
+    height: '100%',
     flexDirection: 'column',
     bg: t.bg,
     fg: t.text,
@@ -253,7 +250,7 @@ const { unmount } = mount(() => {
       box({
         id: 'main',
         width: '100%',
-        grow: 1,
+        // grow: 1, 
         flexDirection: 'row',
         padding: 1,
         gap: 2,
@@ -263,7 +260,8 @@ const { unmount } = mount(() => {
           // =====================================================================
           box({
             id: 'color-grid-panel',
-            width: 50,
+            // width: '100%',
+            // grow: 1,
             flexDirection: 'column',
             border: 1,
             borderColor: t.textMuted,
@@ -285,6 +283,7 @@ const { unmount } = mount(() => {
                     box({
                       id: `color-row-${row}`,
                       flexDirection: 'row',
+                      // flexWrap: 'wrap',
                       gap: 1,
                       children: () => {
                         for (let col = 0; col < 4; col++) {
@@ -332,9 +331,9 @@ const { unmount } = mount(() => {
               // Selected color info
               box({
                 id: 'selected-info',
-                width: '100%',
+                // width: '100%',
                 flexDirection: 'column',
-                marginTop: 1,
+                // marginTop: 1,
                 padding: 1,
                 border: 1,
                 borderColor: t.primary,
@@ -381,7 +380,9 @@ const { unmount } = mount(() => {
           // =====================================================================
           box({
             id: 'oklch-picker',
-            grow: 1,
+            // grow: 1,
+            // shrink: 1,
+            // width: '100%',
             flexDirection: 'column',
             border: 1,
             borderColor: t.textMuted,
@@ -396,7 +397,7 @@ const { unmount } = mount(() => {
               // Preview swatch
               box({
                 id: 'preview-swatch',
-                width: 30,
+                width: '80%',
                 height: 5,
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -487,7 +488,7 @@ const { unmount } = mount(() => {
               // Hue rainbow preview
               box({
                 id: 'hue-rainbow',
-                width: 36,
+                width: '100%',
                 height: 2,
                 flexDirection: 'row',
                 marginTop: 1,
@@ -496,7 +497,7 @@ const { unmount } = mount(() => {
                     const hueVal = h * 10
                     box({
                       id: `hue-${h}`,
-                      width: 1,
+                      width: '9.2%',
                       height: 2,
                       bg: oklch(lightness.value, chroma.value, hueVal),
                     })
@@ -533,10 +534,6 @@ const { unmount } = mount(() => {
     },
   })
 }, {
-  mode: 'fullscreen',
+  mode: 'inline',
 })
 
-console.log('[color-palette] App mounted')
-
-// Keep process alive
-await new Promise(() => {})

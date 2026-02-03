@@ -239,8 +239,6 @@ export interface TextProps extends StyleProps, DimensionProps, SpacingProps, Lay
   content: Reactive<string | number>
   /** Text alignment: 'left' | 'center' | 'right' */
   align?: Reactive<'left' | 'center' | 'right'>
-  /** Text attributes (bold, italic, etc.) */
-  attrs?: Reactive<CellAttrs>
   /** Text wrapping: 'wrap' | 'nowrap' | 'truncate' */
   wrap?: Reactive<'wrap' | 'nowrap' | 'truncate'>
   /** Is visible */
@@ -250,6 +248,32 @@ export interface TextProps extends StyleProps, DimensionProps, SpacingProps, Lay
    * Variants: 'default' | 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'info' | 'ghost' | 'outline'
    */
   variant?: Variant
+
+  // ==========================================================================
+  // TEXT STYLE ATTRIBUTES
+  // Import { bold, italic, underline, ... } from '@spark-tui/core' for clean syntax:
+  //   text({ content: 'Hello', bold, underline })
+  // ==========================================================================
+
+  /** Bold text */
+  bold?: Reactive<boolean>
+  /** Dim/faint text */
+  dim?: Reactive<boolean>
+  /** Italic text */
+  italic?: Reactive<boolean>
+  /** Underlined text */
+  underline?: Reactive<boolean>
+  /** Blinking text (use sparingly!) */
+  blink?: Reactive<boolean>
+  /** Inverse/reverse video (swap fg/bg) */
+  inverse?: Reactive<boolean>
+  /** Hidden/invisible text */
+  hidden?: Reactive<boolean>
+  /** Strikethrough text */
+  strikethrough?: Reactive<boolean>
+
+  /** Raw attributes bitmask (for power users) */
+  attrs?: Reactive<CellAttrs>
 }
 
 // =============================================================================
