@@ -39,7 +39,6 @@ use std::sync::Arc;
 use std::thread;
 use std::sync::mpsc;
 use std::time::Instant;
-
 use spark_signals::{signal, derived, effect, Signal};
 
 use crate::shared_buffer::{SharedBuffer, RenderMode, DIRTY_LAYOUT, DIRTY_TEXT, DIRTY_HIERARCHY};
@@ -195,6 +194,11 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
         let tw = tw_for_layout.get();
         let th = th_for_layout.get();
 
+        // Detect terminal size change (resize forces re-layout)
+        let old_tw = buf.terminal_width() as u16;
+        let old_th = buf.terminal_height() as u16;
+        let terminal_resized = tw != old_tw || th != old_th;
+
         // Update SharedBuffer with current terminal size
         // This is where layout will read available space from
         buf.set_terminal_size(tw as u32, th as u32);
@@ -202,9 +206,11 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
         // Check dirty flags for smart skip
         let node_count = buf.node_count();
 
-        // Always run layout on first two renders (effect creation + initial set)
-        // After that, only run if dirty flags are set
-        let mut needs_layout = generation_value <= 1;
+        // Force layout when:
+        // - First two renders (effect creation + initial set)
+        // - Terminal resized (100% dimensions depend on terminal size)
+        // - Any node has dirty flags
+        let mut needs_layout = generation_value <= 1 || terminal_resized;
 
         for i in 0..node_count {
             let flags = buf.dirty_flags(i);
@@ -241,10 +247,24 @@ fn run_engine(buf: &'static SharedBuffer, running: Arc<AtomicBool>) -> io::Resul
         // Read layout derived (creates reactive dependency)
         let _layout_gen = layout_d.get();
 
-        // Framebuffer dimensions come from root element's computed layout.
-        // Layout already accounts for render mode (fullscreen vs inline).
-        let tw = buf.computed_width(0).max(1.0) as u16;
-        let th = buf.computed_height(0).max(1.0) as u16;
+        // Framebuffer dimensions depend on render mode:
+        //
+        // FULLSCREEN (Diff): framebuffer = terminal size, always.
+        //   The terminal IS the viewport. Content that exceeds it clips (or scrolls
+        //   via the virtual viewport, once implemented). Using root's computed size
+        //   would overflow the terminal if content > viewport, causing character
+        //   wrapping that corrupts all row positions in the diff renderer.
+        //
+        // INLINE/APPEND: framebuffer = root's computed size.
+        //   Content determines height; no viewport constraint.
+        let (tw, th) = match buf.render_mode() {
+            RenderMode::Diff => {
+                (buf.terminal_width().max(1) as u16, buf.terminal_height().max(1) as u16)
+            }
+            _ => {
+                (buf.computed_width(0).max(1.0) as u16, buf.computed_height(0).max(1.0) as u16)
+            }
+        };
 
         // Build framebuffer from SharedBuffer
         let (buffer, hit_regions) = framebuffer::compute_framebuffer(buf, tw, th);

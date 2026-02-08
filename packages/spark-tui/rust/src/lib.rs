@@ -163,10 +163,15 @@ pub extern "C" fn spark_buffer_size_custom(max_nodes: u32, text_pool_size: u32) 
 /// - 0% CPU when idle (thread is parked)
 /// - Instant wake (~1-2μs latency)
 /// - FFI overhead: ~5ns
+///
+/// Safe to call before spark_init() — silently no-ops if engine isn't ready.
+/// This allows TS to create the component tree before starting the engine,
+/// with wake calls during construction being harmless no-ops.
 #[unsafe(no_mangle)]
 pub extern "C" fn spark_wake() {
-    let buf = get_buffer();
-    buf.set_wake_flag();
+    if let Some(buf) = BUFFER.get() {
+        buf.set_wake_flag();
+    }
     pipeline::wake::unpark_wake_thread();
 }
 

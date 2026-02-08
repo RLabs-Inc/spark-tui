@@ -113,105 +113,224 @@ function getMainTs(): string {
   return `/**
  * SparkTUI Application
  *
- * A simple counter demonstrating:
- * - Reactive state (signals)
- * - Theme colors (t.primary, t.success, etc.)
- * - Keyboard handling (+/- keys, q to quit)
- * - Mouse clicks (on buttons)
- * - Flexbox layout
+ * Run: bun run src/main.ts
  */
 
-import {
-  mount,
-  box,
-  text,
-  signal,
-  t,
-  getChar,
-  isEnter,
-  isSpace,
-} from '@spark-tui/core'
-
-// State
-const count = signal(0)
+import { mount } from '@spark-tui/core'
+import { Counter } from './components/counter'
 
 // App
 await mount(() => {
-  box({
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    onKey: (e) => {
-      const ch = getChar(e)
-      if (ch === '+' || ch === '=') count.set(count.get() + 1)
-      if (ch === '-' || ch === '_') count.set(count.get() - 1)
-      if (ch === 'q') process.exit(0)
-    },
-  }, () => {
-    // Card
+  Counter()
+}, { mode: 'inline', disableMouse: true })
+`
+}
+
+function getCounterTs(): string {
+  return `/**
+ * SparkTUI Counter example
+ *
+ * A minimal counter demonstrating:
+ * - Reactive state with signals
+ * - Flexbox layout
+ * - Theme-aware styling
+ * - Keyboard shortcuts (+/- keys)
+ * - Mouse click handling
+ * - Theme cycling
+ *
+ * Controls:
+ *   +/=    Increment
+ *   -/_    Decrement
+ *   r      Reset to zero
+ *   t      Cycle theme
+ *   q      Quit
+ *   Ctrl+C Quit
+ */
+
+import {
+    signal,
+    derived,
+    box,
+    text,
+    t,
+    themes,
+    setTheme,
+    getThemeNames,
+    isEnter,
+    isSpace,
+    getChar,
+    bold,
+    underline,
+} from '@spark-tui/core'
+
+// =============================================================================
+// STATE
+// =============================================================================
+
+const count = signal(0)
+const themeNames = getThemeNames()
+const themeIndex = signal(0)
+const currentThemeName = derived(() => themeNames[themeIndex.value])
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function cycleTheme() {
+    themeIndex.value = (themeIndex.value + 1) % themeNames.length
+    setTheme(themeNames[themeIndex.value] as keyof typeof themes)
+}
+
+// =============================================================================
+// Component
+// =============================================================================
+
+export function Counter() {
+    // Root container - centered
     box({
-      flexDirection: 'column',
-      alignItems: 'center',
-      borderStyle: 'round',
-      borderColor: t.primary,
-      padding: 2,
-      gap: 1,
-    }, () => {
-      // Title
-      text({ content: '⚡ SparkTUI Counter', fg: t.primary, bold: true })
+        width: '100%',
+        height: '100%',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        children: () => {
+            // Card
+            box({
+                flexDirection: 'column',
+                alignItems: 'center',
+                border: 3, // rounded
+                borderColor: t.primary,
+                paddingTop: 2,
+                paddingBottom: 0,
+                paddingLeft: 2,
+                paddingRight: 2,
+                gap: 2,
+                children: () => {
+                    // Title
+                    text({ content: '⚡ SparkTUI Counter', fg: t.primary, bold })
 
-      // Counter row: [ - ]  0  [ + ]
-      box({ flexDirection: 'row', gap: 2, alignItems: 'center' }, () => {
-        // Minus button
-        box({
-          paddingLeft: 2,
-          paddingRight: 2,
-          borderStyle: 'single',
-          borderColor: t.error,
-          focusable: true,
-          onClick: () => count.set(count.get() - 1),
-          onKey: (e) => {
-            if (isEnter(e) || isSpace(e)) {
-              count.set(count.get() - 1)
-              return true
+                    // Counter display row: [ - ] count [ + ]
+                    box({
+                        width: '100%',
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 2,
+                        children: () => {
+                            // Decrement button
+                            box({
+                                width: 9,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                border: 1,
+                                borderColor: t.error,
+                                focusable: true,
+                                onClick: () => { count.value-- },
+                                onKey: (key) => {
+                                    if (isEnter(key) || isSpace(key)) {
+                                        count.value--
+                                        return true
+                                    }
+                                },
+                                children: () => {
+                                    text({ content: '  -  ', fg: t.error })
+                                },
+                            })
+
+                            // Count display
+                            box({
+                                minWidth: 10,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                border: 1,
+                                borderColor: t.textMuted,
+                                children: () => {
+                                    text({
+                                        content: derived(() => String(count.value).padStart(4)),
+                                        fg: t.textBright,
+                                    })
+                                },
+                            })
+
+                            // Increment button
+                            box({
+                                width: 9,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                border: 1,
+                                borderColor: t.success,
+                                focusable: true,
+                                onClick: () => { count.value++ },
+                                onKey: (key) => {
+                                    if (isEnter(key) || isSpace(key)) {
+                                        count.value++
+                                        return true
+                                    }
+                                },
+                                children: () => {
+                                    text({ content: '  +  ', fg: t.success })
+                                },
+                            })
+                        },
+                    })
+
+                    // Help text
+                    box({
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        children: () => {
+                            text({
+                                content: '+/- count | r reset | q quit',
+                                fg: t.textMuted,
+                            })
+                            box({
+                                flexDirection: 'row',
+                                gap: 1,
+                                children: () => {
+                                    text({ content: 't theme | Theme:', fg: t.textMuted })
+                                    text({ content: derived(() => currentThemeName.value), fg: t.textBright, underline })
+                                }
+                            })
+                        },
+                    })
+                }
+            })
+        },
+        // Global keyboard handler
+        onKey: (key) => {
+            const ch = getChar(key)
+
+            // Increment
+            if (ch === '+' || ch === '=') {
+                count.value++
+                return true
             }
-          },
-        }, () => {
-          text({ content: '-', fg: t.error })
-        })
 
-        // Count display
-        text({
-          content: () => String(count.get()).padStart(3),
-          fg: () => count.get() >= 0 ? t.success : t.error,
-          bold: true,
-        })
-
-        // Plus button
-        box({
-          paddingLeft: 2,
-          paddingRight: 2,
-          borderStyle: 'single',
-          borderColor: t.success,
-          focusable: true,
-          onClick: () => count.set(count.get() + 1),
-          onKey: (e) => {
-            if (isEnter(e) || isSpace(e)) {
-              count.set(count.get() + 1)
-              return true
+            // Decrement
+            if (ch === '-' || ch === '_') {
+                count.value--
+                return true
             }
-          },
-        }, () => {
-          text({ content: '+', fg: t.success })
-        })
-      })
 
-      // Help
-      text({ content: '+/- keys or click • q to quit', fg: t.textMuted })
+            // Reset
+            if (ch === 'r' || ch === 'R') {
+                count.value = 0
+                return true
+            }
+
+            // Theme cycle
+            if (ch === 't' || ch === 'T') {
+                cycleTheme()
+                return true
+            }
+
+            // Quit
+            if (ch === 'q' || ch === 'Q') {
+                process.exit(0)
+            }
+        },
     })
-  })
-})
+}
 `
 }
 
@@ -260,7 +379,9 @@ bun dev
 \`\`\`
 ${name}/
 ├── src/
-│   └── main.ts      # Application entry point
+│   ├── main.ts              # Application entry point
+│   └── components/
+│       └── counter.ts       # Counter component
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -324,7 +445,7 @@ async function main() {
   log('')
 
   // Create directory structure
-  mkdirSync(join(targetDir, 'src'), { recursive: true })
+  mkdirSync(join(targetDir, 'src', 'components'), { recursive: true })
 
   // Write files
   writeFileSync(join(targetDir, 'package.json'), getPackageJson(projectBaseName))
@@ -335,6 +456,9 @@ async function main() {
 
   writeFileSync(join(targetDir, 'src', 'main.ts'), getMainTs())
   success('Created src/main.ts')
+
+  writeFileSync(join(targetDir, 'src', 'components', 'counter.ts'), getCounterTs())
+  success('Created src/components/counter.ts')
 
   writeFileSync(join(targetDir, '.gitignore'), getGitIgnore())
   success('Created .gitignore')

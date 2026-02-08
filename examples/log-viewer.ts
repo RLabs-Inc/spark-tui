@@ -16,10 +16,10 @@
  */
 
 import { signal, derived } from '@rlabs-inc/signals'
-import { mount } from '../ts/engine/mount'
-import { box, text, each, show, cycle, Frames } from '../ts/primitives'
-import { onCleanup } from '../ts/primitives/scope'
-import { packColor } from '../ts/bridge/shared-buffer'
+import { mount } from '../src/index'
+import { box, text, each, show, cycle, Frames } from '../src/primitives/index'
+import { onCleanup } from '../src/primitives/scope'
+import { packColor } from '../src/bridge/shared-buffer'
 
 // =============================================================================
 // TYPES

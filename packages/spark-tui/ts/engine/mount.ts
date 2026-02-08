@@ -240,19 +240,6 @@ export function mountSync(app: () => void, options: MountOptions = {}): MountHan
   }
   setConfigFlags(buffer, flags)
 
-  // Initialize Rust engine with the buffer
-  if (!noopNotifier) {
-    const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
-    if (result !== 0) {
-      throw new Error(`SparkTUI engine init failed with code ${result}`)
-    }
-  }
-
-  // Start event listener (worker-based - TRUE 0% CPU, non-blocking main thread)
-  if (!noopNotifier) {
-    startEventListener(buffer, getLibPath())
-  }
-
   // Create exit promise that resolves when app exits
   const exitPromise = new Promise<void>((resolve) => {
     exitResolver = resolve
@@ -321,10 +308,28 @@ export function mountSync(app: () => void, options: MountOptions = {}): MountHan
     })
   }
 
-  // Run app in scoped context
+  // Run app in scoped context BEFORE starting engine.
+  // The component tree must be fully constructed before Rust's initial render.
+  // Wake calls during construction are safe — spark_wake() no-ops when
+  // BUFFER isn't initialized yet (guard added in lib.rs).
   currentCleanup = scoped(() => {
     app()
   })
+
+  // Initialize Rust engine AFTER tree is ready.
+  // This eliminates the race where the engine thread's initial render runs
+  // on a partially-constructed tree, causing wrong layout positions.
+  if (!noopNotifier) {
+    const result = engine.init(ptr(buffer.raw), buffer.raw.byteLength)
+    if (result !== 0) {
+      throw new Error(`SparkTUI engine init failed with code ${result}`)
+    }
+  }
+
+  // Start event listener (worker-based - TRUE 0% CPU, non-blocking main thread)
+  if (!noopNotifier) {
+    startEventListener(buffer, getLibPath())
+  }
 
   mounted = true
 
